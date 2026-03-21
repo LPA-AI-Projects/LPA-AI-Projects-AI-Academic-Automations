@@ -13,6 +13,12 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_TIMEOUT_S = 120.0
+
+
+class AnthropicConfigurationError(RuntimeError):
+    """Bad base URL or model — retrying will not help."""
+
+
 DEFAULT_MAX_ATTEMPTS = 3
 
 LEARNING_OBJECTIVES_PROMPT = """You are a Training Objectives Expert for Learners Point Academy. Your ONLY job is to identify the true learning objectives from training requests.
@@ -452,6 +458,20 @@ class ClaudeService:
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     response = await client.post(url, headers=headers, json=payload)
 
+                if response.status_code == 404:
+                    body_preview = (response.text or "")[:500]
+                    logger.error(
+                        "Anthropic returned 404 | url=%s model=%s body=%s",
+                        url,
+                        self.model,
+                        body_preview,
+                    )
+                    raise AnthropicConfigurationError(
+                        "Anthropic API returned 404. Check ANTHROPIC_BASE_URL (must be "
+                        "https://api.anthropic.com without /v1) and ANTHROPIC_MODEL "
+                        "(use a valid model ID from Anthropic docs, e.g. claude-sonnet-4-20250514)."
+                    )
+
                 if response.status_code >= 500:
                     raise httpx.HTTPStatusError(
                         "Claude server error", request=response.request, response=response
@@ -476,6 +496,8 @@ class ClaudeService:
 
                 return final_text
 
+            except AnthropicConfigurationError:
+                raise
             except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError, RuntimeError) as exc:
                 last_error = exc
                 logger.warning("Claude call failed attempt=%s/%s error=%r", attempt, max_attempts, exc)

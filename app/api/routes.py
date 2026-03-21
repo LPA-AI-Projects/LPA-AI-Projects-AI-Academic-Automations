@@ -174,9 +174,29 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
         raise HTTPException(status_code=422, detail="Payload validation failed for /courses.")
 
 
+def _zoho_callback_url_is_placeholder(url: str) -> bool:
+    u = (url or "").strip().lower()
+    if not u:
+        return True
+    # README / template placeholders — never resolve in DNS
+    return any(
+        x in u
+        for x in (
+            "example.com",
+            "your-zoho",
+            "your-api-domain",
+            "callback-endpoint.example",
+            "localhost",
+        )
+    )
+
+
 async def _post_zoho_callback(job: CourseJob, course_id: uuid.UUID | None, version_number: int | None) -> None:
-    if not settings.ZOHO_CALLBACK_URL:
-        logger.info("Zoho callback skipped: ZOHO_CALLBACK_URL not configured | job_id=%s", str(job.id))
+    if not settings.ZOHO_CALLBACK_URL or _zoho_callback_url_is_placeholder(settings.ZOHO_CALLBACK_URL):
+        logger.info(
+            "Zoho callback skipped: ZOHO_CALLBACK_URL not set or is placeholder | job_id=%s",
+            str(job.id),
+        )
         return
     payload = {
         "job_id": str(job.id),

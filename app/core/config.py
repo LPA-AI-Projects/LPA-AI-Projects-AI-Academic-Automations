@@ -22,6 +22,18 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    @field_validator("ANTHROPIC_BASE_URL")
+    @classmethod
+    def normalize_anthropic_base_url(cls, value: str) -> str:
+        """
+        Avoid https://api.anthropic.com/v1 + /v1/messages => 404.
+        Strip trailing /v1 if present (common misconfiguration).
+        """
+        u = (value or "").strip().rstrip("/")
+        if u.endswith("/v1"):
+            u = u[:-3].rstrip("/")
+        return u
+
     @field_validator("DATABASE_URL")
     @classmethod
     def ensure_async_database_url(cls, value: str) -> str:
