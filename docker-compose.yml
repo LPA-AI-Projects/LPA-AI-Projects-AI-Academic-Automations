@@ -1,17 +1,16 @@
 services:
-  postgres:
-    image: postgres:latest
-    container_name: course_ai_postgres
-    restart: unless-stopped  # important for local resilience
-    environment:
-      POSTGRES_DB: course_db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: course_ai_api
+    env_file:
+      - .env
+    restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "8000:8000"
     volumes:
-      # Postgres 18+ expects versioned subdir under /var/lib/postgresql
-      - course_ai_pgdata:/var/lib/postgresql
+      - generated_pdfs:/app/generated_pdfs
 
 volumes:
-  course_ai_pgdata:
+  generated_pdfs:

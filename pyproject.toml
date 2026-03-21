@@ -17,5 +17,4 @@ dependencies = [
     "requests>=2.32.5",
     "sqlalchemy[asyncio]>=2.0.48",
     "uvicorn[standard]>=0.42.0",
-    "weasyprint>=68.1",
 ]

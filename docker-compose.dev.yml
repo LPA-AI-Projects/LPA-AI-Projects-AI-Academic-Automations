@@ -1,0 +1,27 @@
+services:
+  api:
+    env_file:
+      - .env.dev
+    depends_on:
+      - postgres
+    volumes:
+      - ./:/app
+      - generated_pdfs:/app/generated_pdfs
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  postgres:
+    image: postgres:16
+    container_name: course_ai_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: course_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - course_ai_pgdata:/var/lib/postgresql/data
+
+volumes:
+  course_ai_pgdata:
+  generated_pdfs:
