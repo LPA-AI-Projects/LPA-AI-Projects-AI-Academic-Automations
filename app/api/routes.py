@@ -302,6 +302,8 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
 
             job.status = "completed"
             job.pdf_url = pdf_url
+            job.course_id = created_course_id
+            job.version_number = created_version_number
             await db.commit()
             logger.info(
                 "Job completed | job_id=%s course_id=%s version=%s pdf_url=%s",
@@ -363,7 +365,15 @@ async def generate_course(
 
     background_tasks.add_task(process_course_job, job.id, req.zoho_record_id, req.input_data)
     logger.info("Background task scheduled | job_id=%s", str(job.id))
-    return JobCreateResponse(job_id=job.id, status="processing")
+    return JobCreateResponse(
+        job_id=job.id,
+        status="processing",
+        message=(
+            "Course generation runs in the background. Poll GET /api/v1/jobs/"
+            f"{job.id} until status is completed or failed; then you receive "
+            "course_id, pdf_url, and version_number. Zoho webhook can use the same job_id."
+        ),
+    )
 
 
 @router.post(
@@ -647,5 +657,7 @@ async def get_job_status(
         status=job.status,
         pdf_url=job.pdf_url,
         error=job.error,
+        course_id=job.course_id,
+        version_number=job.version_number,
         created_at=job.created_at,
     )

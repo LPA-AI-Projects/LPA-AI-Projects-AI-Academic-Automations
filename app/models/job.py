@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text
+from sqlalchemy import Column, String, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy import DateTime
@@ -15,4 +15,7 @@ class CourseJob(Base):
     status = Column(String, nullable=False, default="pending")
     pdf_url = Column(String, nullable=True)
     error = Column(Text, nullable=True)
+    # Filled when the background job finishes successfully (for polling + Zoho).
+    course_id = Column(UUID(as_uuid=True), nullable=True)
+    version_number = Column(Integer, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

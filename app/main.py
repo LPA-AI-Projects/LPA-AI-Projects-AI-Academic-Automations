@@ -7,6 +7,8 @@ from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy import text
+
 from app.api.routes import router
 from app.core.database import Base, engine
 from app.utils.logger import get_logger
@@ -35,6 +37,20 @@ async def lifespan(app: FastAPI):
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Lightweight migration for existing DBs (PostgreSQL).
+            try:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS course_id UUID NULL"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS version_number INTEGER NULL"
+                    )
+                )
+            except Exception:
+                logger.warning("course_jobs column migration skipped (non-Postgres or already applied)")
         logger.info("Database tables ready.")
     except Exception:
         logger.exception("Database unavailable at startup; continuing without migrations")
