@@ -7,6 +7,9 @@ from app.core.config import settings
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,          # Set True to log all SQL queries (useful in dev)
+    # Supabase transaction pooler (pgbouncer) is not compatible with asyncpg
+    # prepared statements unless statement cache is disabled.
+    connect_args={"statement_cache_size": 0},
     pool_size=10,
     max_overflow=20,
     # NOTE: pool_pre_ping can trigger MissingGreenlet with asyncpg on some setups.
