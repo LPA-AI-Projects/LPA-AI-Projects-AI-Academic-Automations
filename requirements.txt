@@ -1,0 +1,11 @@
+fastapi
+pydantic-settings
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+python-dotenv
+httpx
+jinja2
+weasyprint
+alembic
+playwright
