@@ -1,23 +1,40 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,          # Set True to log all SQL queries (useful in dev)
-    # Supabase transaction pooler (pgbouncer) is not compatible with asyncpg
-    # prepared statements unless statement cache is disabled.
-    connect_args={"statement_cache_size": 0},
-    pool_size=10,
-    max_overflow=20,
-    # NOTE: pool_pre_ping can trigger MissingGreenlet with asyncpg on some setups.
-    # Prefer app-level retries/reconnects instead.
-    pool_pre_ping=False,
-    pool_timeout=30,
-    pool_recycle=1800,
-)
+def _uses_external_pooler(url: str) -> bool:
+    """Supabase pooler / pgBouncer transaction mode breaks asyncpg + SQLAlchemy pooling."""
+    u = (url or "").lower()
+    return "pooler.supabase.com" in u or "pgbouncer=true" in u
+
+
+# asyncpg + pgBouncer (transaction mode): must disable server-side statement cache.
+# Also use NullPool so each checkout gets a clean connection through the pooler
+# (avoids DuplicatePreparedStatementError when the same pooled slot hits different backends).
+_connect_args = {"statement_cache_size": 0}
+
+if _uses_external_pooler(settings.DATABASE_URL):
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,
+        connect_args=_connect_args,
+        poolclass=NullPool,
+        pool_pre_ping=False,
+    )
+else:
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,
+        connect_args=_connect_args,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=False,
+        pool_timeout=30,
+        pool_recycle=1800,
+    )
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
