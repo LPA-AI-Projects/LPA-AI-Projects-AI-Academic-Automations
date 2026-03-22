@@ -39,6 +39,18 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    @field_validator(
+        "ZOHO_CLIENT_ID",
+        "ZOHO_CLIENT_SECRET",
+        "ZOHO_REFRESH_TOKEN",
+        "ZOHO_ACCOUNTS_BASE_URL",
+        "ZOHO_CRM_API_BASE",
+        mode="before",
+    )
+    @classmethod
+    def strip_zoho_strings(cls, value: str) -> str:
+        return (value or "").strip() if isinstance(value, str) else value
+
     @field_validator("ANTHROPIC_BASE_URL")
     @classmethod
     def normalize_anthropic_base_url(cls, value: str) -> str:

@@ -57,12 +57,51 @@ async def get_access_token() -> str:
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(token_url, data=data)
-        response.raise_for_status()
-        payload: dict[str, Any] = response.json()
+    raw = response.text or ""
+    try:
+        payload = response.json()
+    except Exception:
+        logger.error(
+            "Zoho OAuth token endpoint returned non-JSON | status=%s url=%s body=%s",
+            response.status_code,
+            token_url,
+            raw[:2000],
+        )
+        raise RuntimeError(
+            "Zoho OAuth token response was not JSON. Check ZOHO_ACCOUNTS_BASE_URL matches your "
+            "Zoho data center (e.g. .com vs .eu vs .in) and credentials."
+        ) from None
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Zoho OAuth unexpected response type: {type(payload)}")
+
+    err_code = payload.get("error")
+    err_desc = str(payload.get("error_description") or "")
+
+    if response.status_code >= 400:
+        logger.error(
+            "Zoho OAuth HTTP error | status=%s error=%s description=%s",
+            response.status_code,
+            err_code,
+            err_desc or raw[:1500],
+        )
+        raise RuntimeError(
+            f"Zoho OAuth token HTTP {response.status_code}: {err_code or 'unknown'} — {err_desc or raw[:500]}"
+        )
 
     access = payload.get("access_token")
     if not isinstance(access, str) or not access:
-        raise RuntimeError("Zoho token response missing access_token")
+        logger.error(
+            "Zoho OAuth success status but no access_token | error=%s description=%s raw_keys=%s",
+            err_code,
+            err_desc,
+            list(payload.keys()),
+        )
+        raise RuntimeError(
+            f"Zoho OAuth did not return access_token. "
+            f"error={err_code!r} description={err_desc!r} "
+            f"(fix refresh token, client id/secret, or use correct accounts domain for your DC)."
+        )
 
     expires_in = int(payload.get("expires_in", 3600))
     _token_cache = access

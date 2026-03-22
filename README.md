@@ -112,3 +112,16 @@ Required for attach-after-job:
 - Your own **Railway/ngrok** endpoint that receives the callback.
 
 **CRM PDF on the record without a callback URL:** set `ZOHO_ATTACH_PDF_LINK_TO_CRM=true` and OAuth env vars so this API attaches the `pdf_url` via [Upload attachment (link)](https://www.zoho.com/crm/developer/docs/api/v8/upload-attachment.html).
+
+### Zoho OAuth “missing access_token” / attach fails
+
+Logs will now show Zoho’s `error` and `error_description`. Common fixes:
+
+| Symptom | Fix |
+|---------|-----|
+| `invalid_client` | Wrong `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` or extra spaces/newlines in Railway variables. |
+| `invalid_grant` | Refresh token revoked, expired, or generated for a **different** client id. Regenerate refresh token in API Console. |
+| Wrong **data center** | If your org is EU/IN/AU, use `ZOHO_ACCOUNTS_BASE_URL=https://accounts.zoho.eu` (or `.in`, `.com.au`) — must match where the app was created. |
+| Token URL must be `POST` to `/oauth/v2/token` | Already handled; do not paste a browser URL into `ZOHO_ACCOUNTS_BASE_URL` (only the origin, e.g. `https://accounts.zoho.com`). |
+
+**Callback HTML / 400:** `ZOHO_CALLBACK_URL` must not be a Zoho login page. Leave **`ZOHO_CALLBACK_URL` empty** until you have a real Function/Flow webhook URL, or attach will still work via OAuth above.
