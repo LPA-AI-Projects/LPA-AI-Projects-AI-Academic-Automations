@@ -20,6 +20,20 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ZOHO_CALLBACK_URL: str = ""
 
+    # Zoho CRM V8 — OAuth + optional “attach PDF link” after job completes
+    # https://www.zoho.com/crm/developer/docs/api/v8/oauth-overview.html
+    ZOHO_CLIENT_ID: str = ""
+    ZOHO_CLIENT_SECRET: str = ""
+    ZOHO_REFRESH_TOKEN: str = ""
+    # e.g. https://accounts.zoho.com (also .eu .in .com.au for other DCs)
+    ZOHO_ACCOUNTS_BASE_URL: str = "https://accounts.zoho.com"
+    # e.g. https://www.zohoapis.com
+    ZOHO_CRM_API_BASE: str = "https://www.zohoapis.com"
+    # API name of module: Leads, Contacts, Deals, or custom module API name
+    ZOHO_CRM_MODULE_API_NAME: str = ""
+    # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
+    ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("ANTHROPIC_BASE_URL")

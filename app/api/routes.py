@@ -5,7 +5,8 @@ from urllib.parse import parse_qs
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Header, status, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,11 +24,12 @@ from app.schemas.course import (
     CourseVersionsResponse,
     VersionSummary,
 )
-from app.schemas.job import JobCreateResponse, JobStatusResponse
+from app.schemas.job import JobQueuedResponse, JobResponse
 from app.models.course import Course, CourseVersion
 from app.models.job import CourseJob
 from app.services.claude import ClaudeService
 from app.services.pdf_service import generate_pdf_path_async
+from app.services.zoho_crm import maybe_attach_course_pdf
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,6 +51,19 @@ def verify_api_key(
 
 
 auth = Depends(verify_api_key)
+
+
+def _job_to_response(job: CourseJob) -> JobResponse:
+    return JobResponse(
+        job_id=job.id,
+        zoho_record_id=job.zoho_record_id,
+        status=job.status,
+        pdf_url=job.pdf_url,
+        error=job.error,
+        course_id=job.course_id,
+        version_number=job.version_number,
+        created_at=job.created_at,
+    )
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
@@ -312,6 +327,12 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 created_version_number,
                 pdf_url,
             )
+            course_title = str((input_data or {}).get("course_name") or "").strip() or "Course outline"
+            await maybe_attach_course_pdf(
+                zoho_record_id=zoho_record_id,
+                pdf_url=pdf_url,
+                course_name_for_title=f"{course_title} — outline",
+            )
             await _post_zoho_callback(job, created_course_id, created_version_number)
         except Exception as e:
             if job is not None:
@@ -331,18 +352,25 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
 
 @router.post(
     "/courses",
-    response_model=JobCreateResponse,
-    status_code=status.HTTP_202_ACCEPTED,
     dependencies=[auth],
-    summary="Queue new course generation job",
+    summary="Create course job (async 202, or sync 200 with full result)",
 )
 async def generate_course(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    sync: bool = Query(
+        False,
+        description=(
+            "If true: wait for AI+PDF to finish and return full JSON in this response (HTTP 200). "
+            "Use when the caller (e.g. Zoho) must receive pdf_url/course_id in one shot — "
+            "request may take several minutes and can time out. "
+            "If false (default): return only job_id + zoho_record_id (HTTP 202); poll GET /jobs/{job_id}."
+        ),
+    ),
 ):
     req = await _parse_generate_request(request)
-    logger.info("Queueing course generation | zoho_record_id=%s", req.zoho_record_id)
+    logger.info("Queueing course generation | zoho_record_id=%s sync=%s", req.zoho_record_id, sync)
     # Debug visibility for Zoho webhook mappings: log full request payload and top-level input keys.
     logger.info("Incoming /courses payload: %s", json.dumps(req.model_dump(), ensure_ascii=False))
     logger.info("Incoming input_data keys: %s", sorted(list((req.input_data or {}).keys())))
@@ -363,16 +391,25 @@ async def generate_course(
         logger.exception("Database error while creating job")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
+    if sync:
+        await process_course_job(job.id, req.zoho_record_id, req.input_data)
+        async with AsyncSessionLocal() as db2:
+            result = await db2.execute(select(CourseJob).where(CourseJob.id == job.id))
+            job_done = result.scalars().first()
+        if job_done is None:
+            raise HTTPException(status_code=500, detail="Job finished but could not be reloaded.")
+        logger.info("Sync course generation finished | job_id=%s status=%s", job.id, job_done.status)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=_job_to_response(job_done).model_dump(mode="json"),
+        )
+
     background_tasks.add_task(process_course_job, job.id, req.zoho_record_id, req.input_data)
     logger.info("Background task scheduled | job_id=%s", str(job.id))
-    return JobCreateResponse(
-        job_id=job.id,
-        status="processing",
-        message=(
-            "Course generation runs in the background. Poll GET /api/v1/jobs/"
-            f"{job.id} until status is completed or failed; then you receive "
-            "course_id, pdf_url, and version_number. Zoho webhook can use the same job_id."
-        ),
+    body = JobQueuedResponse(job_id=job.id, zoho_record_id=req.zoho_record_id)
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=body.model_dump(mode="json"),
     )
 
 
@@ -624,7 +661,7 @@ async def health():
 
 @router.get(
     "/jobs/{job_id}",
-    response_model=JobStatusResponse,
+    response_model=JobResponse,
     dependencies=[auth],
     summary="Get async job status",
 )
@@ -651,13 +688,4 @@ async def get_job_status(
 
     logger.info("Job status response | job_id=%s status=%s", job_id, job.status)
 
-    return JobStatusResponse(
-        job_id=job.id,
-        zoho_record_id=job.zoho_record_id,
-        status=job.status,
-        pdf_url=job.pdf_url,
-        error=job.error,
-        course_id=job.course_id,
-        version_number=job.version_number,
-        created_at=job.created_at,
-    )
+    return _job_to_response(job)
