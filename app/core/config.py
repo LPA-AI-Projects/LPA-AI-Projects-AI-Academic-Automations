@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     BASE_URL: str = "http://localhost:8000"
     LOG_LEVEL: str = "INFO"
     ZOHO_CALLBACK_URL: str = ""
+    # How to POST to ZOHO_CALLBACK_URL: "json" (application/json) or "form" (x-www-form-urlencoded).
+    # Many Zoho webhooks / Functions expect form fields, not JSON — use "form" if you get HTTP 400.
+    ZOHO_CALLBACK_BODY_FORMAT: str = "json"
 
     # Zoho CRM V8 — OAuth + optional “attach PDF link” after job completes
     # https://www.zoho.com/crm/developer/docs/api/v8/oauth-overview.html

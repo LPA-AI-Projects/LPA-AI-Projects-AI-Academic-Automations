@@ -213,7 +213,9 @@ async def _post_zoho_callback(job: CourseJob, course_id: uuid.UUID | None, versi
             str(job.id),
         )
         return
-    payload = {
+    # Note: this sends metadata + public pdf_url only — not the PDF bytes. For CRM attachment on
+    # the record, enable ZOHO_ATTACH_PDF_LINK_TO_CRM + OAuth, or download pdf_url inside Zoho.
+    raw_fields = {
         "job_id": str(job.id),
         "zoho_record_id": job.zoho_record_id,
         "status": job.status,
@@ -222,21 +224,34 @@ async def _post_zoho_callback(job: CourseJob, course_id: uuid.UUID | None, versi
         "version_number": version_number,
         "error": job.error,
     }
+    fmt = (settings.ZOHO_CALLBACK_BODY_FORMAT or "json").strip().lower()
     try:
         logger.info(
-            "Posting Zoho callback | job_id=%s status=%s course_id=%s version=%s",
+            "Posting Zoho callback | job_id=%s format=%s status=%s",
             str(job.id),
+            fmt,
             job.status,
-            str(course_id) if course_id else None,
-            version_number,
         )
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(settings.ZOHO_CALLBACK_URL, json=payload)
+            if fmt == "form":
+                form_data = {
+                    k: ("" if v is None else str(v)) for k, v in raw_fields.items()
+                }
+                response = await client.post(settings.ZOHO_CALLBACK_URL, data=form_data)
+            else:
+                json_body = {k: v for k, v in raw_fields.items() if v is not None}
+                response = await client.post(settings.ZOHO_CALLBACK_URL, json=json_body)
             logger.info(
                 "Zoho callback response | job_id=%s status_code=%s",
                 str(job.id),
                 response.status_code,
             )
+            if response.status_code >= 400:
+                logger.warning(
+                    "Zoho callback rejected | job_id=%s body=%s",
+                    str(job.id),
+                    (response.text or "")[:2000],
+                )
     except Exception:
         logger.exception("Zoho callback failed | job_id=%s", str(job.id))
 

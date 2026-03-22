@@ -98,3 +98,10 @@ Required for attach-after-job:
 - `ZOHO_CRM_API_BASE` — usually `https://www.zohoapis.com`.
 - `ZOHO_CRM_MODULE_API_NAME` — CRM **Setup → Developer Space → APIs** (or module settings) → **API Name** (e.g. `Leads`, `Deals`, `Custom_Module_X`).
 - `ZOHO_ATTACH_PDF_LINK_TO_CRM` — `true` to attach the generated public PDF URL to the record after the job completes.
+
+### Callback URL (`ZOHO_CALLBACK_URL`) — HTTP 400 / “file not received”
+
+- The callback **does not upload PDF bytes**; it POSTs JSON (or form) with a **`pdf_url`** string. Your Zoho Function / Flow must **download** that URL or **use CRM attach** via OAuth (`ZOHO_ATTACH_PDF_LINK_TO_CRM`).
+- If the callback returns **400**, Zoho often expects **`application/x-www-form-urlencoded`** instead of JSON. Set:
+  - `ZOHO_CALLBACK_BODY_FORMAT=form`
+- After deploy, check logs: `Zoho callback rejected | ... body=...` shows Zoho’s error message.
