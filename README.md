@@ -121,7 +121,20 @@ Logs will now show Zoho’s `error` and `error_description`. Common fixes:
 |---------|-----|
 | `invalid_client` | Wrong `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` or extra spaces/newlines in Railway variables. |
 | `invalid_grant` | Refresh token revoked, expired, or generated for a **different** client id. Regenerate refresh token in API Console. |
+| `invalid_code` (often with **empty** `error_description`) | Refresh token and client don’t match, or **wrong DC**: regenerate refresh token using the **same** API Console app and **same** accounts host (e.g. EU app → `https://accounts.zoho.eu`). Do **not** store a one-time **authorization `code`** in `ZOHO_REFRESH_TOKEN` — only the **`refresh_token`** field from the token exchange JSON. |
 | Wrong **data center** | If your org is EU/IN/AU, use `ZOHO_ACCOUNTS_BASE_URL=https://accounts.zoho.eu` (or `.in`, `.com.au`) — must match where the app was created. |
 | Token URL must be `POST` to `/oauth/v2/token` | Already handled; do not paste a browser URL into `ZOHO_ACCOUNTS_BASE_URL` (only the origin, e.g. `https://accounts.zoho.com`). |
 
 **Callback HTML / 400:** `ZOHO_CALLBACK_URL` must not be a Zoho login page. Leave **`ZOHO_CALLBACK_URL` empty** until you have a real Function/Flow webhook URL, or attach will still work via OAuth above.
+
+**Verify OAuth outside the app** (replace placeholders; use your DC host):
+
+```bash
+curl -sS -X POST "https://accounts.zoho.com/oauth/v2/token" \
+  -d "grant_type=refresh_token" \
+  -d "client_id=YOUR_CLIENT_ID" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
+  -d "refresh_token=YOUR_REFRESH_TOKEN"
+```
+
+You must see JSON with `"access_token"`. If you see `"error":"invalid_code"`, fix credentials in Zoho API Console before Railway will work.

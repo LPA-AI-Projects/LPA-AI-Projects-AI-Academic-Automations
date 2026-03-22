@@ -92,15 +92,28 @@ async def get_access_token() -> str:
     access = payload.get("access_token")
     if not isinstance(access, str) or not access:
         logger.error(
-            "Zoho OAuth success status but no access_token | error=%s description=%s raw_keys=%s",
+            "Zoho OAuth success status but no access_token | url=%s error=%s description=%s raw_keys=%s raw=%s",
+            token_url,
             err_code,
             err_desc,
             list(payload.keys()),
+            raw[:800],
         )
+        hint = (
+            "invalid_code on refresh_token grant usually means: refresh token does not belong to this "
+            "client_id, was revoked, or was issued on a different Zoho DC — regenerate refresh token "
+            "in API Console for this client, and set ZOHO_ACCOUNTS_BASE_URL to the same DC "
+            "(.com / .eu / .in / .com.au)."
+        )
+        if err_code == "invalid_code":
+            hint = (
+                "Zoho returned invalid_code: your ZOHO_REFRESH_TOKEN is not accepted for this "
+                "client_id + ZOHO_ACCOUNTS_BASE_URL. Regenerate a new refresh token (same app, same DC). "
+                "Do not paste a short-lived authorization `code` from the URL — only the refresh_token "
+                "from the /oauth/v2/token exchange response."
+            )
         raise RuntimeError(
-            f"Zoho OAuth did not return access_token. "
-            f"error={err_code!r} description={err_desc!r} "
-            f"(fix refresh token, client id/secret, or use correct accounts domain for your DC)."
+            f"Zoho OAuth did not return access_token. error={err_code!r} description={err_desc!r}. {hint}"
         )
 
     expires_in = int(payload.get("expires_in", 3600))
