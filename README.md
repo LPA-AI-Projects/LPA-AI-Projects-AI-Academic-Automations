@@ -75,10 +75,10 @@ See [OAuth overview](https://www.zoho.com/crm/developer/docs/api/v8/oauth-overvi
 | `ZOHO_REFRESH_TOKEN` | Long-lived refresh token |
 | `ZOHO_ACCOUNTS_BASE_URL` | e.g. `https://accounts.zoho.com` (use `.eu` / `.in` etc. for your DC) |
 | `ZOHO_CRM_API_BASE` | Usually `https://www.zohoapis.com` |
-| `ZOHO_CRM_MODULE_API_NAME` | API name of the module, e.g. `Leads`, `Deals`, or custom module name |
+| `ZOHO_CRM_MODULE_API_NAME` | CRM **module API name** for attachments (default: `Course_Outline`). Must match **Setup → Developer Space → APIs** for that module. |
 | `ZOHO_ATTACH_PDF_LINK_TO_CRM` | `true` to attach the generated public PDF URL to the record after the job completes |
 
-3. **`zoho_record_id` in your webhook must be the CRM record ID** used in the API path (numeric string from Zoho). Custom labels like `ZHO-LEARNQUEST-001` will not work with the Attachments API unless that string is actually the record id in your CRM.
+3. **`zoho_record_id` in `POST /courses` must be the `Course_Outline` record ID** Zoho sends (the long numeric **Record Id** from CRM, same id used in the URL when you open the record). The backend attaches the generated **PDF public link** to that record via `POST .../crm/v8/Course_Outline/{record_id}/Attachments` (link attachment). If your module’s API name is not exactly `Course_Outline`, set `ZOHO_CRM_MODULE_API_NAME` accordingly.
 
 4. Access tokens are refreshed automatically (cached; refresh uses your refresh token before the ~1 hour expiry).
 
@@ -105,3 +105,10 @@ Required for attach-after-job:
 - If the callback returns **400**, Zoho often expects **`application/x-www-form-urlencoded`** instead of JSON. Set:
   - `ZOHO_CALLBACK_BODY_FORMAT=form`
 - After deploy, check logs: `Zoho callback rejected | ... body=...` shows Zoho’s error message.
+
+**If logs show HTML / “Zoho Accounts” / a login page:** `ZOHO_CALLBACK_URL` is **wrong** — you pasted a **browser** URL (login or CRM UI), not a **machine** URL. The backend POSTs **without cookies**, so Zoho returns the Accounts HTML page → **400**. Fix: use a real webhook target, for example:
+- **CRM → Functions** → create a function → copy its **Invoke URL** (public URL that accepts POST), or  
+- **Zoho Flow** → incoming webhook URL, or  
+- Your own **Railway/ngrok** endpoint that receives the callback.
+
+**CRM PDF on the record without a callback URL:** set `ZOHO_ATTACH_PDF_LINK_TO_CRM=true` and OAuth env vars so this API attaches the `pdf_url` via [Upload attachment (link)](https://www.zoho.com/crm/developer/docs/api/v8/upload-attachment.html).

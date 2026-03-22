@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     ZOHO_ACCOUNTS_BASE_URL: str = "https://accounts.zoho.com"
     # e.g. https://www.zohoapis.com
     ZOHO_CRM_API_BASE: str = "https://www.zohoapis.com"
-    # API name of module: Leads, Contacts, Deals, or custom module API name
-    ZOHO_CRM_MODULE_API_NAME: str = ""
+    # CRM module API name for Attachments API (path: /crm/v8/{module}/{record_id}/Attachments)
+    ZOHO_CRM_MODULE_API_NAME: str = "Course_Outline"
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 

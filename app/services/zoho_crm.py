@@ -83,9 +83,17 @@ async def attach_pdf_link_to_record(
 
     See: Upload an Attachment API (link variant).
     """
+    rid = (crm_record_id or "").strip()
+    mod = module_api_name.strip("/")
     token = await get_access_token()
     base = settings.ZOHO_CRM_API_BASE.rstrip("/")
-    path = f"{base}/crm/v8/{module_api_name.strip('/')}/{crm_record_id}/Attachments"
+    path = f"{base}/crm/v8/{mod}/{rid}/Attachments"
+    logger.info(
+        "Zoho CRM attaching PDF link | module=%s record_id=%s url_len=%s",
+        mod,
+        rid,
+        len(public_pdf_url or ""),
+    )
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
 
     # Multipart form: attachmentUrl + optional title (per Zoho docs)
@@ -121,13 +129,17 @@ async def maybe_attach_course_pdf(
     if not pdf_url or not settings.ZOHO_ATTACH_PDF_LINK_TO_CRM:
         return
     if not _crm_configured():
-        logger.info("Zoho CRM attach skipped: OAuth/module not configured")
+        logger.info(
+            "Zoho CRM attach skipped: set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, "
+            "ZOHO_REFRESH_TOKEN, and ZOHO_CRM_MODULE_API_NAME (e.g. Course_Outline), "
+            "and ZOHO_ATTACH_PDF_LINK_TO_CRM=true"
+        )
         return
 
     try:
         await attach_pdf_link_to_record(
             module_api_name=settings.ZOHO_CRM_MODULE_API_NAME,
-            crm_record_id=zoho_record_id,
+            crm_record_id=zoho_record_id.strip(),
             public_pdf_url=pdf_url,
             attachment_title=course_name_for_title or "Course outline",
         )
