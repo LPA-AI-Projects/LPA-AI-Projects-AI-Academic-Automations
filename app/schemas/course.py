@@ -41,6 +41,20 @@ class RefineCourseRequest(BaseModel):
     }
 
 
+class RefineZohoRequest(BaseModel):
+    zoho_record_id: str = Field(..., min_length=1, description="Zoho CRM record ID")
+    feedback: str = Field(..., min_length=10, description="Feedback for refinement")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "zoho_record_id": "1234567890123456789",
+                "feedback": "Please add more practical exercises and reduce theory sections.",
+            }
+        }
+    }
+
+
 # ─── Response schemas ─────────────────────────────────────────────────────────
 
 class CourseVersionResponse(BaseModel):
@@ -68,3 +82,10 @@ class CourseVersionsResponse(BaseModel):
     course_id: uuid.UUID
     zoho_record_id: str
     versions: list[VersionSummary]
+
+
+class RefineZohoResponse(BaseModel):
+    status: str
+    pdf_url: Optional[str]
+    zoho_record_id: str
+    version_number: int

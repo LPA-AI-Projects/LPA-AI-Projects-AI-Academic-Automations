@@ -20,6 +20,8 @@ from app.core.config import settings
 from app.schemas.course import (
     GenerateCourseRequest,
     RefineCourseRequest,
+    RefineZohoRequest,
+    RefineZohoResponse,
     CourseVersionResponse,
     CourseVersionsResponse,
     VersionSummary,
@@ -206,7 +208,7 @@ def _zoho_callback_url_is_placeholder(url: str) -> bool:
     )
 
 
-async def _post_zoho_callback(job: CourseJob, course_id: uuid.UUID | None, version_number: int | None) -> None:
+async def _post_zoho_callback(job: CourseJob, version_number: int | None) -> None:
     if not settings.ZOHO_CALLBACK_URL or _zoho_callback_url_is_placeholder(settings.ZOHO_CALLBACK_URL):
         logger.info(
             "Zoho callback skipped: ZOHO_CALLBACK_URL not set or is placeholder | job_id=%s",
@@ -220,7 +222,6 @@ async def _post_zoho_callback(job: CourseJob, course_id: uuid.UUID | None, versi
         "zoho_record_id": job.zoho_record_id,
         "status": job.status,
         "pdf_url": job.pdf_url,
-        "course_id": str(course_id) if course_id else None,
         "version_number": version_number,
         "error": job.error,
     }
@@ -348,13 +349,13 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 pdf_url=pdf_url,
                 course_name_for_title=f"{course_title} — outline",
             )
-            await _post_zoho_callback(job, created_course_id, created_version_number)
+            await _post_zoho_callback(job, created_version_number)
         except Exception as e:
             if job is not None:
                 job.status = "failed"
                 job.error = str(e)[:4000]
                 await db.commit()
-                await _post_zoho_callback(job, created_course_id, created_version_number)
+                await _post_zoho_callback(job, created_version_number)
             logger.exception(
                 "Background job failed | job_id=%s zoho_record_id=%s course_id=%s",
                 str(job_id),
@@ -558,6 +559,152 @@ async def refine_course(
         pdf_url=new_version.pdf_url,
         outline=new_version.outline_text,
         created_at=new_version.created_at,
+    )
+
+
+@router.post(
+    "/courses/refine",
+    response_model=RefineZohoResponse,
+    dependencies=[auth],
+    summary="Refine latest course version using zoho_record_id",
+)
+async def refine_course_by_zoho(
+    req: RefineZohoRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    zoho_record_id = (req.zoho_record_id or "").strip()
+    logger.info("Refine requested | zoho_record_id=%s", zoho_record_id)
+
+    try:
+        course_result = await db.execute(
+            select(Course)
+            .where(Course.zoho_record_id == zoho_record_id)
+            .order_by(Course.created_at.desc())
+        )
+        course = course_result.scalars().first()
+    except (SQLAlchemyError, OSError, Exception):
+        logger.exception("Database error while reading course by zoho_record_id")
+        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+
+    if not course:
+        logger.warning("Refine failed: course not found | zoho_record_id=%s", zoho_record_id)
+        raise HTTPException(status_code=404, detail="Course not found for zoho_record_id.")
+
+    course_uuid = course.id
+
+    # Fetch latest version (read-only; do not hold locks during AI call)
+    try:
+        result = await db.execute(
+            select(CourseVersion)
+            .where(CourseVersion.course_id == course_uuid)
+            .order_by(CourseVersion.version_number.desc())
+        )
+        last_version = result.scalars().first()
+    except (SQLAlchemyError, OSError, Exception):
+        logger.exception("Database error while reading last version")
+        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+
+    if not last_version:
+        logger.warning("Refine failed: no versions found | zoho_record_id=%s", zoho_record_id)
+        raise HTTPException(status_code=404, detail="Course version not found for zoho_record_id.")
+
+    # Close out the implicit transaction opened by the SELECT so we don't hold it
+    # during the long-running AI call (and to avoid "transaction already begun").
+    base_outline = last_version.outline_text
+    await db.rollback()
+
+    # Call AI (structured refine first, fallback to text refine)
+    try:
+        ai = ClaudeService()
+        try:
+            logger.info("Refine AI started with structured mode | zoho_record_id=%s", zoho_record_id)
+            refined_payload = await wait_for(
+                ai.refine_course_outline_json(base_outline, req.feedback),
+                timeout=310,
+            )
+            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            logger.info("Refine AI structured mode completed | zoho_record_id=%s", zoho_record_id)
+        except RuntimeError:
+            logger.warning("Refine AI structured mode failed, using fallback | zoho_record_id=%s", zoho_record_id)
+            context_text = json.dumps(
+                {
+                    "previous_outline": base_outline,
+                    "feedback": req.feedback,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            updated_outline = await wait_for(
+                ai.build_roi_course_outline(context_text, base_outline),
+                timeout=310,
+            )
+            refined_payload = None
+            logger.info("Refine AI fallback completed | zoho_record_id=%s", zoho_record_id)
+    except AsyncTimeoutError:
+        logger.warning("AI refine timed out for zoho_record_id=%s", zoho_record_id)
+        raise HTTPException(status_code=504, detail="AI service timed out.")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        logger.warning("AI refine failed for zoho_record_id=%s error=%s", zoho_record_id, str(e))
+        raise HTTPException(status_code=502, detail="AI service failed. Please retry.")
+
+    # Generate PDF off the event loop
+    pdf_url = None
+    try:
+        logger.info("Refine PDF generation started | zoho_record_id=%s", zoho_record_id)
+        pdf_path = await generate_pdf_path_async(refined_payload if "refined_payload" in locals() and refined_payload is not None else updated_outline)
+        pdf_url = _build_pdf_url(pdf_path)
+        logger.info("Refine PDF generation completed | zoho_record_id=%s pdf_url=%s", zoho_record_id, pdf_url)
+    except RuntimeError as e:
+        logger.warning(
+            "PDF generation unavailable; continuing without PDF | zoho_record_id=%s error=%s",
+            zoho_record_id,
+            str(e),
+        )
+
+    # Save new version (single transaction + basic race-safe increment)
+    try:
+        # Lock the course row so concurrent refinements serialize version increments.
+        locked_course = await db.execute(
+            select(Course).where(Course.id == course_uuid).with_for_update()
+        )
+        if locked_course.scalars().first() is None:
+            raise HTTPException(status_code=404, detail="Course not found.")
+
+        current_max = await db.execute(
+            select(func.max(CourseVersion.version_number)).where(
+                CourseVersion.course_id == course_uuid
+            )
+        )
+        max_version_number = current_max.scalar_one_or_none() or 0
+        new_version_number = int(max_version_number) + 1
+
+        new_version = CourseVersion(
+            course_id=course_uuid,
+            version_number=new_version_number,
+            outline_text=updated_outline,
+            pdf_url=pdf_url,
+            feedback=req.feedback,
+        )
+        db.add(new_version)
+        await db.commit()
+    except (SQLAlchemyError, OSError, Exception):
+        logger.exception("Database error while saving refined version")
+        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+
+    await maybe_attach_course_pdf(
+        zoho_record_id=zoho_record_id,
+        pdf_url=pdf_url,
+        course_name_for_title="Course outline",
+    )
+    logger.info("Course refined: zoho_record_id=%s version=%s", zoho_record_id, new_version_number)
+
+    return RefineZohoResponse(
+        status="completed",
+        pdf_url=pdf_url,
+        zoho_record_id=zoho_record_id,
+        version_number=new_version_number,
     )
 
 
