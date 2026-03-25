@@ -17,4 +17,7 @@ dependencies = [
     "requests>=2.32.5",
     "sqlalchemy[asyncio]>=2.0.48",
     "uvicorn[standard]>=0.42.0",
+    "python-multipart>=0.0.20",
+    "pymupdf>=1.26.4",
+    "python-pptx>=1.0.2",
 ]

@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 
+    # Gamma Public API (PPT generation)
+    GAMMA_API_KEY: str = ""
+    GAMMA_BASE_URL: str = "https://public-api.gamma.app"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator(

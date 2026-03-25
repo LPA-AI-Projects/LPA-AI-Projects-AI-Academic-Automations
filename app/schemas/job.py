@@ -20,8 +20,10 @@ class JobResponse(BaseModel):
 
     job_id: uuid.UUID
     zoho_record_id: str
+    job_type: str | None = None
     status: str
     pdf_url: str | None = None
+    ppt_url: str | None = None
     error: str | None = None
     course_id: uuid.UUID | None = None
     version_number: int | None = None

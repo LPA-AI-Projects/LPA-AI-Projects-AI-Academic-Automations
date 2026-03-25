@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.routes import router
+from app.api.slides import router as slides_router
 from app.core.database import Base, engine
 from app.utils.logger import get_logger
 
@@ -17,6 +18,8 @@ logger = get_logger(__name__)
 
 OUTPUT_DIR = "generated_pdfs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+PPT_OUTPUT_DIR = "generated_ppts"
+os.makedirs(PPT_OUTPUT_DIR, exist_ok=True)
 
 # Playwright launches Chromium via subprocess; ensure an event loop policy
 # that supports subprocesses on Windows.
@@ -49,6 +52,21 @@ async def lifespan(app: FastAPI):
                         "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS version_number INTEGER NULL"
                     )
                 )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS job_type VARCHAR NULL"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS ppt_url VARCHAR NULL"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS payload_json TEXT NULL"
+                    )
+                )
             except Exception:
                 logger.warning("course_jobs column migration skipped (non-Postgres or already applied)")
         logger.info("Database tables ready.")
@@ -78,9 +96,11 @@ app.add_middleware(
 
 # ── Static files: serve generated PDFs at /pdfs/<filename> ───────────────────
 app.mount("/pdfs", StaticFiles(directory=OUTPUT_DIR), name="pdfs")
+app.mount("/ppts", StaticFiles(directory=PPT_OUTPUT_DIR), name="ppts")
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(router)
+app.include_router(slides_router)
 
 
 @app.middleware("http")

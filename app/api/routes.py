@@ -57,8 +57,10 @@ def _job_to_response(job: CourseJob) -> JobResponse:
     return JobResponse(
         job_id=job.id,
         zoho_record_id=job.zoho_record_id,
+        job_type=getattr(job, "job_type", None),
         status=job.status,
         pdf_url=job.pdf_url,
+        ppt_url=getattr(job, "ppt_url", None),
         error=job.error,
         course_id=job.course_id,
         version_number=job.version_number,
