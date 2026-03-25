@@ -17,7 +17,6 @@ from app.services.ppt_merger import merge_ppt_files_async
 from app.services.slide_generator import generate_slide
 from app.services.slide_planner import plan_slides
 from app.services.slide_validator import validate_slides
-from app.services.zoho_crm import attach_pdf_link_to_record
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -223,20 +222,16 @@ async def process_slides_job(job_id) -> None:
             await db.commit()
             logger.info("Slides PPT ready | job_id=%s ppt_url=%s", str(job.id), ppt_url)
 
+            # Attaching to Zoho is intentionally skipped for the first testing pass.
+            # This lets you validate PPT generation + `/ppts/...` URL in Postman
+            # before we enable CRM attachment wiring.
             await _set_status(db, job, "attaching")
-            # Reuse Zoho attachment logic (link attachment). Attach PPT URL as link.
             logger.info(
-                "Zoho attaching PPT link | job_id=%s zoho_record_id=%s",
+                "Zoho attaching PPT link skipped (test mode) | job_id=%s zoho_record_id=%s ppt_url=%s",
                 str(job.id),
                 job.zoho_record_id,
+                ppt_url,
             )
-            await attach_pdf_link_to_record(
-                module_api_name=settings.ZOHO_CRM_MODULE_API_NAME,
-                crm_record_id=job.zoho_record_id,
-                public_pdf_url=ppt_url,
-                attachment_title="Instructor Slides (PPT)",
-            )
-            logger.info("Zoho PPT link attached | job_id=%s", str(job.id))
 
             await _set_status(db, job, "completed")
             logger.info(
