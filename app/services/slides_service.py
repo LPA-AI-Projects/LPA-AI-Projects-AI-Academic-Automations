@@ -14,7 +14,6 @@ from app.models.job import CourseJob
 from app.services.document_extractor import extract_pdf_text_async, extract_ppt_text_async
 from app.services.gamma_client import generate_ppt
 from app.services.google_drive import upload_ppt_to_google_drive
-from app.services.ppt_merger import merge_ppt_files_async
 from app.services.slide_generator import generate_slide
 from app.services.slide_planner import plan_slides
 from app.services.slide_validator import validate_slides
@@ -28,6 +27,11 @@ MAX_SLIDES_PER_BATCH = 40
 def _build_ppt_url(file_path: str) -> str:
     filename = os.path.basename(file_path)
     return f"{settings.BASE_URL}/ppts/{filename}"
+
+
+def _build_ppt_url_from_relative_path(rel_path: str) -> str:
+    normalized = str(rel_path).replace("\\", "/").lstrip("/")
+    return f"{settings.BASE_URL}/ppts/{normalized}"
 
 
 async def _set_status(db, job: CourseJob, status: str, *, error: str | None = None) -> None:
@@ -185,6 +189,8 @@ async def process_slides_job(job_id) -> None:
             ppt_paths: list[str] = []
             batch_dir = os.path.join("generated_ppts", "batches", str(job_id))
             os.makedirs(batch_dir, exist_ok=True)
+            batch_links: list[str] = []
+            batch_file_ids: list[str] = []
             for bi, batch in enumerate(batches, start=1):
                 logger.info(
                     "Gamma rendering batch | job_id=%s batch=%s/%s slides=%s",
@@ -205,43 +211,46 @@ async def process_slides_job(job_id) -> None:
                     len(ppt_bytes),
                     out_path,
                 )
+                # Upload each batch directly to Google Drive as editable Slides.
+                try:
+                    drive_upload = await asyncio.to_thread(
+                        upload_ppt_to_google_drive,
+                        out_path,
+                        f"{job_id}_batch_{bi}.pptx",
+                    )
+                    file_id = str(drive_upload.get("file_id") or "").strip()
+                    edit_link = str(drive_upload.get("edit_link") or "").strip()
+                    if file_id:
+                        batch_file_ids.append(file_id)
+                    if edit_link:
+                        batch_links.append(edit_link)
+                    logger.info(
+                        "Google Drive batch upload success | job_id=%s batch=%s file_id=%s",
+                        str(job.id),
+                        bi,
+                        file_id,
+                    )
+                except Exception:
+                    # Fallback: keep Railway URL for that batch if Drive upload fails.
+                    logger.exception(
+                        "Google Drive batch upload failed; using Railway batch URL | job_id=%s batch=%s",
+                        str(job.id),
+                        bi,
+                    )
+                    rel_path = os.path.join("batches", str(job_id), f"batch_{bi}.pptx")
+                    batch_links.append(_build_ppt_url_from_relative_path(rel_path))
                 await asyncio.sleep(0)  # cooperative
 
+            # Keep the status progression unchanged; merging is now a no-op in Option 1.
             await _set_status(db, job, "merging")
-            final_path = os.path.join("generated_ppts", f"{job_id}.pptx")
-            t0 = time.time()
-            merged_path = await merge_ppt_files_async(ppt_paths, output_path=final_path)
             logger.info(
-                "PPT merge completed | job_id=%s files=%s seconds=%.2f path=%s",
+                "Merging skipped (Option 1) | job_id=%s batch_files=%s",
                 str(job.id),
                 len(ppt_paths),
-                time.time() - t0,
-                merged_path,
             )
-            # Default output URL (Railway static) — replaced by Drive edit_link on success.
-            ppt_url = _build_ppt_url(merged_path)
-            google_file_id: str | None = None
-            try:
-                drive_upload = await asyncio.to_thread(
-                    upload_ppt_to_google_drive,
-                    merged_path,
-                    f"{job_id}.pptx",
-                )
-                google_file_id = str(drive_upload.get("file_id") or "").strip() or None
-                edit_link = str(drive_upload.get("edit_link") or "").strip()
-                if edit_link:
-                    ppt_url = edit_link
-                logger.info(
-                    "Google Drive upload success | job_id=%s google_file_id=%s edit_link=%s",
-                    str(job.id),
-                    google_file_id,
-                    edit_link,
-                )
-            except Exception:
-                logger.exception(
-                    "Google Drive upload failed; falling back to Railway ppt_url | job_id=%s",
-                    str(job.id),
-                )
+
+            primary_link = batch_links[0] if batch_links else None
+            primary_file_id = batch_file_ids[0] if batch_file_ids else None
 
             payload_state: dict[str, Any] = {}
             try:
@@ -250,17 +259,20 @@ async def process_slides_job(job_id) -> None:
                     payload_state = {}
             except Exception:
                 payload_state = {}
-            payload_state["google_file_id"] = google_file_id
-            payload_state["google_edit_link"] = ppt_url if google_file_id else None
+            payload_state["google_file_id"] = primary_file_id
+            payload_state["google_edit_link"] = primary_link
+            payload_state["google_batch_file_ids"] = batch_file_ids
+            payload_state["google_batch_links"] = batch_links
             job.payload_json = json.dumps(payload_state)
 
-            job.ppt_url = ppt_url
+            job.ppt_url = primary_link
             await db.commit()
             logger.info(
-                "Slides PPT ready | job_id=%s ppt_url=%s google_file_id=%s",
+                "Slides output ready | job_id=%s primary_link=%s google_file_id=%s batch_links=%s",
                 str(job.id),
-                ppt_url,
-                google_file_id,
+                primary_link,
+                primary_file_id,
+                len(batch_links),
             )
 
             # Attaching to Zoho is intentionally skipped for the first testing pass.
@@ -271,7 +283,7 @@ async def process_slides_job(job_id) -> None:
                 "Zoho attaching PPT link skipped (test mode) | job_id=%s zoho_record_id=%s ppt_url=%s",
                 str(job.id),
                 job.zoho_record_id,
-                ppt_url,
+                primary_link,
             )
 
             await _set_status(db, job, "completed")

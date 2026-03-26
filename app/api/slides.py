@@ -45,22 +45,27 @@ def _job_to_dict(job: CourseJob) -> dict:
     if isinstance(created_at, datetime):
         created_at = created_at.isoformat()
     google_file_id = None
+    google_batch_links: list[str] = []
     try:
         payload = json.loads(getattr(job, "payload_json", "") or "{}")
         if isinstance(payload, dict):
             raw_id = payload.get("google_file_id")
             if isinstance(raw_id, str) and raw_id.strip():
                 google_file_id = raw_id.strip()
+            raw_links = payload.get("google_batch_links")
+            if isinstance(raw_links, list):
+                google_batch_links = [str(x).strip() for x in raw_links if str(x).strip()]
     except Exception:
         google_file_id = None
+        google_batch_links = []
     return {
-        "job_id": str(job.id),
         "zoho_record_id": job.zoho_record_id,
         "job_type": getattr(job, "job_type", None),
         "status": job.status,
         "pdf_url": getattr(job, "pdf_url", None),
         "ppt_url": getattr(job, "ppt_url", None),
         "google_file_id": google_file_id,
+        "google_batch_links": google_batch_links,
         "error": getattr(job, "error", None),
         "course_id": str(job.course_id) if getattr(job, "course_id", None) else None,
         "version_number": getattr(job, "version_number", None),
@@ -161,16 +166,21 @@ async def generate_slides(
         "status": "queued",
         "message": "Slides job queued. Poll using zoho_record_id endpoint.",
         "polling": {
-            "by_zoho_record_id": f"/api/v2/jobs/zoho/{rid}",
+            "by_zoho_record_id": f"/api/v1/jobs/zoho/{rid}",
         },
     }
     return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=body)
 
 
 @router.get(
+    "/jobs/zoho/{zoho_record_id}",
+    dependencies=[auth],
+    summary="Get latest job status by zoho_record_id",
+)
+@router.get(
     "/v2/jobs/zoho/{zoho_record_id}",
     dependencies=[auth],
-    summary="Get latest job status by zoho_record_id [v2]",
+    summary="Get latest job status by zoho_record_id [deprecated alias]",
 )
 async def get_latest_job_by_zoho_record_id(
     zoho_record_id: str,

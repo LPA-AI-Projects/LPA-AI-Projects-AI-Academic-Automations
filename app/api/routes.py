@@ -65,6 +65,20 @@ def _job_google_file_id(job: CourseJob) -> str | None:
     return None
 
 
+def _job_google_batch_links(job: CourseJob) -> list[str] | None:
+    try:
+        payload = json.loads(getattr(job, "payload_json", "") or "{}")
+        if not isinstance(payload, dict):
+            return None
+        links = payload.get("google_batch_links")
+        if not isinstance(links, list):
+            return None
+        cleaned = [str(x).strip() for x in links if str(x).strip()]
+        return cleaned or None
+    except Exception:
+        return None
+
+
 def _job_to_response(job: CourseJob) -> JobResponse:
     return JobResponse(
         job_id=job.id,
@@ -74,6 +88,7 @@ def _job_to_response(job: CourseJob) -> JobResponse:
         pdf_url=job.pdf_url,
         ppt_url=getattr(job, "ppt_url", None),
         google_file_id=_job_google_file_id(job),
+        google_batch_links=_job_google_batch_links(job),
         error=job.error,
         course_id=job.course_id,
         version_number=job.version_number,
