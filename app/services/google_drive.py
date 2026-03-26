@@ -72,11 +72,14 @@ def upload_ppt_to_google_drive(file_path: str, filename: str) -> dict[str, Any]:
     access_token = _get_access_token()
     headers = {"Authorization": f"Bearer {access_token}"}
 
-    metadata = {
+    metadata: dict[str, Any] = {
         "name": filename,
         # Upload as native Google Slides document (editable in browser)
         "mimeType": GOOGLE_SLIDES_MIME,
     }
+    folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+    if folder_id:
+        metadata["parents"] = [folder_id]
 
     with path.open("rb") as fh:
         files = {

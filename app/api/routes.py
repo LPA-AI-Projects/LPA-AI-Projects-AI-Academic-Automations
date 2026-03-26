@@ -53,6 +53,18 @@ def verify_api_key(
 auth = Depends(verify_api_key)
 
 
+def _job_google_file_id(job: CourseJob) -> str | None:
+    try:
+        payload = json.loads(getattr(job, "payload_json", "") or "{}")
+        if isinstance(payload, dict):
+            val = payload.get("google_file_id")
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    except Exception:
+        return None
+    return None
+
+
 def _job_to_response(job: CourseJob) -> JobResponse:
     return JobResponse(
         job_id=job.id,
@@ -61,6 +73,7 @@ def _job_to_response(job: CourseJob) -> JobResponse:
         status=job.status,
         pdf_url=job.pdf_url,
         ppt_url=getattr(job, "ppt_url", None),
+        google_file_id=_job_google_file_id(job),
         error=job.error,
         course_id=job.course_id,
         version_number=job.version_number,

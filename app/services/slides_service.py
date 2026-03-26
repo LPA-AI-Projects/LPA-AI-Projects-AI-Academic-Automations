@@ -13,6 +13,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.job import CourseJob
 from app.services.document_extractor import extract_pdf_text_async, extract_ppt_text_async
 from app.services.gamma_client import generate_ppt
+from app.services.google_drive import upload_ppt_to_google_drive
 from app.services.ppt_merger import merge_ppt_files_async
 from app.services.slide_generator import generate_slide
 from app.services.slide_planner import plan_slides
@@ -217,10 +218,50 @@ async def process_slides_job(job_id) -> None:
                 time.time() - t0,
                 merged_path,
             )
+            # Default output URL (Railway static) — replaced by Drive edit_link on success.
             ppt_url = _build_ppt_url(merged_path)
+            google_file_id: str | None = None
+            try:
+                drive_upload = await asyncio.to_thread(
+                    upload_ppt_to_google_drive,
+                    merged_path,
+                    f"{job_id}.pptx",
+                )
+                google_file_id = str(drive_upload.get("file_id") or "").strip() or None
+                edit_link = str(drive_upload.get("edit_link") or "").strip()
+                if edit_link:
+                    ppt_url = edit_link
+                logger.info(
+                    "Google Drive upload success | job_id=%s google_file_id=%s edit_link=%s",
+                    str(job.id),
+                    google_file_id,
+                    edit_link,
+                )
+            except Exception:
+                logger.exception(
+                    "Google Drive upload failed; falling back to Railway ppt_url | job_id=%s",
+                    str(job.id),
+                )
+
+            payload_state: dict[str, Any] = {}
+            try:
+                payload_state = json.loads(job.payload_json or "{}")
+                if not isinstance(payload_state, dict):
+                    payload_state = {}
+            except Exception:
+                payload_state = {}
+            payload_state["google_file_id"] = google_file_id
+            payload_state["google_edit_link"] = ppt_url if google_file_id else None
+            job.payload_json = json.dumps(payload_state)
+
             job.ppt_url = ppt_url
             await db.commit()
-            logger.info("Slides PPT ready | job_id=%s ppt_url=%s", str(job.id), ppt_url)
+            logger.info(
+                "Slides PPT ready | job_id=%s ppt_url=%s google_file_id=%s",
+                str(job.id),
+                ppt_url,
+                google_file_id,
+            )
 
             # Attaching to Zoho is intentionally skipped for the first testing pass.
             # This lets you validate PPT generation + `/ppts/...` URL in Postman

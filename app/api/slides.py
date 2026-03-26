@@ -44,6 +44,15 @@ def _job_to_dict(job: CourseJob) -> dict:
     created_at = getattr(job, "created_at", None)
     if isinstance(created_at, datetime):
         created_at = created_at.isoformat()
+    google_file_id = None
+    try:
+        payload = json.loads(getattr(job, "payload_json", "") or "{}")
+        if isinstance(payload, dict):
+            raw_id = payload.get("google_file_id")
+            if isinstance(raw_id, str) and raw_id.strip():
+                google_file_id = raw_id.strip()
+    except Exception:
+        google_file_id = None
     return {
         "job_id": str(job.id),
         "zoho_record_id": job.zoho_record_id,
@@ -51,6 +60,7 @@ def _job_to_dict(job: CourseJob) -> dict:
         "status": job.status,
         "pdf_url": getattr(job, "pdf_url", None),
         "ppt_url": getattr(job, "ppt_url", None),
+        "google_file_id": google_file_id,
         "error": getattr(job, "error", None),
         "course_id": str(job.course_id) if getattr(job, "course_id", None) else None,
         "version_number": getattr(job, "version_number", None),
@@ -146,13 +156,11 @@ async def generate_slides(
     background_tasks.add_task(process_slides_job, job_id)
     logger.info("Slides background task scheduled | job_id=%s", str(job_id))
     body = {
-        "job_id": str(job_id),
         "zoho_record_id": rid,
         "job_type": "slides",
         "status": "queued",
-        "message": "Slides job queued. Poll using job_id or zoho_record_id endpoint.",
+        "message": "Slides job queued. Poll using zoho_record_id endpoint.",
         "polling": {
-            "by_job_id": f"/api/v1/jobs/{job_id}",
             "by_zoho_record_id": f"/api/v2/jobs/zoho/{rid}",
         },
     }

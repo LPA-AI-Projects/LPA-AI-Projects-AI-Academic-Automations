@@ -24,6 +24,7 @@ class JobResponse(BaseModel):
     status: str
     pdf_url: str | None = None
     ppt_url: str | None = None
+    google_file_id: str | None = None
     error: str | None = None
     course_id: uuid.UUID | None = None
     version_number: int | None = None
