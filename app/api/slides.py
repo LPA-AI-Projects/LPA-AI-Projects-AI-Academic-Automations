@@ -1,17 +1,18 @@
 import json
 import os
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.job import CourseJob
-from app.schemas.job import JobQueuedResponse
 from app.services.slides_service import process_slides_job
 from app.utils.logger import get_logger
 
@@ -39,10 +40,33 @@ def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+def _job_to_dict(job: CourseJob) -> dict:
+    created_at = getattr(job, "created_at", None)
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat()
+    return {
+        "job_id": str(job.id),
+        "zoho_record_id": job.zoho_record_id,
+        "job_type": getattr(job, "job_type", None),
+        "status": job.status,
+        "pdf_url": getattr(job, "pdf_url", None),
+        "ppt_url": getattr(job, "ppt_url", None),
+        "error": getattr(job, "error", None),
+        "course_id": str(job.course_id) if getattr(job, "course_id", None) else None,
+        "version_number": getattr(job, "version_number", None),
+        "created_at": created_at,
+    }
+
+
 @router.post(
     "/slides/generate",
     dependencies=[auth],
     summary="Generate instructor slides (PPT) asynchronously",
+)
+@router.post(
+    "/v2/slides/generate",
+    dependencies=[auth],
+    summary="Generate instructor slides (PPT) asynchronously [v2]",
 )
 async def generate_slides(
     background_tasks: BackgroundTasks,
@@ -121,6 +145,43 @@ async def generate_slides(
 
     background_tasks.add_task(process_slides_job, job_id)
     logger.info("Slides background task scheduled | job_id=%s", str(job_id))
-    body = JobQueuedResponse(job_id=job_id, zoho_record_id=rid)
-    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=body.model_dump(mode="json"))
+    body = {
+        "job_id": str(job_id),
+        "zoho_record_id": rid,
+        "job_type": "slides",
+        "status": "queued",
+        "message": "Slides job queued. Poll using job_id or zoho_record_id endpoint.",
+        "polling": {
+            "by_job_id": f"/api/v1/jobs/{job_id}",
+            "by_zoho_record_id": f"/api/v2/jobs/zoho/{rid}",
+        },
+    }
+    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=body)
+
+
+@router.get(
+    "/v2/jobs/zoho/{zoho_record_id}",
+    dependencies=[auth],
+    summary="Get latest job status by zoho_record_id [v2]",
+)
+async def get_latest_job_by_zoho_record_id(
+    zoho_record_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    rid = (zoho_record_id or "").strip()
+    if not rid:
+        raise HTTPException(status_code=422, detail="zoho_record_id is required.")
+    try:
+        result = await db.execute(
+            select(CourseJob)
+            .where(CourseJob.zoho_record_id == rid)
+            .order_by(CourseJob.created_at.desc())
+        )
+        job = result.scalars().first()
+    except Exception:
+        logger.exception("Database error while reading latest job by zoho_record_id")
+        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+    if not job:
+        raise HTTPException(status_code=404, detail="No jobs found for this zoho_record_id.")
+    return JSONResponse(status_code=status.HTTP_200_OK, content=_job_to_dict(job))
 
