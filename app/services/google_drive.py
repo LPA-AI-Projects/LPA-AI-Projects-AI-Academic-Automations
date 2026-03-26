@@ -21,6 +21,10 @@ class GoogleDriveUploadError(RuntimeError):
     """Raised when Google Drive upload/conversion fails."""
 
 
+class GoogleSlidesMergeError(RuntimeError):
+    """Raised when Google Apps Script merge fails."""
+
+
 def _get_env(name: str) -> str:
     value = (os.getenv(name) or "").strip()
     if not value:
@@ -113,4 +117,54 @@ def upload_ppt_to_google_drive(file_path: str, filename: str) -> dict[str, Any]:
     edit_link = f"https://docs.google.com/presentation/d/{file_id}/edit"
     logger.info("Google Drive upload success | file_id=%s filename=%s", file_id, filename)
     return {"file_id": file_id, "edit_link": edit_link}
+
+
+def merge_google_slides_via_apps_script(presentation_ids: list[str]) -> dict[str, Any]:
+    """
+    Merge multiple Google Slides presentations into a single deck via Google Apps Script web app.
+
+    Required env vars:
+    - GOOGLE_SCRIPT_URL
+    - GOOGLE_SCRIPT_KEY
+    Optional:
+    - GOOGLE_DRIVE_FOLDER_ID (forwarded to script as folderId)
+    """
+    ids = [str(x).strip() for x in presentation_ids if str(x).strip()]
+    if not ids:
+        raise GoogleSlidesMergeError("No presentation IDs provided for merge.")
+
+    script_url = _get_env("GOOGLE_SCRIPT_URL")
+    script_key = _get_env("GOOGLE_SCRIPT_KEY")
+    folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+
+    payload: dict[str, Any] = {
+        "key": script_key,
+        "presentationIds": ids,
+    }
+    if folder_id:
+        payload["folderId"] = folder_id
+
+    with httpx.Client(timeout=120.0) as client:
+        response = client.post(script_url, json=payload)
+
+    if response.status_code >= 400:
+        raise GoogleSlidesMergeError(
+            f"Apps Script merge call failed: HTTP {response.status_code} body={(response.text or '')[:2000]}"
+        )
+
+    data = response.json() if response.content else {}
+    if isinstance(data, dict) and data.get("ok") is False:
+        raise GoogleSlidesMergeError(f"Apps Script merge error: {data.get('error')}")
+
+    merged_file_id = data.get("presentationId") or data.get("file_id")
+    merged_link = data.get("link") or data.get("edit_link")
+    if not isinstance(merged_file_id, str) or not merged_file_id.strip():
+        raise GoogleSlidesMergeError(f"Apps Script merge missing presentationId. payload={str(data)[:800]}")
+    if not isinstance(merged_link, str) or not merged_link.strip():
+        merged_link = f"https://docs.google.com/presentation/d/{merged_file_id.strip()}/edit"
+
+    merged_file_id = merged_file_id.strip()
+    merged_link = merged_link.strip()
+    logger.info("Apps Script merge success | merged_file_id=%s", merged_file_id)
+    return {"file_id": merged_file_id, "edit_link": merged_link}
 

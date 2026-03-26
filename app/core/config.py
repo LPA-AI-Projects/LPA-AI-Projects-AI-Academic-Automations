@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     GAMMA_API_KEY: str = ""
     GAMMA_BASE_URL: str = "https://public-api.gamma.app"
 
+    # Google Apps Script merge endpoint (optional, for single merged editable Slides link)
+    GOOGLE_SCRIPT_URL: str = ""
+    GOOGLE_SCRIPT_KEY: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator(

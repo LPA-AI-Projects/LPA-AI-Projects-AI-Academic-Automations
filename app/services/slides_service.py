@@ -13,7 +13,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.job import CourseJob
 from app.services.document_extractor import extract_pdf_text_async, extract_ppt_text_async
 from app.services.gamma_client import generate_ppt
-from app.services.google_drive import upload_ppt_to_google_drive
+from app.services.google_drive import merge_google_slides_via_apps_script, upload_ppt_to_google_drive
 from app.services.slide_generator import generate_slide
 from app.services.slide_planner import plan_slides
 from app.services.slide_validator import validate_slides
@@ -243,14 +243,45 @@ async def process_slides_job(job_id) -> None:
 
             # Keep the status progression unchanged; merging is now a no-op in Option 1.
             await _set_status(db, job, "merging")
-            logger.info(
-                "Merging skipped (Option 1) | job_id=%s batch_files=%s",
-                str(job.id),
-                len(ppt_paths),
-            )
+            logger.info("Merging phase started | job_id=%s batch_file_ids=%s", str(job.id), len(batch_file_ids))
 
             primary_link = batch_links[0] if batch_links else None
             primary_file_id = batch_file_ids[0] if batch_file_ids else None
+            merged_link: str | None = None
+            merged_file_id: str | None = None
+
+            # Attempt a true single merged Google Slides deck via Apps Script helper.
+            # If unavailable/failing, keep Option 1 primary-link behavior.
+            can_try_merge = (
+                len(batch_file_ids) >= 2
+                and len(batch_file_ids) == len(batches)
+                and bool((getattr(settings, "GOOGLE_SCRIPT_URL", "") or "").strip())
+                and bool((getattr(settings, "GOOGLE_SCRIPT_KEY", "") or "").strip())
+            )
+            if can_try_merge:
+                try:
+                    merged = await asyncio.to_thread(merge_google_slides_via_apps_script, batch_file_ids)
+                    merged_file_id = str(merged.get("file_id") or "").strip() or None
+                    merged_link = str(merged.get("edit_link") or "").strip() or None
+                    if merged_link:
+                        primary_link = merged_link
+                    if merged_file_id:
+                        primary_file_id = merged_file_id
+                    logger.info(
+                        "Merged Google Slides created | job_id=%s merged_file_id=%s",
+                        str(job.id),
+                        merged_file_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Apps Script merge failed; using first batch link | job_id=%s",
+                        str(job.id),
+                    )
+            else:
+                logger.info(
+                    "Apps Script merge skipped | job_id=%s reason=missing_ids_or_config",
+                    str(job.id),
+                )
 
             payload_state: dict[str, Any] = {}
             try:
@@ -263,6 +294,8 @@ async def process_slides_job(job_id) -> None:
             payload_state["google_edit_link"] = primary_link
             payload_state["google_batch_file_ids"] = batch_file_ids
             payload_state["google_batch_links"] = batch_links
+            payload_state["google_merged_file_id"] = merged_file_id
+            payload_state["google_merged_link"] = merged_link
             job.payload_json = json.dumps(payload_state)
 
             job.ppt_url = primary_link
