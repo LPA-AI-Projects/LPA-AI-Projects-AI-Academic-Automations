@@ -46,6 +46,8 @@ def _job_to_dict(job: CourseJob) -> dict:
         created_at = created_at.isoformat()
     google_file_id = None
     google_batch_links: list[str] = []
+    gamma_batch_links: list[str] = []
+    google_drive_course_folder_link = None
     try:
         payload = json.loads(getattr(job, "payload_json", "") or "{}")
         if isinstance(payload, dict):
@@ -55,9 +57,17 @@ def _job_to_dict(job: CourseJob) -> dict:
             raw_links = payload.get("google_batch_links")
             if isinstance(raw_links, list):
                 google_batch_links = [str(x).strip() for x in raw_links if str(x).strip()]
+            raw_gamma_links = payload.get("gamma_batch_links")
+            if isinstance(raw_gamma_links, list):
+                gamma_batch_links = [str(x).strip() for x in raw_gamma_links if str(x).strip()]
+            raw_folder_link = payload.get("google_drive_course_folder_link")
+            if isinstance(raw_folder_link, str) and raw_folder_link.strip():
+                google_drive_course_folder_link = raw_folder_link.strip()
     except Exception:
         google_file_id = None
         google_batch_links = []
+        gamma_batch_links = []
+        google_drive_course_folder_link = None
     return {
         "zoho_record_id": job.zoho_record_id,
         "job_type": getattr(job, "job_type", None),
@@ -66,6 +76,8 @@ def _job_to_dict(job: CourseJob) -> dict:
         "ppt_url": getattr(job, "ppt_url", None),
         "google_file_id": google_file_id,
         "google_batch_links": google_batch_links,
+        "google_drive_course_folder_link": google_drive_course_folder_link,
+        "gamma_batch_links": gamma_batch_links,
         "error": getattr(job, "error", None),
         "course_id": str(job.course_id) if getattr(job, "course_id", None) else None,
         "version_number": getattr(job, "version_number", None),
@@ -87,6 +99,7 @@ async def generate_slides(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     zoho_record_id: str = Form(...),
+    course_name: str | None = Form(None),
     outline_pdf: UploadFile = File(...),
     lesson_plan_and_activity_plan_pdf: UploadFile | None = File(None),
     instructor_ppt: UploadFile | None = File(None),
@@ -136,6 +149,7 @@ async def generate_slides(
         "outline_pdf_path": outline_path,
         "lesson_plan_and_activity_plan_pdf_path": lesson_path,
         "instructor_ppt_path": instructor_path,
+        "course_name": (course_name or "").strip() or "course",
     }
     logger.info(
         "Slides job payload prepared | job_id=%s has_lesson=%s has_instructor_ppt=%s",

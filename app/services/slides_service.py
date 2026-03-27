@@ -13,7 +13,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.job import CourseJob
 from app.services.document_extractor import extract_pdf_text_async, extract_ppt_text_async
 from app.services.gamma_client import generate_ppt
-from app.services.google_drive import merge_google_slides_via_apps_script, upload_ppt_to_google_drive
+from app.services.google_drive import ensure_drive_folder, upload_ppt_bytes_to_google_drive
 from app.services.slide_generator import generate_slide
 from app.services.slide_planner import plan_slides
 from app.services.slide_validator import validate_slides
@@ -21,7 +21,41 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-MAX_SLIDES_PER_BATCH = 40
+MAX_SLIDES_PER_BATCH = 60
+
+
+def _safe_course_name(name: str | None) -> str:
+    cleaned = (name or "").strip()
+    forbidden = '\\/:*?"<>|'
+    for ch in forbidden:
+        cleaned = cleaned.replace(ch, "_")
+    return cleaned[:80] or "course"
+
+
+def _safe_id(name: str | None) -> str:
+    cleaned = (name or "").strip()
+    forbidden = '\\/:*?"<>|'
+    for ch in forbidden:
+        cleaned = cleaned.replace(ch, "_")
+    return cleaned[:120] or "unknown"
+
+
+def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for i, s in enumerate(slides_batch, start=1):
+        title = str(s.get("title") or "").strip()
+        bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
+        notes = str(s.get("notes") or "").strip()
+        visual = str(s.get("visual") or "").strip()
+        lines.append(f"Slide {i}: {title}")
+        for b in bullets[:8]:
+            lines.append(f"- {str(b).strip()}")
+        if notes:
+            lines.append(f"Speaker notes: {notes}")
+        if visual:
+            lines.append(f"Visual suggestion: {visual}")
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def _build_ppt_url(file_path: str) -> str:
@@ -81,6 +115,11 @@ async def process_slides_job(job_id) -> None:
             outline_path = payload.get("outline_pdf_path")
             lesson_path = payload.get("lesson_plan_and_activity_plan_pdf_path")
             instructor_path = payload.get("instructor_ppt_path")
+            course_name = _safe_course_name(payload.get("course_name"))
+            cache_dir = os.path.join("generated_ppts", "cache", _safe_id(job.zoho_record_id))
+            os.makedirs(cache_dir, exist_ok=True)
+            validated_cache_path = os.path.join(cache_dir, "validated_slides.json")
+            validated_text_path = os.path.join(cache_dir, "validated_slides.txt")
 
             if not outline_path or not os.path.exists(outline_path):
                 raise RuntimeError("outline_pdf is missing on disk for this job.")
@@ -114,67 +153,99 @@ async def process_slides_job(job_id) -> None:
                     len(instructor_text or ""),
                 )
 
-            await _set_status(db, job, "planning")
-            t0 = time.time()
-            plan = await plan_slides(
-                outline=outline_text,
-                lesson=lesson_text,
-                activity=None,
-                instructor=instructor_text,
-            )
-            logger.info(
-                "Slides planning done | job_id=%s seconds=%.2f",
-                str(job.id),
-                time.time() - t0,
-            )
-            planned_slides = plan.get("slides") if isinstance(plan, dict) else None
-            if not isinstance(planned_slides, list) or not planned_slides:
-                raise RuntimeError("Slide planner returned no slides.")
-            logger.info(
-                "Slides plan received | job_id=%s planned_slides=%s",
-                str(job.id),
-                len(planned_slides),
-            )
+            validated: list[dict[str, Any]]
+            if os.path.exists(validated_cache_path):
+                with open(validated_cache_path, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                if not isinstance(cached, list) or not cached:
+                    raise RuntimeError("Cached validated slides file is invalid.")
+                validated = cached
+                logger.info(
+                    "Using cached validated slides | job_id=%s cache_path=%s slides=%s",
+                    str(job.id),
+                    validated_cache_path,
+                    len(validated),
+                )
+            else:
+                await _set_status(db, job, "planning")
+                t0 = time.time()
+                plan = await plan_slides(
+                    outline=outline_text,
+                    lesson=lesson_text,
+                    activity=None,
+                    instructor=instructor_text,
+                )
+                logger.info(
+                    "Slides planning done | job_id=%s seconds=%.2f",
+                    str(job.id),
+                    time.time() - t0,
+                )
+                planned_slides = plan.get("slides") if isinstance(plan, dict) else None
+                if not isinstance(planned_slides, list) or not planned_slides:
+                    raise RuntimeError("Slide planner returned no slides.")
+                logger.info(
+                    "Slides plan received | job_id=%s planned_slides=%s",
+                    str(job.id),
+                    len(planned_slides),
+                )
 
-            await _set_status(db, job, "generating_slides")
-            context = {
-                "outline": outline_text[:150000],
-                "lesson": (lesson_text or "")[:150000],
-                "instructor": (instructor_text or "")[:150000],
-            }
-            generated: list[dict[str, Any]] = []
-            gen_started = time.time()
-            for idx, s in enumerate(planned_slides, start=1):
-                slide_out = await generate_slide(slide=s, context=context)
-                generated.append(slide_out)
-                if idx % 5 == 0:
-                    # keep some heartbeat in job payload for debugging
-                    job.payload_json = json.dumps(
-                        {"progress": {"generated": idx, "total": len(planned_slides)}}
-                    )
-                    await db.commit()
-                    logger.info(
-                        "Slides generated progress | job_id=%s generated=%s total=%s",
-                        str(job.id),
-                        idx,
-                        len(planned_slides),
-                    )
-            logger.info(
-                "Slides generation done | job_id=%s slides=%s seconds=%.2f",
-                str(job.id),
-                len(generated),
-                time.time() - gen_started,
-            )
+                await _set_status(db, job, "generating_slides")
+                context = {
+                    "outline": outline_text[:150000],
+                    "lesson": (lesson_text or "")[:150000],
+                    "instructor": (instructor_text or "")[:150000],
+                }
+                generated: list[dict[str, Any]] = []
+                gen_started = time.time()
+                for idx, s in enumerate(planned_slides, start=1):
+                    slide_out = await generate_slide(slide=s, context=context)
+                    generated.append(slide_out)
+                    if idx % 5 == 0:
+                        # keep some heartbeat in job payload for debugging
+                        job.payload_json = json.dumps(
+                            {"progress": {"generated": idx, "total": len(planned_slides)}}
+                        )
+                        await db.commit()
+                        logger.info(
+                            "Slides generated progress | job_id=%s generated=%s total=%s",
+                            str(job.id),
+                            idx,
+                            len(planned_slides),
+                        )
+                logger.info(
+                    "Slides generation done | job_id=%s slides=%s seconds=%.2f",
+                    str(job.id),
+                    len(generated),
+                    time.time() - gen_started,
+                )
 
-            await _set_status(db, job, "validating")
-            t0 = time.time()
-            validated = validate_slides(planned_slides=planned_slides, generated_slides=generated)
-            logger.info(
-                "Slides validated | job_id=%s slides=%s seconds=%.2f",
-                str(job.id),
-                len(validated),
-                time.time() - t0,
-            )
+                await _set_status(db, job, "validating")
+                t0 = time.time()
+                validated = validate_slides(planned_slides=planned_slides, generated_slides=generated)
+                logger.info(
+                    "Slides validated | job_id=%s slides=%s seconds=%.2f",
+                    str(job.id),
+                    len(validated),
+                    time.time() - t0,
+                )
+                with open(validated_cache_path, "w", encoding="utf-8") as f:
+                    json.dump(validated, f, ensure_ascii=False, indent=2)
+                with open(validated_text_path, "w", encoding="utf-8") as f:
+                    for i, slide in enumerate(validated, start=1):
+                        f.write(f"Slide {i}: {str(slide.get('title') or '').strip()}\n")
+                        bullets = slide.get("bullets") if isinstance(slide.get("bullets"), list) else []
+                        for b in bullets:
+                            f.write(f"- {str(b).strip()}\n")
+                        notes = str(slide.get("notes") or "").strip()
+                        if notes:
+                            f.write(f"Notes: {notes}\n")
+                        f.write("\n")
+                logger.info(
+                    "Slides debug cache saved | job_id=%s json=%s txt=%s",
+                    str(job.id),
+                    validated_cache_path,
+                    validated_text_path,
+                )
 
             await _set_status(db, job, "batching")
             batches = _batch_slides(validated)
@@ -189,8 +260,33 @@ async def process_slides_job(job_id) -> None:
             ppt_paths: list[str] = []
             batch_dir = os.path.join("generated_ppts", "batches", str(job_id))
             os.makedirs(batch_dir, exist_ok=True)
-            batch_links: list[str] = []
-            batch_file_ids: list[str] = []
+            gamma_batch_links: list[str] = []
+            gamma_generation_ids: list[str] = []
+            google_batch_links: list[str] = []
+            google_batch_file_ids: list[str] = []
+            drive_folder_id: str | None = None
+            drive_folder_link: str | None = None
+            drive_parent_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip() or None
+            try:
+                folder_name = f"{course_name}_{_safe_id(job.zoho_record_id)}"
+                folder = await asyncio.to_thread(
+                    ensure_drive_folder,
+                    folder_name,
+                    parent_folder_id=drive_parent_id,
+                )
+                drive_folder_id = str(folder.get("folder_id") or "").strip() or None
+                drive_folder_link = str(folder.get("folder_link") or "").strip() or None
+                logger.info(
+                    "Google Drive course folder ready | job_id=%s folder_id=%s course_name=%s",
+                    str(job.id),
+                    drive_folder_id,
+                    course_name,
+                )
+            except Exception:
+                logger.exception(
+                    "Google Drive folder create/find failed; continuing without Drive upload | job_id=%s",
+                    str(job.id),
+                )
             for bi, batch in enumerate(batches, start=1):
                 logger.info(
                     "Gamma rendering batch | job_id=%s batch=%s/%s slides=%s",
@@ -199,8 +295,36 @@ async def process_slides_job(job_id) -> None:
                     len(batches),
                     len(batch),
                 )
-                ppt_bytes = await generate_ppt(batch)
+                batch_input_path = os.path.join(cache_dir, f"batch_{bi}_input.txt")
+                with open(batch_input_path, "w", encoding="utf-8") as f:
+                    f.write(_gamma_input_from_batch(batch))
+
+                stable_local_ppt = os.path.join(cache_dir, f"{course_name}_{bi}.pptx")
                 out_path = os.path.join(batch_dir, f"batch_{bi}.pptx")
+                gamma_url = ""
+                generation_id = ""
+                if os.path.exists(stable_local_ppt):
+                    with open(stable_local_ppt, "rb") as f:
+                        ppt_bytes = f.read()
+                    logger.info(
+                        "Using cached local PPT for batch | job_id=%s batch=%s path=%s",
+                        str(job.id),
+                        bi,
+                        stable_local_ppt,
+                    )
+                else:
+                    gamma_result = await generate_ppt(batch)
+                    ppt_bytes = gamma_result.get("ppt_bytes", b"")
+                    gamma_url = str(gamma_result.get("gamma_url") or "").strip()
+                    generation_id = str(gamma_result.get("generation_id") or "").strip()
+                    with open(stable_local_ppt, "wb") as f:
+                        f.write(ppt_bytes)
+                    logger.info(
+                        "Saved stable local PPT | job_id=%s batch=%s path=%s",
+                        str(job.id),
+                        bi,
+                        stable_local_ppt,
+                    )
                 with open(out_path, "wb") as f:
                     f.write(ppt_bytes)
                 ppt_paths.append(out_path)
@@ -211,77 +335,40 @@ async def process_slides_job(job_id) -> None:
                     len(ppt_bytes),
                     out_path,
                 )
-                # Upload each batch directly to Google Drive as editable Slides.
-                try:
-                    drive_upload = await asyncio.to_thread(
-                        upload_ppt_to_google_drive,
-                        out_path,
-                        f"{job_id}_batch_{bi}.pptx",
-                    )
-                    file_id = str(drive_upload.get("file_id") or "").strip()
-                    edit_link = str(drive_upload.get("edit_link") or "").strip()
-                    if file_id:
-                        batch_file_ids.append(file_id)
-                    if edit_link:
-                        batch_links.append(edit_link)
-                    logger.info(
-                        "Google Drive batch upload success | job_id=%s batch=%s file_id=%s",
-                        str(job.id),
-                        bi,
-                        file_id,
-                    )
-                except Exception:
-                    # Fallback: keep Railway URL for that batch if Drive upload fails.
-                    logger.exception(
-                        "Google Drive batch upload failed; using Railway batch URL | job_id=%s batch=%s",
-                        str(job.id),
-                        bi,
-                    )
-                    rel_path = os.path.join("batches", str(job_id), f"batch_{bi}.pptx")
-                    batch_links.append(_build_ppt_url_from_relative_path(rel_path))
+                if gamma_url:
+                    gamma_batch_links.append(gamma_url)
+                if generation_id:
+                    gamma_generation_ids.append(generation_id)
+                if drive_folder_id:
+                    try:
+                        drive_upload = await asyncio.to_thread(
+                            upload_ppt_bytes_to_google_drive,
+                            ppt_bytes,
+                            f"{course_name}_{bi}.pptx",
+                            parent_folder_id=drive_folder_id,
+                            convert_to_google_slides=False,
+                        )
+                        g_file_id = str(drive_upload.get("file_id") or "").strip()
+                        g_link = str(drive_upload.get("edit_link") or "").strip()
+                        if g_file_id:
+                            google_batch_file_ids.append(g_file_id)
+                        if g_link:
+                            google_batch_links.append(g_link)
+                    except Exception:
+                        logger.exception(
+                            "Google Drive upload failed for batch | job_id=%s batch=%s",
+                            str(job.id),
+                            bi,
+                        )
                 await asyncio.sleep(0)  # cooperative
 
-            # Keep the status progression unchanged; merging is now a no-op in Option 1.
+            # Keep status progression unchanged; merging deferred.
             await _set_status(db, job, "merging")
-            logger.info("Merging phase started | job_id=%s batch_file_ids=%s", str(job.id), len(batch_file_ids))
+            logger.info("Merging deferred | job_id=%s batch_files=%s", str(job.id), len(ppt_paths))
 
-            primary_link = batch_links[0] if batch_links else None
-            primary_file_id = batch_file_ids[0] if batch_file_ids else None
-            merged_link: str | None = None
-            merged_file_id: str | None = None
-
-            # Attempt a true single merged Google Slides deck via Apps Script helper.
-            # If unavailable/failing, keep Option 1 primary-link behavior.
-            can_try_merge = (
-                len(batch_file_ids) >= 2
-                and len(batch_file_ids) == len(batches)
-                and bool((getattr(settings, "GOOGLE_SCRIPT_URL", "") or "").strip())
-                and bool((getattr(settings, "GOOGLE_SCRIPT_KEY", "") or "").strip())
+            primary_link = gamma_batch_links[0] if gamma_batch_links else _build_ppt_url_from_relative_path(
+                os.path.join("batches", str(job_id), "batch_1.pptx")
             )
-            if can_try_merge:
-                try:
-                    merged = await asyncio.to_thread(merge_google_slides_via_apps_script, batch_file_ids)
-                    merged_file_id = str(merged.get("file_id") or "").strip() or None
-                    merged_link = str(merged.get("edit_link") or "").strip() or None
-                    if merged_link:
-                        primary_link = merged_link
-                    if merged_file_id:
-                        primary_file_id = merged_file_id
-                    logger.info(
-                        "Merged Google Slides created | job_id=%s merged_file_id=%s",
-                        str(job.id),
-                        merged_file_id,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Apps Script merge failed; using first batch link | job_id=%s",
-                        str(job.id),
-                    )
-            else:
-                logger.info(
-                    "Apps Script merge skipped | job_id=%s reason=missing_ids_or_config",
-                    str(job.id),
-                )
 
             payload_state: dict[str, Any] = {}
             try:
@@ -290,22 +377,22 @@ async def process_slides_job(job_id) -> None:
                     payload_state = {}
             except Exception:
                 payload_state = {}
-            payload_state["google_file_id"] = primary_file_id
-            payload_state["google_edit_link"] = primary_link
-            payload_state["google_batch_file_ids"] = batch_file_ids
-            payload_state["google_batch_links"] = batch_links
-            payload_state["google_merged_file_id"] = merged_file_id
-            payload_state["google_merged_link"] = merged_link
+            payload_state["gamma_batch_links"] = gamma_batch_links
+            payload_state["gamma_generation_ids"] = gamma_generation_ids
+            payload_state["google_batch_links"] = google_batch_links
+            payload_state["google_batch_file_ids"] = google_batch_file_ids
+            payload_state["google_file_id"] = google_batch_file_ids[0] if google_batch_file_ids else None
+            payload_state["google_drive_course_folder_id"] = drive_folder_id
+            payload_state["google_drive_course_folder_link"] = drive_folder_link
             job.payload_json = json.dumps(payload_state)
 
             job.ppt_url = primary_link
             await db.commit()
             logger.info(
-                "Slides output ready | job_id=%s primary_link=%s google_file_id=%s batch_links=%s",
+                "Slides output ready (Gamma links) | job_id=%s primary_link=%s gamma_links=%s",
                 str(job.id),
                 primary_link,
-                primary_file_id,
-                len(batch_links),
+                len(gamma_batch_links),
             )
 
             # Attaching to Zoho is intentionally skipped for the first testing pass.

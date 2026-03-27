@@ -8,9 +8,13 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     # Claude (Anthropic)
+    AI_PROVIDER: str = "anthropic"
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_BASE_URL: str = "https://api.openai.com"
 
     # App security
     API_SECRET_KEY: str
@@ -44,6 +48,10 @@ class Settings(BaseSettings):
     # Google Apps Script merge endpoint (optional, for single merged editable Slides link)
     GOOGLE_SCRIPT_URL: str = ""
     GOOGLE_SCRIPT_KEY: str = ""
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REFRESH_TOKEN: str = ""
+    GOOGLE_DRIVE_FOLDER_ID: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -65,6 +73,17 @@ class Settings(BaseSettings):
         """
         Avoid https://api.anthropic.com/v1 + /v1/messages => 404.
         Strip trailing /v1 if present (common misconfiguration).
+        """
+        u = (value or "").strip().rstrip("/")
+        if u.endswith("/v1"):
+            u = u[:-3].rstrip("/")
+        return u
+
+    @field_validator("OPENAI_BASE_URL")
+    @classmethod
+    def normalize_openai_base_url(cls, value: str) -> str:
+        """
+        Keep OpenAI base URL root-only to avoid /v1/v1/chat/completions.
         """
         u = (value or "").strip().rstrip("/")
         if u.endswith("/v1"):

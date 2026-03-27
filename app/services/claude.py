@@ -19,6 +19,10 @@ class AnthropicConfigurationError(RuntimeError):
     """Bad base URL or model — retrying will not help."""
 
 
+class OpenAIConfigurationError(RuntimeError):
+    """Bad OpenAI setup — retrying will not help."""
+
+
 DEFAULT_MAX_ATTEMPTS = 3
 
 LEARNING_OBJECTIVES_PROMPT = """You are a Training Objectives Expert for Learners Point Academy. Your ONLY job is to identify the true learning objectives from training requests.
@@ -422,11 +426,20 @@ Return the same strict JSON schema as requested.
 
 class ClaudeService:
     def __init__(self) -> None:
+        self.provider = str(getattr(settings, "AI_PROVIDER", "anthropic") or "anthropic").strip().lower()
         self.api_key = settings.ANTHROPIC_API_KEY
         self.base_url = settings.ANTHROPIC_BASE_URL.rstrip("/")
         self.model = settings.ANTHROPIC_MODEL
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY is missing in environment.")
+        self.openai_api_key = str(getattr(settings, "OPENAI_API_KEY", "") or "").strip()
+        self.openai_base_url = str(getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com") or "").rstrip("/")
+        self.openai_model = str(getattr(settings, "OPENAI_MODEL", "gpt-4o-mini") or "").strip()
+
+        if self.provider == "openai":
+            if not self.openai_api_key:
+                raise ValueError("OPENAI_API_KEY is missing in environment.")
+        else:
+            if not self.api_key:
+                raise ValueError("ANTHROPIC_API_KEY is missing in environment.")
 
     async def _call_messages_api(
         self,
@@ -436,6 +449,14 @@ class ClaudeService:
         timeout_s: float,
         max_attempts: int,
     ) -> str:
+        if self.provider == "openai":
+            return await self._call_openai_chat_api(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                timeout_s=timeout_s,
+                max_attempts=max_attempts,
+            )
+
         url = f"{self.base_url}/v1/messages"
         headers = {
             "x-api-key": self.api_key,
@@ -453,6 +474,125 @@ class ClaudeService:
         timeout = httpx.Timeout(timeout_s, connect=10.0)
         last_error: Optional[BaseException] = None
 
+        candidate_models: list[str] = []
+        for m in (self.model, "claude-3-5-sonnet-latest", "claude-sonnet-4-20250514"):
+            mm = (m or "").strip()
+            if mm and mm not in candidate_models:
+                candidate_models.append(mm)
+
+        for model_idx, model_name in enumerate(candidate_models, start=1):
+            payload["model"] = model_name
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        response = await client.post(url, headers=headers, json=payload)
+
+                    if response.status_code == 404:
+                        body_preview = (response.text or "")[:500]
+                        logger.error(
+                            "Anthropic returned 404 | url=%s model=%s body=%s",
+                            url,
+                            model_name,
+                            body_preview,
+                        )
+                        raise AnthropicConfigurationError(
+                            "Anthropic API returned 404. Check ANTHROPIC_BASE_URL (must be "
+                            "https://api.anthropic.com without /v1) and ANTHROPIC_MODEL "
+                            "(use a valid model ID from Anthropic docs, e.g. claude-sonnet-4-20250514)."
+                        )
+
+                    if response.status_code == 400:
+                        body_preview = (response.text or "")[:1200]
+                        logger.warning(
+                            "Anthropic returned 400 | model=%s attempt=%s/%s body=%s",
+                            model_name,
+                            attempt,
+                            max_attempts,
+                            body_preview,
+                        )
+                        if "credit balance is too low" in body_preview.lower():
+                            raise RuntimeError(
+                                "Anthropic credits are exhausted. Please add credits in Anthropic Plans & Billing."
+                            )
+                        # Common local issue: invalid ANTHROPIC_MODEL value in .env.
+                        if ("model" in body_preview.lower() or "not_found_error" in body_preview.lower()) and model_idx < len(candidate_models):
+                            logger.warning(
+                                "Anthropic model rejected; trying fallback model next | current_model=%s",
+                                model_name,
+                            )
+                            break
+
+                    if response.status_code >= 500:
+                        raise httpx.HTTPStatusError(
+                            "Claude server error", request=response.request, response=response
+                        )
+                    response.raise_for_status()
+
+                    data = response.json()
+                    content_blocks = data.get("content", [])
+                    if not isinstance(content_blocks, list) or not content_blocks:
+                        raise RuntimeError("Claude returned empty content.")
+
+                    text_parts: list[str] = []
+                    for block in content_blocks:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text_value = block.get("text")
+                            if isinstance(text_value, str):
+                                text_parts.append(text_value)
+
+                    final_text = "\n".join(text_parts).strip()
+                    if not final_text:
+                        raise RuntimeError("Claude returned blank text.")
+
+                    if model_name != self.model:
+                        logger.warning(
+                            "Anthropic model fallback in use | configured=%s active=%s",
+                            self.model,
+                            model_name,
+                        )
+                    return final_text
+
+                except AnthropicConfigurationError:
+                    raise
+                except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError, RuntimeError) as exc:
+                    last_error = exc
+                    logger.warning(
+                        "Claude call failed attempt=%s/%s model=%s error=%r",
+                        attempt,
+                        max_attempts,
+                        model_name,
+                        exc,
+                    )
+                    if attempt < max_attempts:
+                        await asyncio.sleep(2 ** (attempt - 1))
+
+        logger.error("Claude failed after retries | last_error=%r", last_error)
+        raise RuntimeError("AI service failed after retries. Please try again later.")
+
+    async def _call_openai_chat_api(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        timeout_s: float,
+        max_attempts: int,
+    ) -> str:
+        url = f"{self.openai_base_url}/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.openai_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.openai_model,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        timeout = httpx.Timeout(timeout_s, connect=10.0)
+        last_error: Optional[BaseException] = None
+
         for attempt in range(1, max_attempts + 1):
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:
@@ -461,50 +601,54 @@ class ClaudeService:
                 if response.status_code == 404:
                     body_preview = (response.text or "")[:500]
                     logger.error(
-                        "Anthropic returned 404 | url=%s model=%s body=%s",
+                        "OpenAI returned 404 | url=%s model=%s body=%s",
                         url,
-                        self.model,
+                        self.openai_model,
                         body_preview,
                     )
-                    raise AnthropicConfigurationError(
-                        "Anthropic API returned 404. Check ANTHROPIC_BASE_URL (must be "
-                        "https://api.anthropic.com without /v1) and ANTHROPIC_MODEL "
-                        "(use a valid model ID from Anthropic docs, e.g. claude-sonnet-4-20250514)."
+                    raise OpenAIConfigurationError(
+                        "OpenAI API returned 404. Check OPENAI_BASE_URL (must be root URL without /v1) and OPENAI_MODEL."
                     )
+
+                if response.status_code == 401:
+                    raise OpenAIConfigurationError("OpenAI authentication failed. Check OPENAI_API_KEY.")
 
                 if response.status_code >= 500:
                     raise httpx.HTTPStatusError(
-                        "Claude server error", request=response.request, response=response
+                        "OpenAI server error", request=response.request, response=response
+                    )
+                if response.status_code >= 400:
+                    body_preview = (response.text or "")[:1200]
+                    logger.warning(
+                        "OpenAI returned %s | model=%s attempt=%s/%s body=%s",
+                        response.status_code,
+                        self.openai_model,
+                        attempt,
+                        max_attempts,
+                        body_preview,
                     )
                 response.raise_for_status()
 
                 data = response.json()
-                content_blocks = data.get("content", [])
-                if not isinstance(content_blocks, list) or not content_blocks:
-                    raise RuntimeError("Claude returned empty content.")
+                choices = data.get("choices") if isinstance(data, dict) else None
+                if not isinstance(choices, list) or not choices:
+                    raise RuntimeError("OpenAI returned empty choices.")
+                first = choices[0] if isinstance(choices[0], dict) else {}
+                message = first.get("message") if isinstance(first, dict) else {}
+                content = message.get("content") if isinstance(message, dict) else None
+                if not isinstance(content, str) or not content.strip():
+                    raise RuntimeError("OpenAI returned blank content.")
+                return content.strip()
 
-                text_parts: list[str] = []
-                for block in content_blocks:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text_value = block.get("text")
-                        if isinstance(text_value, str):
-                            text_parts.append(text_value)
-
-                final_text = "\n".join(text_parts).strip()
-                if not final_text:
-                    raise RuntimeError("Claude returned blank text.")
-
-                return final_text
-
-            except AnthropicConfigurationError:
+            except OpenAIConfigurationError:
                 raise
             except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError, RuntimeError) as exc:
                 last_error = exc
-                logger.warning("Claude call failed attempt=%s/%s error=%r", attempt, max_attempts, exc)
+                logger.warning("OpenAI call failed attempt=%s/%s error=%r", attempt, max_attempts, exc)
                 if attempt < max_attempts:
                     await asyncio.sleep(2 ** (attempt - 1))
 
-        logger.error("Claude failed after retries | last_error=%r", last_error)
+        logger.error("OpenAI failed after retries | last_error=%r", last_error)
         raise RuntimeError("AI service failed after retries. Please try again later.")
 
     def _extract_json_candidate(self, text: str) -> str:

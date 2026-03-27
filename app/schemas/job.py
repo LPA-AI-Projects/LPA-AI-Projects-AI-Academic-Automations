@@ -26,6 +26,8 @@ class JobResponse(BaseModel):
     ppt_url: str | None = None
     google_file_id: str | None = None
     google_batch_links: list[str] | None = None
+    google_drive_course_folder_link: str | None = None
+    gamma_batch_links: list[str] | None = None
     error: str | None = None
     course_id: uuid.UUID | None = None
     version_number: int | None = None

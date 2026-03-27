@@ -7,13 +7,16 @@ from typing import Any
 
 import httpx
 
+from app.core.config import settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
+GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable"
 GOOGLE_DRIVE_PERMISSIONS_URL_TMPL = "https://www.googleapis.com/drive/v3/files/{file_id}/permissions"
+GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 GOOGLE_SLIDES_MIME = "application/vnd.google-apps.presentation"
 
 
@@ -27,6 +30,8 @@ class GoogleSlidesMergeError(RuntimeError):
 
 def _get_env(name: str) -> str:
     value = (os.getenv(name) or "").strip()
+    if not value:
+        value = str(getattr(settings, name, "") or "").strip()
     if not value:
         raise GoogleDriveUploadError(f"Missing required environment variable: {name}")
     return value
@@ -59,6 +64,149 @@ def _get_access_token() -> str:
     return access_token
 
 
+def _set_public_edit_permission(file_id: str, access_token: str) -> None:
+    permission_payload = {"type": "anyone", "role": "writer"}
+    permission_url = GOOGLE_DRIVE_PERMISSIONS_URL_TMPL.format(file_id=file_id)
+    headers = {"Authorization": f"Bearer {access_token}"}
+    with httpx.Client(timeout=30.0) as client:
+        perm_resp = client.post(permission_url, headers=headers, json=permission_payload)
+    if perm_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive permission update failed: HTTP {perm_resp.status_code} body={(perm_resp.text or '')[:2000]}"
+        )
+
+
+def _sanitize_drive_name(name: str) -> str:
+    cleaned = (name or "").strip()
+    forbidden = '\\/:*?"<>|'
+    for ch in forbidden:
+        cleaned = cleaned.replace(ch, "_")
+    return cleaned[:120] or "course"
+
+
+def ensure_drive_folder(folder_name: str, *, parent_folder_id: str | None = None) -> dict[str, str]:
+    """
+    Create (or reuse) a Google Drive folder by name and return its id/link.
+    """
+    access_token = _get_access_token()
+    safe_name = _sanitize_drive_name(folder_name)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    safe_name_q = safe_name.replace("'", "\\'")
+    q_parts = [
+        f"name = '{safe_name_q}'",
+        "mimeType = 'application/vnd.google-apps.folder'",
+        "trashed = false",
+    ]
+    if parent_folder_id:
+        q_parts.append(f"'{parent_folder_id}' in parents")
+    query = " and ".join(q_parts)
+
+    with httpx.Client(timeout=30.0) as client:
+        search_resp = client.get(
+            GOOGLE_DRIVE_FILES_URL,
+            headers=headers,
+            params={"q": query, "fields": "files(id,name)", "pageSize": 1},
+        )
+    if search_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive folder search failed: HTTP {search_resp.status_code} body={(search_resp.text or '')[:2000]}"
+        )
+    files = (search_resp.json() or {}).get("files") or []
+    if files:
+        fid = str(files[0].get("id") or "").strip()
+        if fid:
+            return {"folder_id": fid, "folder_link": f"https://drive.google.com/drive/folders/{fid}"}
+
+    metadata: dict[str, Any] = {"name": safe_name, "mimeType": "application/vnd.google-apps.folder"}
+    if parent_folder_id:
+        metadata["parents"] = [parent_folder_id]
+    with httpx.Client(timeout=30.0) as client:
+        create_resp = client.post(
+            GOOGLE_DRIVE_FILES_URL,
+            headers={**headers, "Content-Type": "application/json"},
+            json=metadata,
+        )
+    if create_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive folder create failed: HTTP {create_resp.status_code} body={(create_resp.text or '')[:2000]}"
+        )
+    created = create_resp.json() if create_resp.content else {}
+    folder_id = str(created.get("id") or "").strip()
+    if not folder_id:
+        raise GoogleDriveUploadError("Google Drive folder creation succeeded but folder id was missing.")
+    return {"folder_id": folder_id, "folder_link": f"https://drive.google.com/drive/folders/{folder_id}"}
+
+
+def upload_ppt_bytes_to_google_drive(
+    file_bytes: bytes,
+    filename: str,
+    *,
+    parent_folder_id: str | None = None,
+    convert_to_google_slides: bool = True,
+) -> dict[str, Any]:
+    if not file_bytes:
+        raise GoogleDriveUploadError("Cannot upload empty PPT bytes to Google Drive.")
+
+    access_token = _get_access_token()
+    headers = {"Authorization": f"Bearer {access_token}"}
+    target_mime = (
+        GOOGLE_SLIDES_MIME
+        if convert_to_google_slides
+        else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+    metadata: dict[str, Any] = {
+        "name": filename,
+        "mimeType": target_mime,
+    }
+    if parent_folder_id:
+        metadata["parents"] = [parent_folder_id]
+    upload_headers = {
+        **headers,
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "X-Upload-Content-Length": str(len(file_bytes)),
+    }
+    with httpx.Client(timeout=120.0) as client:
+        start_resp = client.post(
+            GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL,
+            headers=upload_headers,
+            json=metadata,
+        )
+    if start_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive resumable init failed: HTTP {start_resp.status_code} body={(start_resp.text or '')[:2000]}"
+        )
+    resumable_url = (start_resp.headers.get("Location") or "").strip()
+    if not resumable_url:
+        raise GoogleDriveUploadError("Google Drive resumable init succeeded but Location header was missing.")
+
+    with httpx.Client(timeout=300.0) as client:
+        upload_resp = client.put(
+            resumable_url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            },
+            content=file_bytes,
+        )
+    if upload_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive upload failed: HTTP {upload_resp.status_code} body={(upload_resp.text or '')[:2000]}"
+        )
+    uploaded = upload_resp.json() if upload_resp.content else {}
+    file_id = uploaded.get("id")
+    if not isinstance(file_id, str) or not file_id:
+        raise GoogleDriveUploadError("Google Drive upload succeeded but file id was missing.")
+    _set_public_edit_permission(file_id, access_token)
+    if convert_to_google_slides:
+        edit_link = f"https://docs.google.com/presentation/d/{file_id}/edit"
+    else:
+        edit_link = f"https://drive.google.com/file/d/{file_id}/view"
+    logger.info("Google Drive bytes upload success | file_id=%s filename=%s", file_id, filename)
+    return {"file_id": file_id, "edit_link": edit_link}
+
+
 def upload_ppt_to_google_drive(file_path: str, filename: str) -> dict[str, Any]:
     """
     Upload a PPT/PPTX file to Google Drive, convert it into Google Slides,
@@ -73,50 +221,10 @@ def upload_ppt_to_google_drive(file_path: str, filename: str) -> dict[str, Any]:
     if not path.exists() or not path.is_file():
         raise GoogleDriveUploadError(f"File not found: {file_path}")
 
-    access_token = _get_access_token()
-    headers = {"Authorization": f"Bearer {access_token}"}
-
-    metadata: dict[str, Any] = {
-        "name": filename,
-        # Upload as native Google Slides document (editable in browser)
-        "mimeType": GOOGLE_SLIDES_MIME,
-    }
-    folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
-    if folder_id:
-        metadata["parents"] = [folder_id]
-
     with path.open("rb") as fh:
-        files = {
-            "metadata": ("metadata", json.dumps(metadata), "application/json; charset=UTF-8"),
-            "file": (filename, fh, "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
-        }
-        with httpx.Client(timeout=120.0) as client:
-            upload_resp = client.post(GOOGLE_DRIVE_UPLOAD_URL, headers=headers, files=files)
-
-    if upload_resp.status_code >= 400:
-        raise GoogleDriveUploadError(
-            f"Google Drive upload failed: HTTP {upload_resp.status_code} body={(upload_resp.text or '')[:2000]}"
-        )
-
-    uploaded = upload_resp.json() if upload_resp.content else {}
-    file_id = uploaded.get("id")
-    if not isinstance(file_id, str) or not file_id:
-        raise GoogleDriveUploadError("Google Drive upload succeeded but file id was missing.")
-
-    # Set permission: anyone can edit
-    permission_payload = {"type": "anyone", "role": "writer"}
-    permission_url = GOOGLE_DRIVE_PERMISSIONS_URL_TMPL.format(file_id=file_id)
-    with httpx.Client(timeout=30.0) as client:
-        perm_resp = client.post(permission_url, headers=headers, json=permission_payload)
-
-    if perm_resp.status_code >= 400:
-        raise GoogleDriveUploadError(
-            f"Google Drive permission update failed: HTTP {perm_resp.status_code} body={(perm_resp.text or '')[:2000]}"
-        )
-
-    edit_link = f"https://docs.google.com/presentation/d/{file_id}/edit"
-    logger.info("Google Drive upload success | file_id=%s filename=%s", file_id, filename)
-    return {"file_id": file_id, "edit_link": edit_link}
+        file_bytes = fh.read()
+    folder_id = str(getattr(settings, "GOOGLE_DRIVE_FOLDER_ID", "") or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip() or None
+    return upload_ppt_bytes_to_google_drive(file_bytes, filename, parent_folder_id=folder_id)
 
 
 def merge_google_slides_via_apps_script(presentation_ids: list[str]) -> dict[str, Any]:
@@ -135,7 +243,7 @@ def merge_google_slides_via_apps_script(presentation_ids: list[str]) -> dict[str
 
     script_url = _get_env("GOOGLE_SCRIPT_URL")
     script_key = _get_env("GOOGLE_SCRIPT_KEY")
-    folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+    folder_id = str(getattr(settings, "GOOGLE_DRIVE_FOLDER_ID", "") or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
 
     payload: dict[str, Any] = {
         "key": script_key,
