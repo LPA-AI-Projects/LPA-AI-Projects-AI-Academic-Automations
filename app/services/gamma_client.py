@@ -19,12 +19,17 @@ def _gamma_configured() -> bool:
     return bool(getattr(settings, "GAMMA_API_KEY", "") and getattr(settings, "GAMMA_BASE_URL", ""))
 
 
-async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instructions: str = "") -> dict[str, Any]:
+async def generate_ppt(
+    slides_batch: list[dict[str, Any]],
+    *,
+    additional_instructions: str = "",
+    include_export_bytes: bool = True,
+) -> dict[str, Any]:
     """
     Uses Gamma Public API async workflow:
     - POST /v1.0/generations
     - poll GET /v1.0/generations/{id}
-    - download exportUrl (pptx)
+    - optionally download exportUrl (pptx)
     """
     if not _gamma_configured():
         raise GammaNotConfigured("Gamma API is not configured. Set GAMMA_API_KEY and GAMMA_BASE_URL.")
@@ -116,15 +121,22 @@ async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instruc
                 logger.info("Gamma generation polling | generationId=%s attempt=%s status=%s", gen_id, attempt, status)
             await asyncio.sleep(2.0)
 
-        if not export_url or not isinstance(export_url, str):
-            raise RuntimeError("Gamma generation did not complete with exportUrl.")
+        if include_export_bytes:
+            if not export_url or not isinstance(export_url, str):
+                raise RuntimeError("Gamma generation did not complete with exportUrl.")
+            logger.info("Gamma downloading export | generationId=%s", gen_id)
+            dl = await client.get(export_url, headers=headers, timeout=120.0)
+            dl.raise_for_status()
+            logger.info("Gamma export downloaded | generationId=%s bytes=%s", gen_id, len(dl.content))
+            return {
+                "ppt_bytes": dl.content,
+                "generation_id": gen_id,
+                "gamma_url": gamma_url,
+            }
 
-        logger.info("Gamma downloading export | generationId=%s", gen_id)
-        dl = await client.get(export_url, headers=headers, timeout=120.0)
-        dl.raise_for_status()
-        logger.info("Gamma export downloaded | generationId=%s bytes=%s", gen_id, len(dl.content))
+        logger.info("Gamma link-only mode | generationId=%s", gen_id)
         return {
-            "ppt_bytes": dl.content,
+            "ppt_bytes": b"",
             "generation_id": gen_id,
             "gamma_url": gamma_url,
         }

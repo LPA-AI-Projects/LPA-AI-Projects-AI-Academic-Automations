@@ -4,11 +4,10 @@ import json
 from urllib.parse import parse_qs
 from typing import Optional
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 import asyncio
 from asyncio import wait_for, TimeoutError as AsyncTimeoutError
@@ -24,12 +23,16 @@ from app.schemas.course import (
     CourseVersionsResponse,
     VersionSummary,
 )
-from app.schemas.job import JobQueuedResponse, JobResponse
+from app.schemas.job import CourseOutlineJobResponse, CourseOutlineQueuedResponse
 from app.models.course import Course, CourseVersion
 from app.models.job import CourseJob
 from app.services.claude import ClaudeService
 from app.services.pdf_service import generate_pdf_path_async
-from app.services.zoho_crm import maybe_attach_course_pdf
+from app.services.google_drive import GoogleDriveUploadError, upload_course_outline_pdf_to_drive
+from app.services.zoho_integration import (
+    zoho_notify_course_outline_job_finished,
+    zoho_notify_refined_outline_version,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,74 +56,14 @@ def verify_api_key(
 auth = Depends(verify_api_key)
 
 
-def _job_google_file_id(job: CourseJob) -> str | None:
-    try:
-        payload = json.loads(getattr(job, "payload_json", "") or "{}")
-        if isinstance(payload, dict):
-            val = payload.get("google_file_id")
-            if isinstance(val, str) and val.strip():
-                return val.strip()
-    except Exception:
-        return None
-    return None
-
-
-def _job_google_batch_links(job: CourseJob) -> list[str] | None:
-    try:
-        payload = json.loads(getattr(job, "payload_json", "") or "{}")
-        if not isinstance(payload, dict):
-            return None
-        links = payload.get("google_batch_links")
-        if not isinstance(links, list):
-            return None
-        cleaned = [str(x).strip() for x in links if str(x).strip()]
-        return cleaned or None
-    except Exception:
-        return None
-
-
-def _job_gamma_batch_links(job: CourseJob) -> list[str] | None:
-    try:
-        payload = json.loads(getattr(job, "payload_json", "") or "{}")
-        if not isinstance(payload, dict):
-            return None
-        links = payload.get("gamma_batch_links")
-        if not isinstance(links, list):
-            return None
-        cleaned = [str(x).strip() for x in links if str(x).strip()]
-        return cleaned or None
-    except Exception:
-        return None
-
-
-def _job_google_drive_course_folder_link(job: CourseJob) -> str | None:
-    try:
-        payload = json.loads(getattr(job, "payload_json", "") or "{}")
-        if not isinstance(payload, dict):
-            return None
-        val = payload.get("google_drive_course_folder_link")
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-    except Exception:
-        return None
-    return None
-
-
-def _job_to_response(job: CourseJob) -> JobResponse:
-    return JobResponse(
+def _job_to_course_outline_response(job: CourseJob) -> CourseOutlineJobResponse:
+    return CourseOutlineJobResponse(
         job_id=job.id,
         zoho_record_id=job.zoho_record_id,
-        job_type=getattr(job, "job_type", None),
         status=job.status,
         pdf_url=job.pdf_url,
-        ppt_url=getattr(job, "ppt_url", None),
-        google_file_id=_job_google_file_id(job),
-        google_batch_links=_job_google_batch_links(job),
-        google_drive_course_folder_link=_job_google_drive_course_folder_link(job),
-        gamma_batch_links=_job_gamma_batch_links(job),
-        error=job.error,
-        course_id=job.course_id,
         version_number=job.version_number,
+        error=job.error,
         created_at=job.created_at,
     )
 
@@ -248,73 +191,6 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
         raise HTTPException(status_code=422, detail="Payload validation failed for /courses.")
 
 
-def _zoho_callback_url_is_placeholder(url: str) -> bool:
-    u = (url or "").strip().lower()
-    if not u:
-        return True
-    # README / template placeholders — never resolve in DNS
-    return any(
-        x in u
-        for x in (
-            "example.com",
-            "your-zoho",
-            "your-api-domain",
-            "callback-endpoint.example",
-            "localhost",
-        )
-    )
-
-
-async def _post_zoho_callback(job: CourseJob, course_id: uuid.UUID | None, version_number: int | None) -> None:
-    if not settings.ZOHO_CALLBACK_URL or _zoho_callback_url_is_placeholder(settings.ZOHO_CALLBACK_URL):
-        logger.info(
-            "Zoho callback skipped: ZOHO_CALLBACK_URL not set or is placeholder | job_id=%s",
-            str(job.id),
-        )
-        return
-    # Note: this sends metadata + public pdf_url only — not the PDF bytes. For CRM attachment on
-    # the record, enable ZOHO_ATTACH_PDF_LINK_TO_CRM + OAuth, or download pdf_url inside Zoho.
-    raw_fields = {
-        "job_id": str(job.id),
-        "zoho_record_id": job.zoho_record_id,
-        "status": job.status,
-        "pdf_url": job.pdf_url,
-        "course_id": str(course_id) if course_id else None,
-        "version_number": version_number,
-        "error": job.error,
-    }
-    fmt = (settings.ZOHO_CALLBACK_BODY_FORMAT or "json").strip().lower()
-    try:
-        logger.info(
-            "Posting Zoho callback | job_id=%s format=%s status=%s",
-            str(job.id),
-            fmt,
-            job.status,
-        )
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            if fmt == "form":
-                form_data = {
-                    k: ("" if v is None else str(v)) for k, v in raw_fields.items()
-                }
-                response = await client.post(settings.ZOHO_CALLBACK_URL, data=form_data)
-            else:
-                json_body = {k: v for k, v in raw_fields.items() if v is not None}
-                response = await client.post(settings.ZOHO_CALLBACK_URL, json=json_body)
-            logger.info(
-                "Zoho callback response | job_id=%s status_code=%s",
-                str(job.id),
-                response.status_code,
-            )
-            if response.status_code >= 400:
-                logger.warning(
-                    "Zoho callback rejected | job_id=%s body=%s",
-                    str(job.id),
-                    (response.text or "")[:2000],
-                )
-    except Exception:
-        logger.exception("Zoho callback failed | job_id=%s", str(job.id))
-
-
 async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data: dict) -> None:
     async with AsyncSessionLocal() as db:
         job: CourseJob | None = None
@@ -359,7 +235,9 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 outline_payload = None
                 logger.info("AI fallback output completed | job_id=%s", str(job_id))
 
+            pdf_path: str | None = None
             pdf_url = None
+            course_title = str((input_data or {}).get("course_name") or "").strip() or "course"
             try:
                 logger.info("PDF generation started | job_id=%s", str(job_id))
                 pdf_path = await generate_pdf_path_async(outline_payload if outline_payload is not None else outline)
@@ -367,6 +245,31 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 logger.info("PDF generation completed | job_id=%s pdf_url=%s", str(job_id), pdf_url)
             except RuntimeError as e:
                 logger.warning("PDF generation failed in job | job_id=%s error=%s", str(job_id), str(e))
+
+            if pdf_path and os.path.isfile(pdf_path):
+                try:
+                    drive_up = await asyncio.to_thread(
+                        upload_course_outline_pdf_to_drive,
+                        pdf_path,
+                        course_name=course_title,
+                        zoho_record_id=zoho_record_id,
+                        version_number=1,
+                    )
+                    if drive_up and isinstance(drive_up.get("edit_link"), str) and drive_up["edit_link"].strip():
+                        pdf_url = drive_up["edit_link"].strip()
+                        logger.info(
+                            "Course outline PDF uploaded to Drive | job_id=%s url=%s",
+                            str(job_id),
+                            pdf_url,
+                        )
+                except GoogleDriveUploadError as e:
+                    logger.warning(
+                        "Google Drive outline upload failed; keeping local pdf_url | job_id=%s error=%s",
+                        str(job_id),
+                        str(e),
+                    )
+                except Exception:
+                    logger.exception("Google Drive outline upload failed | job_id=%s", str(job_id))
 
             async with db.begin():
                 logger.info("Persisting course + version | job_id=%s", str(job_id))
@@ -401,19 +304,21 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 created_version_number,
                 pdf_url,
             )
-            course_title = str((input_data or {}).get("course_name") or "").strip() or "Course outline"
-            await maybe_attach_course_pdf(
-                zoho_record_id=zoho_record_id,
-                pdf_url=pdf_url,
-                course_name_for_title=f"{course_title} — outline",
+            await zoho_notify_course_outline_job_finished(
+                job,
+                created_version_number,
+                attach_course_title=f"{course_title} — outline",
             )
-            await _post_zoho_callback(job, created_course_id, created_version_number)
         except Exception as e:
             if job is not None:
                 job.status = "failed"
                 job.error = str(e)[:4000]
                 await db.commit()
-                await _post_zoho_callback(job, created_course_id, created_version_number)
+                await zoho_notify_course_outline_job_finished(
+                    job,
+                    created_version_number,
+                    attach_course_title=None,
+                )
             logger.exception(
                 "Background job failed | job_id=%s zoho_record_id=%s course_id=%s",
                 str(job_id),
@@ -428,6 +333,13 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
     "/courses",
     dependencies=[auth],
     summary="Create course job (async 202, or sync 200 with full result)",
+    description=(
+        "After a 202 response, poll GET /api/v1/courses/{zoho_record_id}/outline-job. "
+        "When the job completes, optional Zoho integration runs if configured: "
+        "(1) ZOHO_CALLBACK_URL — HTTP POST to your URL with job_id, zoho_record_id, status, pdf_url, version_number; "
+        "(2) ZOHO_ATTACH_PDF_LINK_TO_CRM=true — attaches PDF link to the CRM record via API. "
+        "Neither runs automatically unless those env vars are set."
+    ),
 )
 async def generate_course(
     request: Request,
@@ -437,9 +349,9 @@ async def generate_course(
         False,
         description=(
             "If true: wait for AI+PDF to finish and return full JSON in this response (HTTP 200). "
-            "Use when the caller (e.g. Zoho) must receive pdf_url/course_id in one shot — "
+            "Use when the caller (e.g. Zoho) must receive pdf_url in one shot — "
             "request may take several minutes and can time out. "
-            "If false (default): return only job_id + zoho_record_id (HTTP 202); poll GET /jobs/{job_id}."
+            "If false (default): HTTP 202 with job_id, status, and polling URL; poll GET /api/v1/courses/{zoho_record_id}/outline-job."
         ),
     ),
 ):
@@ -475,12 +387,21 @@ async def generate_course(
         logger.info("Sync course generation finished | job_id=%s status=%s", job.id, job_done.status)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content=_job_to_response(job_done).model_dump(mode="json"),
+            content=_job_to_course_outline_response(job_done).model_dump(mode="json"),
         )
 
     background_tasks.add_task(process_course_job, job.id, req.zoho_record_id, req.input_data)
     logger.info("Background task scheduled | job_id=%s", str(job.id))
-    body = JobQueuedResponse(job_id=job.id, zoho_record_id=req.zoho_record_id)
+    rid = req.zoho_record_id
+    body = CourseOutlineQueuedResponse(
+        job_id=job.id,
+        zoho_record_id=rid,
+        status=job.status,
+        message="Course outline generation queued.",
+        polling={
+            "by_zoho_record_id": f"/api/v1/courses/{rid}/outline-job",
+        },
+    )
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content=body.model_dump(mode="json"),
@@ -488,23 +409,34 @@ async def generate_course(
 
 
 @router.post(
-    "/courses/{course_id}/refine",
+    "/courses/{zoho_record_id}/refine",
     response_model=CourseVersionResponse,
     dependencies=[auth],
-    summary="Refine a course outline with feedback",
+    summary="Refine a course outline with feedback (keyed by Zoho CRM record id)",
 )
 async def refine_course(
-    course_id: str,
+    zoho_record_id: str,
     req: RefineCourseRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    # Validate UUID
-    try:
-        course_uuid = uuid.UUID(course_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid course_id format.")
+    rid = (zoho_record_id or "").strip()
+    if not rid:
+        raise HTTPException(status_code=422, detail="zoho_record_id is required.")
 
-    logger.info("Refine requested | course_id=%s", course_id)
+    logger.info("Refine requested | zoho_record_id=%s", rid)
+
+    try:
+        cres = await db.execute(select(Course).where(Course.zoho_record_id == rid))
+        course = cres.scalars().first()
+    except (SQLAlchemyError, OSError, Exception):
+        logger.exception("Database error while reading course")
+        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+
+    if not course:
+        logger.warning("Refine failed: course not found | zoho_record_id=%s", rid)
+        raise HTTPException(status_code=404, detail="Course not found for this zoho_record_id.")
+
+    course_uuid = course.id
 
     # Fetch latest version (read-only; do not hold locks during AI call)
     try:
@@ -519,8 +451,8 @@ async def refine_course(
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
     if not last_version:
-        logger.warning("Refine failed: course not found | course_id=%s", course_id)
-        raise HTTPException(status_code=404, detail="Course not found.")
+        logger.warning("Refine failed: no versions | zoho_record_id=%s", rid)
+        raise HTTPException(status_code=404, detail="No outline versions found for this course.")
 
     # Close out the implicit transaction opened by the SELECT so we don't hold it
     # during the long-running AI call (and to avoid "transaction already begun").
@@ -531,15 +463,15 @@ async def refine_course(
     try:
         ai = ClaudeService()
         try:
-            logger.info("Refine AI started with structured mode | course_id=%s", course_id)
+            logger.info("Refine AI started with structured mode | zoho_record_id=%s", rid)
             refined_payload = await wait_for(
                 ai.refine_course_outline_json(base_outline, req.feedback),
                 timeout=310,
             )
             updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
-            logger.info("Refine AI structured mode completed | course_id=%s", course_id)
+            logger.info("Refine AI structured mode completed | zoho_record_id=%s", rid)
         except RuntimeError:
-            logger.warning("Refine AI structured mode failed, using fallback | course_id=%s", course_id)
+            logger.warning("Refine AI structured mode failed, using fallback | zoho_record_id=%s", rid)
             context_text = json.dumps(
                 {
                     "previous_outline": base_outline,
@@ -553,27 +485,30 @@ async def refine_course(
                 timeout=310,
             )
             refined_payload = None
-            logger.info("Refine AI fallback completed | course_id=%s", course_id)
+            logger.info("Refine AI fallback completed | zoho_record_id=%s", rid)
     except AsyncTimeoutError:
-        logger.warning("AI refine timed out for course_id=%s", course_id)
+        logger.warning("AI refine timed out for zoho_record_id=%s", rid)
         raise HTTPException(status_code=504, detail="AI service timed out.")
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
-        logger.warning("AI refine failed for course_id=%s error=%s", course_id, str(e))
+        logger.warning("AI refine failed for zoho_record_id=%s error=%s", rid, str(e))
         raise HTTPException(status_code=502, detail="AI service failed. Please retry.")
 
+    name_for_file = (req.course_name or "").strip() or "course"
+
     # Generate PDF off the event loop
+    pdf_path: str | None = None
     pdf_url = None
     try:
-        logger.info("Refine PDF generation started | course_id=%s", course_id)
+        logger.info("Refine PDF generation started | zoho_record_id=%s", rid)
         pdf_path = await generate_pdf_path_async(refined_payload if "refined_payload" in locals() and refined_payload is not None else updated_outline)
         pdf_url = _build_pdf_url(pdf_path)
-        logger.info("Refine PDF generation completed | course_id=%s pdf_url=%s", course_id, pdf_url)
+        logger.info("Refine PDF generation completed | zoho_record_id=%s pdf_url=%s", rid, pdf_url)
     except RuntimeError as e:
         logger.warning(
-            "PDF generation unavailable; continuing without PDF | course_id=%s error=%s",
-            course_id,
+            "PDF generation unavailable; continuing without PDF | zoho_record_id=%s error=%s",
+            rid,
             str(e),
         )
 
@@ -608,11 +543,48 @@ async def refine_course(
         logger.exception("Database error while saving refined version")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
-    logger.info(f"Course refined: course_id={course_id} version={new_version_number}")
+    if pdf_path and os.path.isfile(pdf_path):
+        try:
+            drive_up = await asyncio.to_thread(
+                upload_course_outline_pdf_to_drive,
+                pdf_path,
+                course_name=name_for_file,
+                zoho_record_id=rid,
+                version_number=new_version.version_number,
+            )
+            if drive_up and isinstance(drive_up.get("edit_link"), str) and drive_up["edit_link"].strip():
+                new_version.pdf_url = drive_up["edit_link"].strip()
+                await db.commit()
+                await db.refresh(new_version)
+                logger.info(
+                    "Refine: outline PDF uploaded to Drive | zoho_record_id=%s url=%s",
+                    rid,
+                    new_version.pdf_url,
+                )
+        except GoogleDriveUploadError as e:
+            logger.warning(
+                "Refine: Google Drive upload failed; keeping local pdf_url | zoho_record_id=%s error=%s",
+                rid,
+                str(e),
+            )
+        except Exception:
+            logger.exception("Refine: Google Drive upload failed | zoho_record_id=%s", rid)
+
+    try:
+        await zoho_notify_refined_outline_version(
+            zoho_record_id=rid,
+            pdf_url=new_version.pdf_url,
+            version_number=new_version.version_number,
+            course_name_for_title=f"{name_for_file} — outline v{new_version.version_number}",
+        )
+    except Exception:
+        logger.exception("Refine: Zoho notify skipped due to error | zoho_record_id=%s", rid)
+
+    logger.info("Course refined | zoho_record_id=%s version=%s", rid, new_version_number)
 
     return CourseVersionResponse(
         version_id=new_version.id,
-        course_id=course_uuid,
+        zoho_record_id=rid,
         version_number=new_version.version_number,
         pdf_url=new_version.pdf_url,
         outline=new_version.outline_text,
@@ -621,30 +593,29 @@ async def refine_course(
 
 
 @router.get(
-    "/courses/{course_id}/versions",
+    "/courses/{zoho_record_id}/versions",
     response_model=CourseVersionsResponse,
     dependencies=[auth],
-    summary="List all versions of a course",
+    summary="List all versions of a course (by Zoho CRM record id)",
 )
 async def list_versions(
-    course_id: str,
+    zoho_record_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info("List versions requested | course_id=%s", course_id)
-    try:
-        course_uuid = uuid.UUID(course_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid course_id format.")
+    rid = (zoho_record_id or "").strip()
+    logger.info("List versions requested | zoho_record_id=%s", rid)
 
     # Fetch course
     try:
-        result = await db.execute(select(Course).where(Course.id == course_uuid))
+        result = await db.execute(select(Course).where(Course.zoho_record_id == rid))
         course = result.scalars().first()
     except (SQLAlchemyError, OSError, Exception):
         logger.exception("Database error while reading course")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
     if not course:
-        raise HTTPException(status_code=404, detail="Course not found.")
+        raise HTTPException(status_code=404, detail="Course not found for this zoho_record_id.")
+
+    course_uuid = course.id
 
     # Fetch versions
     try:
@@ -659,7 +630,6 @@ async def list_versions(
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
     return CourseVersionsResponse(
-        course_id=course.id,
         zoho_record_id=course.zoho_record_id,
         versions=[
             VersionSummary(
@@ -675,21 +645,29 @@ async def list_versions(
 
 
 @router.get(
-    "/courses/{course_id}/versions/{version_number}",
+    "/courses/{zoho_record_id}/versions/{version_number}",
     response_model=CourseVersionResponse,
     dependencies=[auth],
-    summary="Get a specific version of a course",
+    summary="Get a specific version of a course (by Zoho CRM record id)",
 )
 async def get_version(
-    course_id: str,
+    zoho_record_id: str,
     version_number: int,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info("Get version requested | course_id=%s version=%s", course_id, version_number)
+    rid = (zoho_record_id or "").strip()
+    logger.info("Get version requested | zoho_record_id=%s version=%s", rid, version_number)
+
     try:
-        course_uuid = uuid.UUID(course_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid course_id format.")
+        cres = await db.execute(select(Course).where(Course.zoho_record_id == rid))
+        course = cres.scalars().first()
+    except (SQLAlchemyError, OSError, Exception):
+        logger.exception("Database error while reading course")
+        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found for this zoho_record_id.")
+
+    course_uuid = course.id
 
     try:
         result = await db.execute(
@@ -709,7 +687,7 @@ async def get_version(
 
     return CourseVersionResponse(
         version_id=version.id,
-        course_id=course_uuid,
+        zoho_record_id=rid,
         version_number=version.version_number,
         pdf_url=version.pdf_url,
         outline=version.outline_text,
@@ -734,32 +712,37 @@ async def health():
 
 
 @router.get(
-    "/jobs/{job_id}",
-    response_model=JobResponse,
+    "/courses/{zoho_record_id}/outline-job",
     dependencies=[auth],
-    summary="Get async job status",
+    summary="Latest course-outline generation job by Zoho record id (excludes slides jobs)",
 )
-async def get_job_status(
-    job_id: str,
+async def get_latest_course_outline_job(
+    zoho_record_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info("Job status requested | job_id=%s", job_id)
+    rid = (zoho_record_id or "").strip()
+    if not rid:
+        raise HTTPException(status_code=422, detail="zoho_record_id is required.")
     try:
-        job_uuid = uuid.UUID(job_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid job_id format.")
-
-    try:
-        result = await db.execute(select(CourseJob).where(CourseJob.id == job_uuid))
+        result = await db.execute(
+            select(CourseJob)
+            .where(
+                CourseJob.zoho_record_id == rid,
+                or_(CourseJob.job_type.is_(None), CourseJob.job_type != "slides"),
+            )
+            .order_by(CourseJob.created_at.desc())
+        )
         job = result.scalars().first()
     except Exception:
-        logger.exception("Database error while reading job")
+        logger.exception("Database error while reading latest course outline job")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
-
     if not job:
-        logger.warning("Job status lookup failed: not found | job_id=%s", job_id)
-        raise HTTPException(status_code=404, detail="Job not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="No course outline job found for this zoho_record_id.",
+        )
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=_job_to_course_outline_response(job).model_dump(mode="json"),
+    )
 
-    logger.info("Job status response | job_id=%s status=%s", job_id, job.status)
-
-    return _job_to_response(job)

@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
-    # Claude (Anthropic)
+    # LLM routing: "anthropic" = Claude (ANTHROPIC_*), "openai" = OpenAI Chat (OPENAI_*)
     AI_PROVIDER: str = "anthropic"
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REFRESH_TOKEN: str = ""
     GOOGLE_DRIVE_FOLDER_ID: str = ""
+    # Optional. If empty, course outlines go under My Drive root: ai_automation/course_outline/...
+    # If set, that folder is the parent (same hierarchy underneath).
+    GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -66,6 +69,28 @@ class Settings(BaseSettings):
     @classmethod
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
+
+    @field_validator("AI_PROVIDER", mode="before")
+    @classmethod
+    def normalize_ai_provider(cls, value: object) -> str:
+        """anthropic → Claude API; openai → OpenAI Chat Completions. Accepts a few aliases."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return "anthropic"
+        s = str(value).strip().lower()
+        aliases: dict[str, str] = {
+            "anthropic": "anthropic",
+            "claude": "anthropic",
+            "antropic": "anthropic",  # common typo
+            "openai": "openai",
+            "chatgpt": "openai",
+        }
+        out = aliases.get(s, s)
+        if out not in ("anthropic", "openai"):
+            raise ValueError(
+                "AI_PROVIDER must be 'anthropic' (Claude) or 'openai' (OpenAI). "
+                f"Received: {value!r}"
+            )
+        return out
 
     @field_validator("ANTHROPIC_BASE_URL")
     @classmethod

@@ -10,12 +10,13 @@ from html import escape
 from pathlib import Path
 from typing import Iterable
 
+from app.core.storage_paths import pdfs_dir
 from app.schemas.outline_payload import CourseOutlinePayload
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-OUTPUT_DIR = "generated_pdfs"
+OUTPUT_DIR = pdfs_dir()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"

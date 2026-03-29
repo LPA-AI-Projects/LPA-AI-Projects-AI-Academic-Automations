@@ -31,11 +31,16 @@ class GenerateCourseRequest(BaseModel):
 
 class RefineCourseRequest(BaseModel):
     feedback: str = Field(..., min_length=10, description="Feedback for refinement")
+    course_name: Optional[str] = Field(
+        None,
+        description="Optional display name for Drive file naming (defaults to a safe name if omitted).",
+    )
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "feedback": "Please add more practical exercises and reduce theory sections."
+                "feedback": "Please add more practical exercises and reduce theory sections.",
+                "course_name": "My Course Title",
             }
         }
     }
@@ -45,7 +50,7 @@ class RefineCourseRequest(BaseModel):
 
 class CourseVersionResponse(BaseModel):
     version_id: uuid.UUID
-    course_id: uuid.UUID
+    zoho_record_id: str
     version_number: int
     pdf_url: Optional[str]
     outline: str
@@ -65,6 +70,5 @@ class VersionSummary(BaseModel):
 
 
 class CourseVersionsResponse(BaseModel):
-    course_id: uuid.UUID
     zoho_record_id: str
     versions: list[VersionSummary]

@@ -2,6 +2,12 @@
 
 All Academic Operations
 
+## Layout
+
+- `app/` — FastAPI application (API, services, models)
+- `scripts/` — optional local utilities (not required at runtime)
+- `storage/` — generated PDFs, slide cache, and uploads (created on startup; gitignored). Override with `COURSE_AI_STORAGE_ROOT`.
+
 ## Docker Setup (Dev/Prod)
 
 ### 1) Local development (API + Postgres)
@@ -53,13 +59,16 @@ Health check endpoint: `/api/v1/health`
 ### 4) Important production notes
 
 - Railway provides dynamic `PORT`; container is already configured for it.
-- `generated_pdfs/` on Railway is ephemeral storage. Files can disappear on restart.
-- For production-grade persistence, store PDFs in object storage (S3/R2/GCS) and save the URL in DB.
+- Runtime files live under `storage/` (`storage/pdfs`, `storage/ppts`, `storage/uploads`). On Railway this volume is still ephemeral unless you attach persistent storage or use object storage (S3/R2/GCS).
+- Optional: set `COURSE_AI_STORAGE_ROOT` to point uploads/PDFs elsewhere.
 
-## Job API shape
+## Job API shape (course outline)
 
-- **Default** `POST /api/v1/courses` → **202** with only `{ "job_id", "zoho_record_id" }` (no `"processing"`). Poll `GET /api/v1/jobs/{job_id}` for the full object (`status`, `pdf_url`, `course_id`, …).
-- **Synchronous** `POST /api/v1/courses?sync=true` → **200** with the **full** result in one response (same shape as when the job is done). The request **waits** until AI + PDF finish (often **minutes**); many systems (including Zoho) **may time out**. Prefer async + poll, or use CRM attach below.
+- **Default** `POST /api/v1/courses` → **202** with `job_id`, `zoho_record_id`, `status`, `message`, and `polling.by_zoho_record_id` → `GET /api/v1/courses/{zoho_record_id}/outline-job` (slim JSON: no Gamma/slides fields).
+- **Poll** `GET /api/v1/courses/{zoho_record_id}/outline-job` (slim JSON for outline jobs).
+- **Synchronous** `POST /api/v1/courses?sync=true` → **200** when AI + PDF finish (same slim shape as outline job). May time out from Zoho; prefer async + poll.
+
+**Slides** (separate): `POST /api/v1/slides/` then `GET /api/v1/slides/{zoho_record_id}` for `module_gamma_links`, etc.
 
 ## Zoho CRM V8 — OAuth + attach PDF link (optional)
 

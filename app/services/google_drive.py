@@ -276,3 +276,124 @@ def merge_google_slides_via_apps_script(presentation_ids: list[str]) -> dict[str
     logger.info("Apps Script merge success | merged_file_id=%s", merged_file_id)
     return {"file_id": merged_file_id, "edit_link": merged_link}
 
+
+def upload_pdf_bytes_to_google_drive(
+    file_bytes: bytes,
+    filename: str,
+    *,
+    parent_folder_id: str | None = None,
+) -> dict[str, Any]:
+    """Upload a PDF to Drive with resumable upload; anyone can view (link usable for Zoho)."""
+    if not file_bytes:
+        raise GoogleDriveUploadError("Cannot upload empty PDF bytes to Google Drive.")
+
+    access_token = _get_access_token()
+    headers = {"Authorization": f"Bearer {access_token}"}
+    metadata: dict[str, Any] = {
+        "name": _sanitize_drive_name(filename),
+        "mimeType": "application/pdf",
+    }
+    if parent_folder_id:
+        metadata["parents"] = [parent_folder_id]
+    upload_headers = {
+        **headers,
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Type": "application/pdf",
+        "X-Upload-Content-Length": str(len(file_bytes)),
+    }
+    with httpx.Client(timeout=120.0) as client:
+        start_resp = client.post(
+            GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL,
+            headers=upload_headers,
+            json=metadata,
+        )
+    if start_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive PDF resumable init failed: HTTP {start_resp.status_code} body={(start_resp.text or '')[:2000]}"
+        )
+    resumable_url = (start_resp.headers.get("Location") or "").strip()
+    if not resumable_url:
+        raise GoogleDriveUploadError("Google Drive resumable init succeeded but Location header was missing.")
+
+    with httpx.Client(timeout=300.0) as client:
+        upload_resp = client.put(
+            resumable_url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/pdf",
+            },
+            content=file_bytes,
+        )
+    if upload_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive PDF upload failed: HTTP {upload_resp.status_code} body={(upload_resp.text or '')[:2000]}"
+        )
+    uploaded = upload_resp.json() if upload_resp.content else {}
+    file_id = uploaded.get("id")
+    if not isinstance(file_id, str) or not file_id:
+        raise GoogleDriveUploadError("Google Drive PDF upload succeeded but file id was missing.")
+    _set_public_edit_permission(file_id, access_token)
+    view_link = f"https://drive.google.com/file/d/{file_id}/view"
+    logger.info("Google Drive PDF upload success | file_id=%s filename=%s", file_id, filename)
+    return {"file_id": file_id, "edit_link": view_link}
+
+
+# Fixed hierarchy under parent: ai_automation / course_outline / {course}_{zoho} / files
+_DRIVE_AI_AUTOMATION = "ai_automation"
+_DRIVE_COURSE_OUTLINE = "course_outline"
+# Google Drive API: use parent id "root" for the authenticated user's My Drive root (no env folder required).
+_DRIVE_MY_DRIVE_ROOT_ID = "root"
+
+
+def _resolve_course_outline_parent_folder_id() -> str:
+    """Explicit folder from env, or My Drive root so folders are created under root like exist_ok."""
+    explicit = (
+        str(getattr(settings, "GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID", "") or "").strip()
+        or str(getattr(settings, "GOOGLE_DRIVE_FOLDER_ID", "") or "").strip()
+        or (os.getenv("GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID") or "").strip()
+        or (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+    )
+    if explicit:
+        return explicit
+    return _DRIVE_MY_DRIVE_ROOT_ID
+
+
+def upload_course_outline_pdf_to_drive(
+    pdf_path: str,
+    *,
+    course_name: str,
+    zoho_record_id: str,
+    version_number: int,
+) -> dict[str, Any]:
+    """
+    Under GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID or GOOGLE_DRIVE_FOLDER_ID (if set), or else
+    under **My Drive root**, ensure:
+
+    ``{parent}/ai_automation/course_outline/{course_name}_{zoho_record_id}/``
+
+    Each folder is created only if missing (reuse by name under the same parent). Then upload
+    ``{course_name}_v{n}.pdf``. Requires Google OAuth (client id, secret, refresh token).
+    """
+    parent = _resolve_course_outline_parent_folder_id()
+    if parent == _DRIVE_MY_DRIVE_ROOT_ID:
+        logger.info(
+            "Google Drive course outline: no GOOGLE_DRIVE_* parent set; using My Drive root (parent id=root)"
+        )
+    path = Path(pdf_path)
+    if not path.exists() or not path.is_file():
+        raise GoogleDriveUploadError(f"PDF not found: {pdf_path}")
+
+    safe_course = _sanitize_drive_name(course_name or "course")
+    safe_zoho = _sanitize_drive_name(zoho_record_id or "zoho")
+    per_course_name = f"{safe_course}_{safe_zoho}"
+
+    ai_folder = ensure_drive_folder(_DRIVE_AI_AUTOMATION, parent_folder_id=parent)
+    outline_folder = ensure_drive_folder(_DRIVE_COURSE_OUTLINE, parent_folder_id=ai_folder["folder_id"])
+    course_folder = ensure_drive_folder(per_course_name, parent_folder_id=outline_folder["folder_id"])
+    folder_id = course_folder["folder_id"]
+
+    filename = f"{safe_course}_v{int(version_number)}.pdf"
+    with path.open("rb") as fh:
+        data = fh.read()
+    return upload_pdf_bytes_to_google_drive(data, filename, parent_folder_id=folder_id)
+
