@@ -594,17 +594,31 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
 
     def estimate_row_height(rec: dict[str, list[str] | str]) -> int:
         """
-        Estimate row height from content volume so we can break before clipping.
-        This avoids cut-off bottom rows when text is long.
+        Conservative row-height estimate so rows move to next page before clipping.
+        We intentionally over-estimate to avoid bottom cut-offs in generated PDFs.
         """
         name = str(rec.get("name", ""))
         topics = rec.get("topics", [])
         exercises = rec.get("exercises", [])
-        t_count = len(topics if isinstance(topics, list) else [])
-        e_count = len(exercises if isinstance(exercises, list) else [])
-        text_weight = len(name) // 16
-        # Base + per bullet + light text penalty
-        return 82 + (t_count * 18) + (e_count * 18) + (text_weight * 3)
+        topics_list = topics if isinstance(topics, list) else []
+        exercises_list = exercises if isinstance(exercises, list) else []
+
+        # Approx wrapped line count by character length
+        def line_units(text: str, chars_per_line: int = 34) -> int:
+            t = str(text or "").strip()
+            if not t:
+                return 0
+            return max(1, (len(t) + chars_per_line - 1) // chars_per_line)
+
+        units = 0
+        units += line_units(name, 18)  # module column is narrower
+        for t in topics_list:
+            units += line_units(str(t), 34) + 1  # +1 bullet padding
+        for e in exercises_list:
+            units += line_units(str(e), 34) + 1
+
+        # Strongly conservative baseline + per-line height
+        return 96 + (units * 13)
 
     def render_rows(chunk: list[dict[str, list[str] | str]], base_idx: int) -> str:
         rows: list[str] = []
