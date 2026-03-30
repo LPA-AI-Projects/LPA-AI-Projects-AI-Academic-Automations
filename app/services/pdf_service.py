@@ -284,10 +284,10 @@ def _build_cover_title_html(title: str) -> str:
     else:
         size_px = 44
     return (
-        f'<span style="display:block;font-size:{size_px}px;line-height:1.05;'
-        'letter-spacing:-0.5px;">'
+        f'<span style="display:inline-block;font-size:{size_px}px;line-height:1.05;'
+        'letter-spacing:-0.5px;white-space:normal;overflow-wrap:anywhere;">'
         f"{safe_title}"
-        "</span>"
+        '</span><span class="dot"></span>'
     )
 
 
@@ -305,15 +305,9 @@ def _build_cover_title_text(raw_title: str) -> str:
     # Remove bracketed suffix from title line; keep it for subtitle if needed.
     base_no_brackets = re.sub(r"\s*\([^)]*\)\s*", " ", base).strip()
 
-    # If title is very long, trim generic training words first.
-    if len(base_no_brackets) > 36:
-        words = base_no_brackets.split()
-        ignore = {"certification", "preparation", "program", "training", "course", "outline"}
-        compact = [w for w in words if w.lower() not in ignore]
-        if len(compact) >= 2:
-            base_no_brackets = " ".join(compact[:4]).strip()
-        else:
-            base_no_brackets = " ".join(words[:4]).strip()
+    # Keep full meaningful title; only trim overly long strings for layout safety.
+    if len(base_no_brackets) > 96:
+        base_no_brackets = base_no_brackets[:96].rstrip()
 
     return base_no_brackets or "COURSE OUTLINE"
 
@@ -578,7 +572,22 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
     if not records:
         return ""
     pages: list[str] = []
-    rows_per_page = 3
+    usable_height = 800
+    thead_height = 42
+
+    def estimate_row_height(rec: dict[str, list[str] | str]) -> int:
+        """
+        Estimate row height from content volume so we can break before clipping.
+        This avoids cut-off bottom rows when text is long.
+        """
+        name = str(rec.get("name", ""))
+        topics = rec.get("topics", [])
+        exercises = rec.get("exercises", [])
+        t_count = len(topics if isinstance(topics, list) else [])
+        e_count = len(exercises if isinstance(exercises, list) else [])
+        text_weight = len(name) // 16
+        # Base + per bullet + light text penalty
+        return 82 + (t_count * 18) + (e_count * 18) + (text_weight * 3)
 
     def render_rows(chunk: list[dict[str, list[str] | str]], base_idx: int) -> str:
         rows: list[str] = []
@@ -606,9 +615,15 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
         return "".join(rows)
 
     page_number = 5
-    for start in range(0, len(records), rows_per_page):
-        chunk = records[start : start + rows_per_page]
-        rows_html = render_rows(chunk, start + 1)
+    current_chunk: list[dict[str, list[str] | str]] = []
+    current_start_idx = 1
+    used_height = thead_height
+
+    def flush_chunk(chunk: list[dict[str, list[str] | str]], start_idx: int) -> None:
+        nonlocal page_number
+        if not chunk:
+            return
+        rows_html = render_rows(chunk, start_idx)
         pages.append(
             '<section class="page page-fixed bg-modules">'
             '<div class="modules-wrap"><table class="mod-table"><thead><tr>'
@@ -618,6 +633,19 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
             + f'</tbody></table></div><div class="page-num-overlay">Page {page_number:02d}</div></section>'
         )
         page_number += 1
+
+    for idx, rec in enumerate(records, start=1):
+        row_h = estimate_row_height(rec)
+        if current_chunk and (used_height + row_h > usable_height):
+            flush_chunk(current_chunk, current_start_idx)
+            current_chunk = []
+            current_start_idx = idx
+            used_height = thead_height
+
+        current_chunk.append(rec)
+        used_height += row_h
+
+    flush_chunk(current_chunk, current_start_idx)
 
     return "".join(pages)
 
