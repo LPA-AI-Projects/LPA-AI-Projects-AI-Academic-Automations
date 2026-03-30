@@ -421,6 +421,63 @@ def _resolve_course_outline_parent_folder_id() -> str:
     return _DRIVE_MY_DRIVE_ROOT_ID
 
 
+def _find_existing_outline_course_folder_by_zoho(
+    *,
+    parent_outline_folder_id: str,
+    safe_zoho: str,
+) -> dict[str, str] | None:
+    """
+    Reuse an existing outline folder for the same Zoho record id.
+    Matches folders named like: "{any_prefix}_{safe_zoho}" under course_outline parent.
+    """
+    access_token = _get_access_token()
+    headers = {"Authorization": f"Bearer {access_token}"}
+    suffix = f"_{safe_zoho}"
+    suffix_q = suffix.replace("'", "\\'")
+    q_parts = [
+        "mimeType = 'application/vnd.google-apps.folder'",
+        "trashed = false",
+        f"'{parent_outline_folder_id}' in parents",
+        f"name contains '{suffix_q}'",
+    ]
+    query = " and ".join(q_parts)
+
+    with httpx.Client(timeout=30.0) as client:
+        search_resp = client.get(
+            GOOGLE_DRIVE_FILES_URL,
+            headers=headers,
+            params={
+                "q": query,
+                "fields": "files(id,name,createdTime)",
+                "orderBy": "createdTime asc",
+                "pageSize": 50,
+            },
+        )
+    if search_resp.status_code >= 400:
+        raise GoogleDriveUploadError(
+            f"Google Drive outline folder search failed: HTTP {search_resp.status_code} body={(search_resp.text or '')[:2000]}"
+        )
+
+    files = (search_resp.json() or {}).get("files") or []
+    if not isinstance(files, list) or not files:
+        return None
+
+    # Prefer exact suffix match to avoid accidental partial id matches.
+    for f in files:
+        name = str(f.get("name") or "").strip()
+        fid = str(f.get("id") or "").strip()
+        if fid and name.endswith(suffix):
+            return {"folder_id": fid, "folder_name": name}
+
+    # Fallback: first folder returned by createdTime.
+    first = files[0]
+    fid = str(first.get("id") or "").strip()
+    name = str(first.get("name") or "").strip()
+    if fid:
+        return {"folder_id": fid, "folder_name": name}
+    return None
+
+
 def upload_course_outline_pdf_to_drive(
     pdf_path: str,
     *,
@@ -448,12 +505,22 @@ def upload_course_outline_pdf_to_drive(
 
     safe_course = _sanitize_drive_name(course_name or "course")
     safe_zoho = _sanitize_drive_name(zoho_record_id or "zoho")
-    per_course_name = f"{safe_course}_{safe_zoho}"
-
     ai_folder = ensure_drive_folder(_DRIVE_AI_AUTOMATION, parent_folder_id=parent)
     outline_folder = ensure_drive_folder(_DRIVE_COURSE_OUTLINE, parent_folder_id=ai_folder["folder_id"])
-    course_folder = ensure_drive_folder(per_course_name, parent_folder_id=outline_folder["folder_id"])
-    folder_id = course_folder["folder_id"]
+    existing_folder = _find_existing_outline_course_folder_by_zoho(
+        parent_outline_folder_id=outline_folder["folder_id"],
+        safe_zoho=safe_zoho,
+    )
+
+    if existing_folder is not None:
+        folder_id = existing_folder["folder_id"]
+        existing_name = existing_folder.get("folder_name", "")
+        if existing_name.endswith(f"_{safe_zoho}") and len(existing_name) > len(safe_zoho) + 1:
+            safe_course = existing_name[: -(len(safe_zoho) + 1)] or safe_course
+    else:
+        per_course_name = f"{safe_course}_{safe_zoho}"
+        course_folder = ensure_drive_folder(per_course_name, parent_folder_id=outline_folder["folder_id"])
+        folder_id = course_folder["folder_id"]
 
     filename = f"{safe_course}_v{int(version_number)}.pdf"
     with path.open("rb") as fh:
