@@ -302,14 +302,24 @@ def _build_cover_title_text(raw_title: str) -> str:
     if not base:
         return "COURSE OUTLINE"
 
-    # Remove bracketed suffix from title line; keep it for subtitle if needed.
-    base_no_brackets = re.sub(r"\s*\([^)]*\)\s*", " ", base).strip()
+    # Prefer concise heading: use part before ":" or " - " as title.
+    # Example:
+    # "Data Science for Software Developers: Building Data-Driven Solutions..."
+    # -> "Data Science for Software Developers"
+    split_match = re.split(r"\s*[:\-–—]\s*", base, maxsplit=1)
+    primary = split_match[0].strip() if split_match else base
 
-    # Keep full meaningful title; only trim overly long strings for layout safety.
-    if len(base_no_brackets) > 96:
-        base_no_brackets = base_no_brackets[:96].rstrip()
+    # Remove bracketed suffix noise from title line.
+    primary = re.sub(r"\s*\([^)]*\)\s*", " ", primary).strip()
 
-    return base_no_brackets or "COURSE OUTLINE"
+    # Keep heading short and readable on cover.
+    words = primary.split()
+    if len(words) > 8:
+        primary = " ".join(words[:8]).strip()
+    if len(primary) > 64:
+        primary = primary[:64].rstrip()
+
+    return primary or "COURSE OUTLINE"
 
 
 def _build_cover_subtitle_text(raw_title: str, current_subtitle: str = "") -> str:
@@ -321,6 +331,13 @@ def _build_cover_subtitle_text(raw_title: str, current_subtitle: str = "") -> st
         return subtitle[:90]
 
     raw = _clean_line(raw_title)
+    # If title contains "Title: Subtitle", use right side as subtitle.
+    split_match = re.split(r"\s*[:\-–—]\s*", raw, maxsplit=1)
+    if len(split_match) == 2:
+        rhs = split_match[1].strip()
+        if rhs:
+            return rhs[:90]
+
     bracket = re.search(r"\(([^)]{2,40})\)", raw)
     if bracket:
         return f"Certification preparation for {bracket.group(1).strip()}."
