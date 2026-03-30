@@ -193,7 +193,13 @@ body { background: var(--bg); color: var(--dark); }
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.cover-title .dot { color: var(--orange); }
+.cover-title .dot{
+  display:inline-block;
+  width:10px; height:10px;
+  background: #e11d48; /* red square */
+  margin-left: 8px;
+  transform: translateY(-2px);
+}
 .cover-subtitle {
   font-size: 22.55px; font-weight: 300; color: var(--dark);
   line-height: 1.5; margin-bottom: 24px;
@@ -830,7 +836,7 @@ Builds practical reporting and stakeholder engagement skills"></textarea>
     <section class="page page-fixed bg-cover">
       <div class="cover-overlay">
         <div class="cover-rule"></div>
-        <div class="cover-title" id="pTitle" contenteditable="true" spellcheck="false">TITLE NAME<span class="dot">.</span></div>
+        <div class="cover-title" id="pTitle" contenteditable="true" spellcheck="false">TITLE NAME<span class="dot"></span></div>
         <div class="cover-subtitle" id="pSubtitle" contenteditable="true" spellcheck="false">Subtitle goes here.</div>
         <div class="cover-rule"></div>
         <div class="cover-duration">Total Duration: <strong id="pDuration" contenteditable="true" spellcheck="false">—</strong></div>
@@ -1044,7 +1050,7 @@ function bindCover() {
   const subtitle = val('f-subtitle') || 'Subtitle goes here.';
   const duration = val('f-duration') || '—';
 
-  setHTML('pTitle', escHtml(title) + '<span class="dot">.</span>');
+  setHTML('pTitle', escHtml(title) + '<span class="dot"></span>');
   fitCoverTitle();
   setTEXT('pSubtitle', subtitle);
   setTEXT('pDuration',  duration);
