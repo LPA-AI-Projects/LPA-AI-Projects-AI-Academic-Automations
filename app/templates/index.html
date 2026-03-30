@@ -350,6 +350,15 @@ body { background: var(--bg); color: var(--dark); }
   top: 245px; left: 43px; right: 43px; bottom: 78px;
   overflow: hidden;
 }
+.modules-wrap::after{
+  /* Always show a bottom “table line” at page end (even if last row doesn't reach bottom) */
+  content:'';
+  position:absolute;
+  left:0; right:0; bottom:0;
+  height:1px;
+  background:#ccc;
+  pointer-events:none;
+}
 .mod-table { width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.55; }
 .mod-table th {
   text-align: left; font-size: 13px; font-weight: 600; color: var(--dark);
