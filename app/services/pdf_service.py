@@ -591,6 +591,7 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
     pages: list[str] = []
     usable_height = 800
     thead_height = 42
+    min_rows_per_page = 2
 
     def estimate_row_height(rec: dict[str, list[str] | str]) -> int:
         """
@@ -603,22 +604,23 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
         topics_list = topics if isinstance(topics, list) else []
         exercises_list = exercises if isinstance(exercises, list) else []
 
-        # Approx wrapped line count by character length
-        def line_units(text: str, chars_per_line: int = 34) -> int:
+        # Approx wrapped line count by character length.
+        # Use less conservative values so table can keep multiple rows per page.
+        def line_units(text: str, chars_per_line: int = 42) -> int:
             t = str(text or "").strip()
             if not t:
                 return 0
             return max(1, (len(t) + chars_per_line - 1) // chars_per_line)
 
         units = 0
-        units += line_units(name, 18)  # module column is narrower
+        units += line_units(name, 20)  # module column is narrower
         for t in topics_list:
-            units += line_units(str(t), 34) + 1  # +1 bullet padding
+            units += line_units(str(t), 42) + 1  # +1 bullet padding
         for e in exercises_list:
-            units += line_units(str(e), 34) + 1
+            units += line_units(str(e), 42) + 1
 
-        # Strongly conservative baseline + per-line height
-        return 96 + (units * 13)
+        # Moderately conservative baseline + per-line height
+        return 68 + (units * 8)
 
     def render_rows(chunk: list[dict[str, list[str] | str]], base_idx: int) -> str:
         rows: list[str] = []
@@ -668,6 +670,11 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
     for idx, rec in enumerate(records, start=1):
         row_h = estimate_row_height(rec)
         if current_chunk and (used_height + row_h > usable_height):
+            # Prefer at least 2 rows/page when feasible; avoid one-row pages.
+            if len(current_chunk) < min_rows_per_page and used_height < usable_height + 40:
+                current_chunk.append(rec)
+                used_height += row_h
+                continue
             flush_chunk(current_chunk, current_start_idx)
             current_chunk = []
             current_start_idx = idx
