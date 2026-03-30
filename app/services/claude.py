@@ -441,6 +441,21 @@ class ClaudeService:
             if not self.api_key:
                 raise ValueError("ANTHROPIC_API_KEY is missing in environment.")
 
+    async def generate_text_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        timeout_s: float = 180.0,
+    ) -> str:
+        """Generic completion for auxiliary flows (e.g. assessments). Uses configured AI_PROVIDER."""
+        return await self._call_messages_api(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            timeout_s=timeout_s,
+            max_attempts=DEFAULT_MAX_ATTEMPTS,
+        )
+
     async def _call_messages_api(
         self,
         *,

@@ -31,7 +31,12 @@ def slides_upload_dir() -> str:
     return os.path.join(uploads_dir(), "slides")
 
 
+def assessments_upload_dir() -> str:
+    return os.path.join(uploads_dir(), "assessments")
+
+
 def ensure_storage_dirs() -> None:
     os.makedirs(pdfs_dir(), exist_ok=True)
     os.makedirs(ppts_dir(), exist_ok=True)
     os.makedirs(slides_upload_dir(), exist_ok=True)
+    os.makedirs(assessments_upload_dir(), exist_ok=True)

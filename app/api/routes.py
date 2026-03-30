@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.exc import SQLAlchemyError
 import asyncio
 from asyncio import wait_for, TimeoutError as AsyncTimeoutError
@@ -189,6 +189,60 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
     except Exception:
         logger.exception("Payload validation failed for /courses")
         raise HTTPException(status_code=422, detail="Payload validation failed for /courses.")
+
+
+async def _parse_refine_request(request: Request) -> tuple[str, RefineCourseRequest]:
+    """
+    Support both:
+    - application/json
+    - application/x-www-form-urlencoded (Zoho-friendly)
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+    payload: dict
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except Exception:
+            logger.exception("Failed to parse JSON body for /courses/refine")
+            raise HTTPException(status_code=422, detail="Invalid JSON body.")
+    elif "application/x-www-form-urlencoded" in content_type:
+        body_bytes = await request.body()
+        raw_body = body_bytes.decode("utf-8", errors="replace")
+        parsed = parse_qs(raw_body, keep_blank_values=True)
+        payload = {k: (v[0] if isinstance(v, list) and v else "") for k, v in parsed.items()}
+    else:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported content type. Use application/json or application/x-www-form-urlencoded.",
+        )
+
+    rid = str(
+        payload.get("zoho_record_id")
+        or payload.get("record_id")
+        or payload.get("id")
+        or payload.get("crm_record_id")
+        or ""
+    ).strip()
+    if not rid:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Missing zoho_record_id in refine payload. "
+                "Provide one of: zoho_record_id, record_id, id, crm_record_id."
+            ),
+        )
+
+    refine_payload = {
+        "feedback": payload.get("feedback"),
+        "course_name": payload.get("course_name"),
+    }
+    try:
+        req = RefineCourseRequest.model_validate(refine_payload)
+    except Exception:
+        logger.exception("Payload validation failed for /courses/refine")
+        raise HTTPException(status_code=422, detail="Payload validation failed for /courses/refine.")
+
+    return rid, req
 
 
 async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data: dict) -> None:
@@ -406,6 +460,20 @@ async def generate_course(
         status_code=status.HTTP_202_ACCEPTED,
         content=body.model_dump(mode="json"),
     )
+
+
+@router.post(
+    "/courses/refine",
+    response_model=CourseVersionResponse,
+    dependencies=[auth],
+    summary="Refine a course outline with feedback (zoho_record_id in request body)",
+)
+async def refine_course_from_body(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    rid, req = await _parse_refine_request(request)
+    return await refine_course(zoho_record_id=rid, req=req, db=db)
 
 
 @router.post(
@@ -714,7 +782,7 @@ async def health():
 @router.get(
     "/courses/{zoho_record_id}/outline-job",
     dependencies=[auth],
-    summary="Latest course-outline generation job by Zoho record id (excludes slides jobs)",
+    summary="Latest course-outline generation job by Zoho record id (excludes slides and assessment jobs)",
 )
 async def get_latest_course_outline_job(
     zoho_record_id: str,
@@ -728,7 +796,10 @@ async def get_latest_course_outline_job(
             select(CourseJob)
             .where(
                 CourseJob.zoho_record_id == rid,
-                or_(CourseJob.job_type.is_(None), CourseJob.job_type != "slides"),
+                or_(
+                    CourseJob.job_type.is_(None),
+                    and_(CourseJob.job_type != "slides", CourseJob.job_type != "assessment"),
+                ),
             )
             .order_by(CourseJob.created_at.desc())
         )
