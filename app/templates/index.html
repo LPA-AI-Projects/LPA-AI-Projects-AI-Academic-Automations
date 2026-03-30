@@ -183,7 +183,7 @@ body { background: var(--bg); color: var(--dark); }
    ========================================================= */
 .cover-overlay {
   position: absolute;
-  top: 308px;
+  top: 280px;
   left: 54px; right: 54px;
 }
 .cover-title {
@@ -196,7 +196,7 @@ body { background: var(--bg); color: var(--dark); }
   font-size: 22.55px; font-weight: 300; color: var(--dark);
   line-height: 1.5; margin-bottom: 24px;
 }
-.cover-rule { height: 1px; background: rgba(0,0,0,0.12); margin-bottom: 18px; }
+.cover-rule { height: 1px; background: rgba(0,0,0,0.12); margin: 14px -54px; }
 .cover-duration {
   font-size: 15px; color: var(--dark);
 }
@@ -244,7 +244,7 @@ body { background: var(--bg); color: var(--dark); }
 .details-overlay {
   position: absolute;
   top: 52px; left: 60px; right: 60px; bottom: 78px;
-  overflow: visible;
+  overflow: hidden;
 }
 .details-summary {
   font-size: 14px; font-weight: 700; line-height: 18px;
@@ -340,27 +340,20 @@ body { background: var(--bg); color: var(--dark); }
 .modules-wrap {
   position: absolute;
   top: 245px; left: 43px; right: 43px; bottom: 78px;
-  overflow: visible;
+  overflow: hidden;
 }
-.mod-table { width: 100%; border-collapse: collapse; font-size: 10px; line-height: 1.4; }
+.mod-table { width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.55; }
 .mod-table th {
-  text-align: left; font-size: 12px; font-weight: 600; color: var(--dark);
-  padding: 8px 10px; border: 1px solid #ccc;
+  text-align: left; font-size: 13px; font-weight: 600; color: var(--dark);
+  padding: 10px 12px; border: 1px solid #ccc;
 }
-.mod-table td {
-  padding: 8px 10px;
-  border: 1px solid #ccc;
-  vertical-align: top;
-  white-space: normal;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-.mod-table .col-sno  { width: 44px; text-align: center; font-size: 15px; font-weight: 700; }
-.mod-table .col-mod  { width: 118px; font-weight: 700; font-size: 11px; color: var(--dark); }
+.mod-table td { padding: 12px; border: 1px solid #ccc; vertical-align: top; }
+.mod-table .col-sno  { width: 52px; text-align: center; font-size: 17px; font-weight: 700; }
+.mod-table .col-mod  { width: 130px; font-weight: 700; font-size: 13px; color: var(--dark); }
 .mod-table .col-top,
-.mod-table .col-ex   { width: auto; }
-.mod-table ul        { list-style: disc; padding-left: 13px; }
-.mod-table ul li     { margin: 2px 0; }
+.mod-table .col-ex   { width: 275px; }
+.mod-table ul        { list-style: disc; padding-left: 15px; }
+.mod-table ul li     { margin: 3px 0; }
 .mod-table strong    { font-weight: 700; }
 
 /* =========================================================
@@ -373,24 +366,13 @@ body { background: var(--bg); color: var(--dark); }
   .panel { display: block; }
   .canvas { background: #fff; padding: 0; max-height: none; overflow: visible; box-shadow: none; }
   .page {
-    page-break-after: always;
-    page-break-inside: auto;
-    box-shadow: none;
-    margin: 0;
-    width: 794px;
-    min-height: 1123px;
-    height: auto !important;
-    overflow: visible !important;
-  }
-  .content-overlay,
-  .details-overlay,
-  .modules-wrap {
-    overflow: visible !important;
-    height: auto !important;
-    max-height: none !important;
+    page-break-after: always; page-break-inside: avoid;
+    box-shadow: none; margin: 0; width: 794px; height: 1123px;
   }
   .wrap { max-width: 794px; padding: 0; margin: 0 auto; }
   @page { size: A4 portrait; margin: 0; }
+  /* Keep hyperlink overlay visible and clickable in PDF */
+  .page a[href] { display: block !important; position: absolute !important; }
 }
 
 /* =========================================================
@@ -714,18 +696,24 @@ body { background: var(--bg); color: var(--dark); }
           <div class="section-num num-blue">3</div>
           <div>
             <div class="section-toggle-title">Program Insight</div>
-            <div class="section-toggle-sub">Body paragraphs with **bold** support</div>
+            <div class="section-toggle-sub">Description paragraphs · Bullet points</div>
           </div>
         </div>
         <span class="chevron">▼</span>
       </button>
       <div class="section-body">
-        <label class="field-label">Body Text (blank line = new paragraph; start line with - for bullet)</label>
-        <textarea id="f-insight" rows="9" placeholder="This programme is designed for **professionals who are ready to move forward** in their careers...
+        <label class="field-label">Description Paragraphs</label>
+        <textarea id="f-insight" rows="9" placeholder="This programme is specifically designed for **finance professionals** and accountants...
 
-- Strengthens capability to lead end-to-end audits with confidence
-- Enhances ability to identify risks and improvement opportunities"></textarea>
-        <p class="hint">Wrap text in **double asterisks** for bold. Start a line with <strong>-</strong> or <strong>•</strong> for bullet points.</p>
+Use a blank line to start a new paragraph. Wrap text in **double asterisks** for bold."></textarea>
+        <p class="hint">Blank line = new paragraph. Use **text** for bold.</p>
+
+        <label class="field-label" style="margin-top:14px;">Bullet Points — one per line</label>
+        <textarea id="f-insight-bullets" rows="6" placeholder="Strengthens capability to lead end-to-end audits with confidence
+Enhances ability to identify risks and improvement opportunities
+Enables alignment of systems with organisational objectives
+Builds practical reporting and stakeholder engagement skills"></textarea>
+        <p class="hint">Each line becomes one bullet point. No need for - or • prefix.</p>
       </div>
     </div>
 
@@ -839,6 +827,7 @@ body { background: var(--bg); color: var(--dark); }
 
     <section class="page page-fixed bg-cover">
       <div class="cover-overlay">
+        <div class="cover-rule"></div>
         <div class="cover-title" id="pTitle" contenteditable="true" spellcheck="false">TITLE NAME<span class="dot">.</span></div>
         <div class="cover-subtitle" id="pSubtitle" contenteditable="true" spellcheck="false">Subtitle goes here.</div>
         <div class="cover-rule"></div>
@@ -897,7 +886,14 @@ body { background: var(--bg); color: var(--dark); }
     <section class="page page-fixed bg-pedagogy2"><div class="page-num-overlay" id="fixedNum1"></div></section>
     <section class="page page-fixed bg-evaluation"><div class="page-num-overlay" id="fixedNum2"></div></section>
     <section class="page page-fixed bg-whoweare"><div class="page-num-overlay" id="fixedNum3"></div></section>
-    <section class="page page-fixed bg-getintouch"><div class="page-num-overlay" id="fixedNum4"></div></section>
+    <section class="page page-fixed bg-getintouch" style="position:relative;">
+      <div class="page-num-overlay" id="fixedNum4"></div>
+      <a href="https://www.learnerspoint.org" target="_blank"
+         style="position:absolute; bottom:54px; left:50%; transform:translateX(-50%);
+                width:320px; height:40px; display:block; cursor:pointer;
+                z-index:10;"
+         title="www.learnerspoint.org"></a>
+    </section>
     <section class="page page-fixed bg-trustedby"><div class="page-num-overlay" id="fixedNum5"></div></section>
 
 
@@ -1055,87 +1051,39 @@ function bindInsight() {
   if (dirtyEls.has('pInsight')) return;
   const el = document.getElementById('pInsight');
   el.innerHTML = '';
-  const raw = val('f-insight');
-  if (!raw) return;
 
-  // Split into blocks by blank lines
-  const blocks = raw.split(/\n\n+/);
-  blocks.forEach(block => {
-    const blockLines = block.split(/\r?\n/);
-    // Check if all (non-empty) lines in this block are bullet lines
-    const bulletLines = blockLines.filter(l => /^[\-•]\s+/.test(l.trim()));
-    const nonBulletLines = blockLines.filter(l => l.trim() && !/^[\-•]\s+/.test(l.trim()));
+  // --- Section 1: Description paragraphs (f-insight) ---
+  const rawDesc = val('f-insight');
+  if (rawDesc) {
+    rawDesc.split(/\n\n+/).forEach(block => {
+      const trimmed = block.trim();
+      if (!trimmed) return;
+      const p = document.createElement('p');
+      p.className = 'insight-para';
+      p.innerHTML = bold(escHtml(trimmed).replace(/\n/g, '<br>'));
+      el.appendChild(p);
+    });
+  }
 
-    if (bulletLines.length > 0 && nonBulletLines.length === 0) {
-      // Pure bullet block
+  // --- Section 2: Dedicated bullet points (f-insight-bullets) ---
+  const rawBullets = val('f-insight-bullets');
+  if (rawBullets) {
+    const bulletLines = rawBullets.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (bulletLines.length) {
       const ul = document.createElement('ul');
       ul.className = 'insight-bullets';
       bulletLines.forEach(line => {
-        const text = line.trim().replace(/^[\-•]\s+/, '');
+        // Strip any accidental - or • prefix users might type
+        const text = line.replace(/^[-•]\s+/, '').trim();
+        if (!text) return;
         const li = document.createElement('li');
         li.className = 'insight-bullet-item';
         li.innerHTML = bold(escHtml(text));
         ul.appendChild(li);
       });
       el.appendChild(ul);
-    } else if (bulletLines.length > 0 && nonBulletLines.length > 0) {
-      // Mixed block: render non-bullet lines as paragraph, bullet lines as list
-      const paraLines = [];
-      const pendingBullets = [];
-      let inBullets = false;
-      blockLines.forEach(line => {
-        if (/^[\-•]\s+/.test(line.trim())) {
-          if (!inBullets && paraLines.length) {
-            const p = document.createElement('p');
-            p.className = 'insight-para';
-            p.innerHTML = bold(escHtml(paraLines.join('\n')).replace(/\n/g,'<br>'));
-            el.appendChild(p);
-            paraLines.length = 0;
-          }
-          inBullets = true;
-          pendingBullets.push(line.trim().replace(/^[\-•]\s+/, ''));
-        } else if (line.trim()) {
-          if (inBullets) {
-            const ul = document.createElement('ul');
-            ul.className = 'insight-bullets';
-            pendingBullets.forEach(bt => {
-              const li = document.createElement('li');
-              li.className = 'insight-bullet-item';
-              li.innerHTML = bold(escHtml(bt));
-              ul.appendChild(li);
-            });
-            el.appendChild(ul);
-            pendingBullets.length = 0;
-            inBullets = false;
-          }
-          paraLines.push(line);
-        }
-      });
-      if (paraLines.length) {
-        const p = document.createElement('p');
-        p.className = 'insight-para';
-        p.innerHTML = bold(escHtml(paraLines.join('\n')).replace(/\n/g,'<br>'));
-        el.appendChild(p);
-      }
-      if (pendingBullets.length) {
-        const ul = document.createElement('ul');
-        ul.className = 'insight-bullets';
-        pendingBullets.forEach(bt => {
-          const li = document.createElement('li');
-          li.className = 'insight-bullet-item';
-          li.innerHTML = bold(escHtml(bt));
-          ul.appendChild(li);
-        });
-        el.appendChild(ul);
-      }
-    } else {
-      // Pure paragraph block
-      const p = document.createElement('p');
-      p.className = 'insight-para';
-      p.innerHTML = bold(escHtml(block.trim()).replace(/\n/g,'<br>'));
-      el.appendChild(p);
     }
-  });
+  }
 }
 
 function bindDetails() {
@@ -1272,11 +1220,24 @@ function bindModules() {
     `;
   }
 
-  const USABLE  = 800; // 1123px page height - 245px top - 78px bottom
+  // ── Reliable height measurement ──────────────────────────────────────────
+  // Build a persistent off-screen ghost, keep it in the DOM while measuring,
+  // read all heights in ONE reflow, then remove it. This prevents the
+  // "all heights = 0" bug that occurs when the ghost is detached too early.
+  const USABLE  = 800; // 1123px page - 245px top - 78px bottom
   const THEAD_H = 42;
 
   const ghost = document.createElement('div');
-  ghost.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;left:-9999px;top:0;width:708px;'; // 794px page - 43px left - 43px right
+  ghost.style.cssText = [
+    'position:fixed',
+    'visibility:hidden',
+    'pointer-events:none',
+    'left:-9999px',
+    'top:0',
+    'width:708px',   // 794px page − 43px left − 43px right
+    'z-index:-1'
+  ].join(';');
+
   const ghostTable = document.createElement('table');
   ghostTable.className = 'mod-table';
   ghostTable.style.width = '100%';
@@ -1285,6 +1246,7 @@ function bindModules() {
   ghost.appendChild(ghostTable);
   document.body.appendChild(ghost);
 
+  // Insert all rows first, then trigger a single reflow, then read heights
   const ghostRows = modules.map(mod => {
     const tr = document.createElement('tr');
     tr.innerHTML = mkRowInner(mod);
@@ -1292,9 +1254,18 @@ function bindModules() {
     return tr;
   });
 
-  void ghost.getBoundingClientRect();
-  const heights = ghostRows.map(tr => tr.offsetHeight);
+  // Force layout so offsetHeight values are accurate
+  ghost.getBoundingClientRect();
+  // eslint-disable-next-line no-unused-expressions
+  ghostTable.offsetHeight; // second reflow guarantee
+
+  const heights = ghostRows.map(tr => {
+    const h = tr.getBoundingClientRect().height || tr.offsetHeight;
+    return h > 0 ? h : 80; // fallback 80px if measurement still fails
+  });
+
   document.body.removeChild(ghost);
+  // ─────────────────────────────────────────────────────────────────────────
 
   function mkPage() {
     const sec = document.createElement('section');
@@ -1373,12 +1344,13 @@ From the very first session, participants are encouraged to engage actively in t
 
 The programme is **shaped by real industry experience** and years of collaboration with organisations across diverse markets. Every framework, case study, and conversation reflects the complexity and pace of modern professional environments.
 
-Over the years, **thousands of professionals from emerging leaders to experienced practitioners have participated in this journey.** What connects them is a shared goal: to build capabilities that create lasting impact within their teams and organisations.
+Over the years, **thousands of professionals from emerging leaders to experienced practitioners have participated in this journey.** What connects them is a shared goal: to build capabilities that create lasting impact within their teams and organisations.`;
 
-- Strengthens capability to lead end-to-end audits with confidence
-- Enhances ability to identify risks, non-conformities, and improvement opportunities
-- Enables alignment of systems with organisational objectives
-- Builds practical audit, reporting, and stakeholder engagement skills`;
+  document.getElementById('f-insight-bullets').value =
+`Strengthens capability to lead end-to-end audits with confidence
+Enhances ability to identify risks, non-conformities, and improvement opportunities
+Enables alignment of systems with organisational objectives
+Builds practical audit, reporting, and stakeholder engagement skills`;
 
   document.getElementById('f-det-summary').value =
 `**By the end of the programme, participants leave with a sharper perspective, stronger professional confidence, and a practical toolkit they can use immediately.** The goal is not only personal development but also meaningful contribution to the teams, departments, and organisations participants are part of.`;
