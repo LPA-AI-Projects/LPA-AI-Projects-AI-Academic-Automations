@@ -1,6 +1,7 @@
 import uuid
 import os
 import json
+import re
 from urllib.parse import parse_qs
 from typing import Optional
 
@@ -73,6 +74,37 @@ def _job_to_course_outline_response(job: CourseJob) -> CourseOutlineJobResponse:
 def _build_pdf_url(file_path: str) -> str:
     filename = os.path.basename(file_path)
     return f"{settings.BASE_URL}/pdfs/{filename}"
+
+
+def _derive_course_name_from_outline(outline_text: str | None) -> str:
+    """
+    Best-effort title extraction for naming files/folders in refine flow.
+    Priority:
+    1) structured JSON field: course_title
+    2) text line: "Course Title: ..."
+    3) first markdown heading / first non-empty line
+    """
+    text = str(outline_text or "").strip()
+    if not text:
+        return "course"
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            raw = str(data.get("course_title") or "").strip()
+            if raw:
+                return raw
+    except Exception:
+        pass
+
+    m = re.search(r"(?im)^\s*course\s*title\s*:\s*(.+)$", text)
+    if m and str(m.group(1)).strip():
+        return str(m.group(1)).strip()
+
+    lines = [ln.strip().lstrip("#").strip() for ln in text.splitlines() if ln.strip()]
+    if lines:
+        return lines[0][:120]
+    return "course"
 
 
 async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
@@ -563,7 +595,7 @@ async def refine_course(
         logger.warning("AI refine failed for zoho_record_id=%s error=%s", rid, str(e))
         raise HTTPException(status_code=502, detail="AI service failed. Please retry.")
 
-    name_for_file = (req.course_name or "").strip() or "course"
+    name_for_file = (req.course_name or "").strip() or _derive_course_name_from_outline(base_outline)
 
     # Generate PDF off the event loop
     pdf_path: str | None = None
