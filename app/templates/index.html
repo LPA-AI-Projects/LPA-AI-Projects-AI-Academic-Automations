@@ -190,6 +190,8 @@ body { background: var(--bg); color: var(--dark); }
   font-size: 44.52px; font-weight: 700; line-height: 1.05;
   color: var(--dark); margin-bottom: 14px;
   letter-spacing: -1px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .cover-title .dot { color: var(--orange); }
 .cover-subtitle {
@@ -1043,8 +1045,44 @@ function bindCover() {
   const duration = val('f-duration') || '—';
 
   setHTML('pTitle', escHtml(title) + '<span class="dot">.</span>');
+  fitCoverTitle();
   setTEXT('pSubtitle', subtitle);
   setTEXT('pDuration',  duration);
+}
+
+function fitCoverTitle() {
+  // Shrink-to-fit cover title to prevent truncation in PDF/print.
+  const el = document.getElementById('pTitle');
+  if (!el) return;
+  // Respect manual edits
+  if (dirtyEls && dirtyEls.has && dirtyEls.has('pTitle')) return;
+
+  // Reset first
+  el.style.fontSize = '';
+  el.style.letterSpacing = '';
+
+  // Measure with the default CSS first
+  const baseFont = 44.52;
+  const minFont = 30;
+  const maxLines = 2;
+  const lineHeight = 1.05;
+  const maxHeight = (baseFont * lineHeight) * maxLines + 2; // +2px buffer
+
+  let size = baseFont;
+  // If title is long, reduce negative tracking a bit to help readability
+  const rawText = (el.textContent || '').trim();
+  if (rawText.length > 34) el.style.letterSpacing = '-0.5px';
+
+  // Loop: shrink until it fits within maxHeight
+  // Note: scrollHeight is reliable for contenteditable blocks.
+  for (let i = 0; i < 40; i++) {
+    // Force layout before reading scrollHeight
+    const h = el.scrollHeight;
+    if (h <= maxHeight) break;
+    size = Math.max(minFont, size - 1);
+    el.style.fontSize = size + 'px';
+    if (size === minFont) break;
+  }
 }
 
 function bindInsight() {
