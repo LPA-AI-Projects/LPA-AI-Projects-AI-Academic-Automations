@@ -186,6 +186,13 @@ body { background: var(--bg); color: var(--dark); }
   top: 280px;
   left: 54px; right: 54px;
 }
+.cover-kicker{
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--dark);
+  line-height: 1.2;
+  margin-bottom: 18px;
+}
 .cover-title {
   font-size: 44.52px; font-weight: 700; line-height: 1.05;
   color: var(--dark); margin-bottom: 14px;
@@ -847,6 +854,7 @@ Builds practical reporting and stakeholder engagement skills"></textarea>
 
     <section class="page page-fixed bg-cover">
       <div class="cover-overlay">
+        <div class="cover-kicker" id="pCurriculum" contenteditable="true" spellcheck="false">Course Curriculum</div>
         <div class="cover-rule"></div>
         <div class="cover-title" id="pTitle" contenteditable="true" spellcheck="false">TITLE NAME<span class="dot"></span></div>
         <div class="cover-subtitle" id="pSubtitle" contenteditable="true" spellcheck="false">Subtitle goes here.</div>
@@ -932,7 +940,7 @@ const dirtyEls = new Set();
 
 function markDirtyListeners() {
   const editableIds = [
-    'pTitle','pSubtitle','pDuration','pInsight','pDetSummary',
+    'pCurriculum','pTitle','pSubtitle','pDuration','pInsight','pDetSummary',
     'pRegions','pDetDuration','pHours','pBenefits','pValue',
     'pLocation','pDatetime','pObjective','pImpact'
   ];
@@ -977,7 +985,7 @@ function addSyncBtn() {
 function resetDirty() {
   dirtyEls.clear();
   // Remove title attributes
-  ['pTitle','pSubtitle','pDuration','pInsight','pDetSummary',
+  ['pCurriculum','pTitle','pSubtitle','pDuration','pInsight','pDetSummary',
    'pRegions','pDetDuration','pHours','pBenefits','pValue',
    'pLocation','pDatetime','pObjective','pImpact'].forEach(id => {
     const el = document.getElementById(id);
@@ -1062,6 +1070,7 @@ function bindCover() {
   const subtitle = val('f-subtitle') || 'Subtitle goes here.';
   const duration = val('f-duration') || '—';
 
+  setTEXT('pCurriculum', 'Course Curriculum');
   setHTML('pTitle', escHtml(title) + '<span class="dot"></span>');
   fitCoverTitle();
   setTEXT('pSubtitle', subtitle);
