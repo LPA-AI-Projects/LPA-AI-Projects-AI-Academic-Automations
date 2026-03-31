@@ -84,10 +84,12 @@ See [OAuth overview](https://www.zoho.com/crm/developer/docs/api/v8/oauth-overvi
 | `ZOHO_REFRESH_TOKEN` | Long-lived refresh token |
 | `ZOHO_ACCOUNTS_BASE_URL` | e.g. `https://accounts.zoho.com` (use `.eu` / `.in` etc. for your DC) |
 | `ZOHO_CRM_API_BASE` | Usually `https://www.zohoapis.com` |
-| `ZOHO_CRM_MODULE_API_NAME` | CRM **module API name** for attachments (default: `Course_Outline`). Must match **Setup → Developer Space → APIs** for that module. |
+| `ZOHO_CRM_MODULE_API_NAME` | Legacy fallback module API name (used when specific outline/slides vars are not set). |
+| `ZOHO_CRM_OUTLINE_MODULE_API_NAME` | CRM module API name for **course-outline attach** (recommended). |
+| `ZOHO_CRM_SLIDES_MODULE_API_NAME` | CRM module API name for **slides input fetch** from file-upload field `outline`. |
 | `ZOHO_ATTACH_PDF_LINK_TO_CRM` | `true` to attach the generated public PDF URL to the record after the job completes |
 
-3. **`zoho_record_id` in `POST /courses` must be the `Course_Outline` record ID** Zoho sends (the long numeric **Record Id** from CRM, same id used in the URL when you open the record). The backend attaches the generated **PDF public link** to that record via `POST .../crm/v8/Course_Outline/{record_id}/Attachments` (link attachment). If your module’s API name is not exactly `Course_Outline`, set `ZOHO_CRM_MODULE_API_NAME` accordingly.
+3. **`zoho_record_id` in `POST /courses` must be the outline-module record ID** Zoho sends (the long numeric **Record Id** from CRM, same id used in the URL when you open the record). The backend attaches the generated **PDF public link** to that record via `POST .../crm/v8/{outline_module}/{record_id}/Attachments` (link attachment). Set `ZOHO_CRM_OUTLINE_MODULE_API_NAME` for this flow.
 
 4. Access tokens are refreshed automatically (cached; refresh uses your refresh token before the ~1 hour expiry).
 
@@ -105,7 +107,9 @@ Required for attach-after-job:
 - `ZOHO_REFRESH_TOKEN` — generated once via OAuth grant with required CRM scopes (see Zoho OAuth docs); store securely.
 - `ZOHO_ACCOUNTS_BASE_URL` — `https://accounts.zoho.com` (US); use `https://accounts.zoho.eu`, `https://accounts.zoho.in`, etc. if your org is in that DC.
 - `ZOHO_CRM_API_BASE` — usually `https://www.zohoapis.com`.
-- `ZOHO_CRM_MODULE_API_NAME` — CRM **Setup → Developer Space → APIs** (or module settings) → **API Name** (e.g. `Leads`, `Deals`, `Custom_Module_X`).
+- `ZOHO_CRM_OUTLINE_MODULE_API_NAME` — CRM module API name for course-outline attach flow.
+- `ZOHO_CRM_SLIDES_MODULE_API_NAME` — CRM module API name for slides source fetch flow (field `outline`).
+- `ZOHO_CRM_MODULE_API_NAME` — optional legacy fallback when the two specific vars above are not set.
 - `ZOHO_ATTACH_PDF_LINK_TO_CRM` — `true` to attach the generated public PDF URL to the record after the job completes.
 
 ### Callback URL (`ZOHO_CALLBACK_URL`) — HTTP 400 / “file not received”

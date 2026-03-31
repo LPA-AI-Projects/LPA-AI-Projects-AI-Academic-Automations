@@ -36,8 +36,12 @@ class Settings(BaseSettings):
     ZOHO_ACCOUNTS_BASE_URL: str = "https://accounts.zoho.com"
     # e.g. https://www.zohoapis.com
     ZOHO_CRM_API_BASE: str = "https://www.zohoapis.com"
-    # CRM module API name for Attachments API (path: /crm/v8/{module}/{record_id}/Attachments)
+    # Legacy default module API name (fallback for both outline/slides when specific vars are unset).
     ZOHO_CRM_MODULE_API_NAME: str = "Course_Outline"
+    # Course outline flow module (PDF link attach target).
+    ZOHO_CRM_OUTLINE_MODULE_API_NAME: str = ""
+    # Slides flow module (source record where File Upload field `outline` is read).
+    ZOHO_CRM_SLIDES_MODULE_API_NAME: str = ""
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 
@@ -64,6 +68,9 @@ class Settings(BaseSettings):
         "ZOHO_REFRESH_TOKEN",
         "ZOHO_ACCOUNTS_BASE_URL",
         "ZOHO_CRM_API_BASE",
+        "ZOHO_CRM_MODULE_API_NAME",
+        "ZOHO_CRM_OUTLINE_MODULE_API_NAME",
+        "ZOHO_CRM_SLIDES_MODULE_API_NAME",
         mode="before",
     )
     @classmethod

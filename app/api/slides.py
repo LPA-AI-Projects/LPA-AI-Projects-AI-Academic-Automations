@@ -17,6 +17,11 @@ from app.core.database import get_db
 from app.core.storage_paths import slides_upload_dir
 from app.models.job import CourseJob
 from app.services.slides_service import process_slides_job
+from app.services.zoho_crm import (
+    download_file_upload_content,
+    get_record_file_upload_field,
+    get_slides_module_api_name,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -196,6 +201,49 @@ async def generate_slides(
             return await _save_upload(upload, filename)
         if (url or "").strip():
             return await _save_from_url(str(url), filename)
+        if required and filename == "outline.pdf":
+            # Test mode: if outline is not passed in request, fetch Zoho File Upload field `outline`.
+            logger.info(
+                "Slides outline not provided in request; fetching from Zoho CRM | job_id=%s zoho_record_id=%s field=outline",
+                str(job_id),
+                rid,
+            )
+            try:
+                outline_meta = await get_record_file_upload_field(
+                    module_api_name=get_slides_module_api_name(),
+                    crm_record_id=rid,
+                    field_api_name="outline",
+                )
+                logger.info(
+                    "Slides Zoho outline metadata | job_id=%s file_id=%s has_download_url=%s file_name=%s",
+                    str(job_id),
+                    outline_meta.get("file_id"),
+                    bool(outline_meta.get("download_url")),
+                    outline_meta.get("file_name"),
+                )
+                file_bytes = await download_file_upload_content(
+                    file_id=outline_meta.get("file_id"),
+                    download_url=outline_meta.get("download_url"),
+                )
+                with open(os.path.join(upload_dir, filename), "wb") as f:
+                    f.write(file_bytes)
+                logger.info(
+                    "Slides Zoho outline downloaded and saved | job_id=%s file=%s bytes=%s",
+                    str(job_id),
+                    filename,
+                    len(file_bytes),
+                )
+                return os.path.join(upload_dir, filename)
+            except Exception as e:
+                logger.exception(
+                    "Slides failed to fetch outline from Zoho CRM | job_id=%s zoho_record_id=%s",
+                    str(job_id),
+                    rid,
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Failed to fetch outline from Zoho CRM field 'outline': {str(e)}",
+                )
         if required:
             raise HTTPException(
                 status_code=422,
