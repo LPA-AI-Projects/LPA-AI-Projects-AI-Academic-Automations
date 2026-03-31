@@ -242,9 +242,15 @@ def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
     if isinstance(value, list):
         item = value[0] if value else {}
     if isinstance(item, str):
-        return {"file_id": item.strip() or None, "download_url": None, "file_name": None, "raw": value}
+        return {
+            "file_id": item.strip() or None,
+            "file_token": None,
+            "download_url": None,
+            "file_name": None,
+            "raw": value,
+        }
     if not isinstance(item, dict):
-        return {"file_id": None, "download_url": None, "file_name": None, "raw": value}
+        return {"file_id": None, "file_token": None, "download_url": None, "file_name": None, "raw": value}
 
     file_id = (
         item.get("id")
@@ -253,6 +259,9 @@ def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
         or item.get("attachment_id")
         or item.get("$file_id")
     )
+    # Zoho File Upload fields commonly include an opaque file token in File_Id__s.
+    # This is often the correct identifier for /crm/v8/files endpoints.
+    file_token = item.get("File_Id__s") or item.get("file_id__s")
     download_url = (
         item.get("download_url")
         or item.get("Download_URL")
@@ -261,9 +270,15 @@ def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
         or item.get("link_url")
         or item.get("preview_url")
     )
-    file_name = item.get("name") or item.get("file_name") or item.get("File_Name")
+    file_name = (
+        item.get("name")
+        or item.get("file_name")
+        or item.get("File_Name")
+        or item.get("File_Name__s")
+    )
     return {
         "file_id": str(file_id).strip() if file_id else None,
+        "file_token": str(file_token).strip() if file_token else None,
         "download_url": str(download_url).strip() if download_url else None,
         "file_name": str(file_name).strip() if file_name else None,
         "raw": value,
@@ -309,10 +324,11 @@ async def get_record_file_upload_field(
     raw_value = record.get(field) if isinstance(record, dict) else None
     normalized = _extract_file_upload_candidate(raw_value)
     logger.info(
-        "Zoho CRM file field payload | record_id=%s field=%s file_id=%s has_download_url=%s file_name=%s raw=%s",
+        "Zoho CRM file field payload | record_id=%s field=%s file_id=%s file_token=%s has_download_url=%s file_name=%s raw=%s",
         rid,
         field,
         normalized.get("file_id"),
+        normalized.get("file_token"),
         bool(normalized.get("download_url")),
         normalized.get("file_name"),
         str(raw_value)[:1200],
@@ -320,7 +336,12 @@ async def get_record_file_upload_field(
     return normalized
 
 
-async def download_file_upload_content(*, file_id: str | None, download_url: str | None) -> bytes:
+async def download_file_upload_content(
+    *,
+    file_id: str | None,
+    file_token: str | None = None,
+    download_url: str | None,
+) -> bytes:
     """
     Download Zoho File Upload bytes.
     Tries direct URL first (if provided), then known Zoho file endpoints by file_id.
@@ -332,13 +353,16 @@ async def download_file_upload_content(*, file_id: str | None, download_url: str
 
     if (download_url or "").strip():
         candidates.append(("direct_download_url", (download_url or "").strip()))
-    if (file_id or "").strip():
-        fid = quote((file_id or "").strip(), safe="")
-        candidates.append(("files_query", f"{base}/crm/v8/files?id={fid}"))
-        candidates.append(("files_path", f"{base}/crm/v8/files/{fid}"))
+    # Prefer opaque File_Id__s token first (when present), then numeric id fallback.
+    for label_prefix, raw_id in (("file_token", file_token), ("file_id", file_id)):
+        if (raw_id or "").strip():
+            fid = quote((raw_id or "").strip(), safe="")
+            candidates.append((f"{label_prefix}_files_query", f"{base}/crm/v8/files?id={fid}"))
+            candidates.append((f"{label_prefix}_files_path", f"{base}/crm/v8/files/{fid}"))
+            candidates.append((f"{label_prefix}_files_download", f"{base}/crm/v8/files/{fid}/download"))
 
     if not candidates:
-        raise RuntimeError("No Zoho file identifier found (missing file_id/download_url).")
+        raise RuntimeError("No Zoho file identifier found (missing file_id/file_token/download_url).")
 
     async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
         for label, url in candidates:

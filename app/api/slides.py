@@ -215,14 +215,16 @@ async def generate_slides(
                     field_api_name="outline",
                 )
                 logger.info(
-                    "Slides Zoho outline metadata | job_id=%s file_id=%s has_download_url=%s file_name=%s",
+                    "Slides Zoho outline metadata | job_id=%s file_id=%s file_token=%s has_download_url=%s file_name=%s",
                     str(job_id),
                     outline_meta.get("file_id"),
+                    outline_meta.get("file_token"),
                     bool(outline_meta.get("download_url")),
                     outline_meta.get("file_name"),
                 )
                 file_bytes = await download_file_upload_content(
                     file_id=outline_meta.get("file_id"),
+                    file_token=outline_meta.get("file_token"),
                     download_url=outline_meta.get("download_url"),
                 )
                 with open(os.path.join(upload_dir, filename), "wb") as f:
