@@ -98,38 +98,98 @@ def _extract_outline_modules(outline_text: str, *, program_name: str | None = No
     if not text:
         return [{"module_name": (program_name or "Module 1").strip() or "Module 1", "module_text": ""}]
 
-    # Strict heading detection to avoid counting "module" mentions in paragraph text.
-    # Accepted examples:
-    # - Module 1
-    # - Module 2: Topic
-    # - Module 3 - Topic
-    heading_pattern = re.compile(
-        r"(?im)^\s*(module)\s+(\d{1,3})\s*(?:[:\-\)]\s*([^\n]{0,120}))?\s*$"
+    def _dedupe_matches(raw: list[re.Match[str]], *, min_distance: int = 24) -> list[re.Match[str]]:
+        out: list[re.Match[str]] = []
+        seen_numbers: set[int] = set()
+        last_pos = -10_000
+        for m in raw:
+            num = int(m.group(2))
+            pos = m.start()
+            if num in seen_numbers:
+                continue
+            if pos - last_pos < min_distance:
+                continue
+            seen_numbers.add(num)
+            out.append(m)
+            last_pos = pos
+        return out
+
+    def _build_modules(matches: list[re.Match[str]]) -> list[dict[str, str]]:
+        modules: list[dict[str, str]] = []
+        for idx, m in enumerate(matches):
+            start = m.start()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+            module_num = int(m.group(2))
+            module_title = str((m.group(3) or "")).strip(" :-\u2013\u2014\t")
+            heading = f"Module {module_num}" + (f": {module_title}" if module_title else "")
+            body = text[start:end].strip()
+            modules.append({"module_name": heading, "module_text": body})
+        return modules
+
+    # 1) Strict line-based heading detection.
+    strict_pattern = re.compile(
+        r"(?im)^\s*(?:[#*\-\u2022]\s*)?(module)\s+(\d{1,3})\s*(?:[:\-\u2013\u2014\)]\s*([^\n]{0,180}))?\s*$"
     )
-    raw_matches = list(heading_pattern.finditer(text))
-    if not raw_matches:
+    matches = _dedupe_matches(list(strict_pattern.finditer(text)))
+
+    # 2) Relaxed heading detection for PDFs where heading line has trailing noise.
+    if len(matches) < 2:
+        relaxed_pattern = re.compile(
+            r"(?im)^\s*(?:[#*\-\u2022]\s*)?(module)\s+(\d{1,3})\b(?:\s*[:\-\u2013\u2014\)]\s*([^\n]{0,180}))?"
+        )
+        matches = _dedupe_matches(list(relaxed_pattern.finditer(text)))
+
+    # 3) Inline fallback for poor extraction where headings collapse into large paragraphs.
+    if len(matches) < 2:
+        inline_pattern = re.compile(
+            r"(?i)(?:^|[\n\r]|[.!?]\s+)(module)\s+(\d{1,3})\s*(?:[:\-\u2013\u2014\)]\s*([^.\n\r]{0,120}))?"
+        )
+        matches = _dedupe_matches(list(inline_pattern.finditer(text)), min_distance=20)
+
+    # 4) Table-style fallback for outlines rendered like:
+    # Sno. | Modules | Topics | Exercises
+    # 01
+    # Understanding Leadership ...
+    if len(matches) < 2:
+        table_row_pattern = re.compile(r"(?im)^\s*0?(\d{1,2})\s*$")
+        table_rows = list(table_row_pattern.finditer(text))
+        if len(table_rows) >= 2:
+            table_modules: list[dict[str, str]] = []
+            for idx, row in enumerate(table_rows):
+                start = row.start()
+                end = table_rows[idx + 1].start() if idx + 1 < len(table_rows) else len(text)
+                row_num = int(row.group(1))
+                body = text[start:end].strip()
+
+                # Derive module title from first non-empty lines after row number until bullets start.
+                after_number = text[row.end() : end]
+                title_lines: list[str] = []
+                for ln in after_number.splitlines():
+                    s = ln.strip()
+                    if not s:
+                        continue
+                    if re.match(r"^(?:[-*•]\s+)", s):
+                        break
+                    if re.match(r"^(?:topics?|exercises?|sno\.?)\b", s, flags=re.IGNORECASE):
+                        continue
+                    title_lines.append(s)
+                    if len(" ".join(title_lines).split()) >= 12:
+                        break
+                    if len(title_lines) >= 3:
+                        break
+                title = " ".join(title_lines).strip(" :-\u2013\u2014\t")
+                heading = f"Module {row_num}" + (f": {title}" if title else "")
+                table_modules.append({"module_name": heading, "module_text": body})
+
+            # Keep rows with minimally meaningful body length; avoid dropping real short module rows.
+            table_modules = [m for m in table_modules if len((m.get("module_text") or "").strip()) >= 20]
+            if len(table_modules) >= 2:
+                return table_modules
+
+    if len(matches) < 2:
         return [{"module_name": (program_name or "Module 1").strip() or "Module 1", "module_text": text}]
 
-    # Keep only the first heading occurrence per module number to prevent duplicates.
-    matches: list[re.Match[str]] = []
-    seen_numbers: set[int] = set()
-    for m in raw_matches:
-        num = int(m.group(2))
-        if num in seen_numbers:
-            continue
-        seen_numbers.add(num)
-        matches.append(m)
-
-    modules: list[dict[str, str]] = []
-    for idx, m in enumerate(matches):
-        start = m.start()
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
-        module_num = int(m.group(2))
-        module_title = str(m.group(3) or "").strip()
-        heading = f"Module {module_num}" + (f": {module_title}" if module_title else "")
-        body = text[start:end].strip()
-        modules.append({"module_name": heading, "module_text": body})
-
+    modules = _build_modules(matches)
     return modules or [{"module_name": (program_name or "Module 1").strip() or "Module 1", "module_text": text}]
 
 
