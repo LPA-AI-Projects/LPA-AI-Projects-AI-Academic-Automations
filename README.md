@@ -70,6 +70,19 @@ Health check endpoint: `/api/v1/health`
 
 **Slides** (separate): `POST /api/v1/slides/` then `GET /api/v1/slides/{zoho_record_id}` for `module_gamma_links`, etc.
 
+### Slides LangGraph Pipeline
+
+- Module flow: **Planner -> Generator -> Validator -> (retry max N) -> Gamma**
+- Planner/Generator/Validator models are configurable via env vars:
+  - `SLIDES_PLANNER_MODEL`
+  - `SLIDES_GENERATOR_MODEL`
+  - `SLIDES_VALIDATOR_MODEL`
+- Validation loop: `SLIDES_VALIDATION_MAX_LOOPS` (default `2`)
+- Per-module slide bounds:
+  - `SLIDES_MIN_PER_MODULE` (default `10`)
+  - `SLIDES_MAX_PER_MODULE` (default `20`)
+- Final Gamma safety remains enforced with batching at `MAX_SLIDES_PER_BATCH=60`.
+
 ## Zoho CRM V8 — OAuth + attach PDF link (optional)
 
 See [OAuth overview](https://www.zoho.com/crm/developer/docs/api/v8/oauth-overview.html) and [Upload attachment (file or link)](https://www.zoho.com/crm/developer/docs/api/v8/upload-attachment.html).

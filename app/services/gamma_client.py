@@ -64,9 +64,18 @@ async def generate_ppt(
         "Do not merge sections. Do not skip sections. "
         "Do not summarize into fewer slides. Keep slide count very close to requested."
     )
-    merged_instructions = strict_instructions
+    # Visual consistency: standard deck layout (Gamma applies theme; these instructions bias uniformity).
+    visual_layout_instructions = (
+        "Visual and layout: Use a standard widescreen presentation aspect (16:9). "
+        "Keep every slide visually consistent: same margins/padding, aligned title area, "
+        "readable body text size, and balanced whitespace. "
+        "Avoid cramming too much text on one slide; split content rather than shrinking fonts. "
+        "Use a single coherent theme and color palette across all slides. "
+        "Keep bullet counts similar per slide where possible for a uniform rhythm."
+    )
+    merged_instructions = f"{strict_instructions} {visual_layout_instructions}"
     if (additional_instructions or "").strip():
-        merged_instructions = f"{strict_instructions} {(additional_instructions or '').strip()}"
+        merged_instructions = f"{merged_instructions} {(additional_instructions or '').strip()}"
 
     payload = {
         "inputText": input_text,
@@ -76,6 +85,11 @@ async def generate_ppt(
         "numCards": desired_cards,
         "exportAs": "pptx",
         "additionalInstructions": merged_instructions[:5000],
+        # Editable access is controlled by sharing settings; gammaUrl remains the same live URL.
+        "sharingOptions": {
+            "workspaceAccess": "edit",
+            "externalAccess": "edit",
+        },
     }
 
     logger.info(
@@ -103,6 +117,7 @@ async def generate_ppt(
         status_url = f"{base}/v1.0/generations/{gen_id}"
         export_url: str | None = None
         gamma_url: str | None = None
+        editable_gamma_url: str | None = None
         for attempt in range(1, 121):
             st = await client.get(status_url, headers=headers)
             st.raise_for_status()
@@ -111,6 +126,16 @@ async def generate_ppt(
             if status == "completed":
                 export_url = st_data.get("exportUrl")
                 gamma_url = st_data.get("gammaUrl")
+                # Gamma API can vary naming across versions/tenants.
+                editable_gamma_url = (
+                    st_data.get("editableGammaUrl")
+                    or st_data.get("editUrl")
+                    or st_data.get("editorUrl")
+                    or st_data.get("workspaceUrl")
+                    or st_data.get("presentationUrl")
+                )
+                if not editable_gamma_url:
+                    editable_gamma_url = gamma_url
                 logger.info("Gamma generation completed | generationId=%s", gen_id)
                 break
             if status == "failed":
@@ -132,6 +157,7 @@ async def generate_ppt(
                 "ppt_bytes": dl.content,
                 "generation_id": gen_id,
                 "gamma_url": gamma_url,
+                "editable_gamma_url": editable_gamma_url,
             }
 
         logger.info("Gamma link-only mode | generationId=%s", gen_id)
@@ -139,5 +165,6 @@ async def generate_ppt(
             "ppt_bytes": b"",
             "generation_id": gen_id,
             "gamma_url": gamma_url,
+            "editable_gamma_url": editable_gamma_url,
         }
 

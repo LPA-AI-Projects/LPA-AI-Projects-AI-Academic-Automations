@@ -22,10 +22,18 @@ Return ONLY valid JSON with this shape:
 }
 
 Rules:
+- Primary source priority:
+  1) Course Outline (mandatory structure)
+  2) Lesson Plan / Activity Plan
+  3) Instructor PPT (supplement only)
+- Generate 10-20 slides per module
+- Hard maximum: 20
+- Minimum target: 10 (if content allows)
+- Include exactly 1 summary slide
+- Use activity slides only when LP/AP context exists
+- Avoid duplicate or near-duplicate slides
 - title must be short and specific (max 10 words)
-- type must be one of: "content", "activity"
-- Use activity slides when activities are present in the lesson/activity plan
-- Keep total slide count reasonable; you may exceed 40, batching will handle it
+- type must be one of: "content", "activity", "summary"
 """
 
 
@@ -47,6 +55,7 @@ async def plan_slides(
     lesson: str | None,
     activity: str | None,
     instructor: str | None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     ai = ClaudeService()
     user_prompt = (
@@ -60,12 +69,11 @@ async def plan_slides(
         f"{instructor or ''}\n"
     )
 
-    # Use ClaudeService's internal messages API helper for new tasks.
-    raw = await ai._call_messages_api(  # type: ignore[attr-defined]
+    raw = await ai.generate_text_completion(
         system_prompt=SLIDE_PLAN_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         timeout_s=120.0,
-        max_attempts=3,
+        model_override=model,
     )
     return _safe_json(raw)
 

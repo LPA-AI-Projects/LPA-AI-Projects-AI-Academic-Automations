@@ -447,6 +447,7 @@ class ClaudeService:
         system_prompt: str,
         user_prompt: str,
         timeout_s: float = 180.0,
+        model_override: str | None = None,
     ) -> str:
         """Generic completion for auxiliary flows (e.g. assessments). Uses configured AI_PROVIDER."""
         return await self._call_messages_api(
@@ -454,6 +455,7 @@ class ClaudeService:
             user_prompt=user_prompt,
             timeout_s=timeout_s,
             max_attempts=DEFAULT_MAX_ATTEMPTS,
+            model_override=model_override,
         )
 
     async def _call_messages_api(
@@ -463,6 +465,7 @@ class ClaudeService:
         user_prompt: str,
         timeout_s: float,
         max_attempts: int,
+        model_override: str | None = None,
     ) -> str:
         if self.provider == "openai":
             return await self._call_openai_chat_api(
@@ -470,6 +473,7 @@ class ClaudeService:
                 user_prompt=user_prompt,
                 timeout_s=timeout_s,
                 max_attempts=max_attempts,
+                model_override=model_override,
             )
 
         url = f"{self.base_url}/v1/messages"
@@ -490,7 +494,8 @@ class ClaudeService:
         last_error: Optional[BaseException] = None
 
         candidate_models: list[str] = []
-        for m in (self.model, "claude-3-5-sonnet-latest", "claude-sonnet-4-20250514"):
+        preferred_model = (model_override or "").strip() or self.model
+        for m in (preferred_model, self.model, "claude-3-5-sonnet-latest", "claude-sonnet-4-20250514"):
             mm = (m or "").strip()
             if mm and mm not in candidate_models:
                 candidate_models.append(mm)
@@ -591,14 +596,16 @@ class ClaudeService:
         user_prompt: str,
         timeout_s: float,
         max_attempts: int,
+        model_override: str | None = None,
     ) -> str:
         url = f"{self.openai_base_url}/v1/chat/completions"
+        active_model = (model_override or "").strip() or self.openai_model
         headers = {
             "Authorization": f"Bearer {self.openai_api_key}",
             "Content-Type": "application/json",
         }
         payload = {
-            "model": self.openai_model,
+            "model": active_model,
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -637,7 +644,7 @@ class ClaudeService:
                     logger.warning(
                         "OpenAI returned %s | model=%s attempt=%s/%s body=%s",
                         response.status_code,
-                        self.openai_model,
+                        active_model,
                         attempt,
                         max_attempts,
                         body_preview,

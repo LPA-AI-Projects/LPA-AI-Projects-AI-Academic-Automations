@@ -15,9 +15,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.job import CourseJob
 from app.services.document_extractor import extract_pdf_text_async, extract_ppt_text_async
 from app.services.gamma_client import generate_ppt
-from app.services.slide_generator import generate_slide
-from app.services.slide_planner import plan_slides
-from app.services.slide_validator import validate_slides
+from app.services.slides_graph import run_module_slides_pipeline
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -221,6 +219,12 @@ async def process_slides_job(job_id) -> None:
             logger.info("Outline modules detected | job_id=%s modules=%s", str(job.id), len(modules))
 
             module_entries: list[dict[str, Any]] = []
+            planner_model = (settings.SLIDES_PLANNER_MODEL or "").strip() or None
+            generator_model = (settings.SLIDES_GENERATOR_MODEL or "").strip() or None
+            validator_model = (settings.SLIDES_VALIDATOR_MODEL or "").strip() or None
+            min_per_module = max(1, int(getattr(settings, "SLIDES_MIN_PER_MODULE", 10) or 10))
+            max_per_module = max(min_per_module, int(getattr(settings, "SLIDES_MAX_PER_MODULE", 20) or 20))
+            max_loops = max(1, int(getattr(settings, "SLIDES_VALIDATION_MAX_LOOPS", 2) or 2))
             if os.path.exists(validated_cache_path):
                 with open(validated_cache_path, "r", encoding="utf-8") as f:
                     cached = json.load(f)
@@ -246,50 +250,36 @@ async def process_slides_job(job_id) -> None:
                     module_name = str(mod.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
                     module_text = str(mod.get("module_text") or "").strip()
                     t0 = time.time()
-                    plan = await plan_slides(
-                        outline=module_text,
-                        lesson=lesson_text,
-                        activity=None,
-                        instructor=instructor_text,
+                    validated_module = await run_module_slides_pipeline(
+                        module_name=module_name,
+                        module_text=module_text,
+                        lesson_text=lesson_text,
+                        instructor_text=instructor_text,
+                        planner_model=planner_model,
+                        generator_model=generator_model,
+                        validator_model=validator_model,
+                        min_slides=min_per_module,
+                        max_slides=max_per_module,
+                        max_loops=max_loops,
                     )
-                    planned_slides = plan.get("slides") if isinstance(plan, dict) else None
-                    if not isinstance(planned_slides, list) or not planned_slides:
-                        logger.warning(
-                            "Module plan empty; skipping module | job_id=%s module=%s",
-                            str(job.id),
-                            module_name,
-                        )
-                        continue
                     logger.info(
-                        "Module planned | job_id=%s module=%s planned_slides=%s seconds=%.2f",
+                        "Module pipeline completed | job_id=%s module=%s slides=%s seconds=%.2f",
                         str(job.id),
                         module_name,
-                        len(planned_slides),
+                        len(validated_module),
                         time.time() - t0,
                     )
-
-                    context = {
-                        "outline": module_text[:150000],
-                        "lesson": (lesson_text or "")[:150000],
-                        "instructor": (instructor_text or "")[:150000],
-                    }
-                    generated: list[dict[str, Any]] = []
-                    for idx, s in enumerate(planned_slides, start=1):
-                        slide_out = await generate_slide(slide=s, context=context)
-                        generated.append(slide_out)
-                        if idx % 5 == 0:
-                            job.payload_json = json.dumps(
-                                {
-                                    "progress": {
-                                        "module": module_name,
-                                        "generated": idx,
-                                        "total": len(planned_slides),
-                                    }
-                                }
-                            )
-                            await db.commit()
-                    validated_module = validate_slides(planned_slides=planned_slides, generated_slides=generated)
                     module_entries.append({"module_name": module_name, "slides": validated_module})
+                    job.payload_json = json.dumps(
+                        {
+                            "progress": {
+                                "module": module_name,
+                                "generated": len(validated_module),
+                                "total": len(validated_module),
+                            }
+                        }
+                    )
+                    await db.commit()
 
                 if not module_entries:
                     raise RuntimeError("No modules produced slides.")
@@ -333,41 +323,51 @@ async def process_slides_job(job_id) -> None:
                     continue
                 # Ensure each module presentation starts with a clear module heading slide.
                 module_slides_for_gamma = [_build_module_cover_slide(module_name), *module_slides]
+                module_batches = _batch_slides(module_slides_for_gamma)
                 logger.info(
-                    "Gamma rendering module | job_id=%s module=%s module_index=%s slides=%s",
+                    "Gamma rendering module | job_id=%s module=%s module_index=%s slides=%s batches=%s",
                     str(job.id),
                     module_name,
                     mi,
                     len(module_slides_for_gamma),
+                    len(module_batches),
                 )
 
-                batch_input_path = os.path.join(cache_dir, f"module_{mi}_input.txt")
-                with open(batch_input_path, "w", encoding="utf-8") as f:
-                    f.write(_gamma_input_from_batch(module_slides_for_gamma))
+                for bi, slides_batch in enumerate(module_batches, start=1):
+                    batch_input_path = os.path.join(cache_dir, f"module_{mi}_batch_{bi}_input.txt")
+                    with open(batch_input_path, "w", encoding="utf-8") as f:
+                        f.write(_gamma_input_from_batch(slides_batch))
 
-                gamma_url = ""
-                generation_id = ""
-                gamma_result = await generate_ppt(module_slides_for_gamma, include_export_bytes=False)
-                gamma_url = str(gamma_result.get("gamma_url") or "").strip()
-                generation_id = str(gamma_result.get("generation_id") or "").strip()
-                if gamma_url:
-                    gamma_batch_links.append(gamma_url)
-                if generation_id:
-                    gamma_generation_ids.append(generation_id)
+                    logger.info(
+                        "Gamma rendering batch | job_id=%s module_index=%s batch_index=%s slides=%s",
+                        str(job.id),
+                        mi,
+                        bi,
+                        len(slides_batch),
+                    )
+                    gamma_result = await generate_ppt(slides_batch, include_export_bytes=False)
+                    gamma_url = str(gamma_result.get("gamma_url") or "").strip()
+                    editable_gamma_url = str(gamma_result.get("editable_gamma_url") or "").strip()
+                    generation_id = str(gamma_result.get("generation_id") or "").strip()
+                    if gamma_url:
+                        gamma_batch_links.append(gamma_url)
+                    if generation_id:
+                        gamma_generation_ids.append(generation_id)
 
-                drive_link: str | None = None
-                drive_file_id: str | None = None
-
-                module_gamma_links.append(
-                    {
-                        "module_index": str(mi),
-                        "link_name": f"Module {mi} - {module_name}",
-                        "module_name": module_name,
-                        "gamma_link": gamma_url or None,
-                        "drive_link": drive_link,
-                        "file_id": drive_file_id,
-                    }
-                )
+                    drive_link: str | None = None
+                    drive_file_id: str | None = None
+                    suffix = f" Batch {bi}" if len(module_batches) > 1 else ""
+                    module_gamma_links.append(
+                        {
+                            "module_index": str(mi),
+                            "link_name": f"Module {mi}{suffix}",
+                            "module_name": module_name,
+                            "gamma_link": gamma_url or None,
+                            "editable_gamma_link": editable_gamma_url or gamma_url or None,
+                            "drive_link": drive_link,
+                            "file_id": drive_file_id,
+                        }
+                    )
                 # Persist links incrementally so polling shows completed modules even if later modules fail.
                 try:
                     payload_progress = json.loads(job.payload_json or "{}")

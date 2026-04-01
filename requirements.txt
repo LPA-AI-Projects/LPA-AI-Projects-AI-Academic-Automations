@@ -12,3 +12,4 @@ python-multipart
 PyMuPDF
 python-pptx
 python-docx
+langgraph

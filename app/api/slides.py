@@ -56,7 +56,8 @@ def _job_to_dict(job: CourseJob) -> dict:
     google_batch_links: list[str] = []
     gamma_batch_links: list[str] = []
     google_drive_course_folder_link = None
-    module_gamma_links: list[dict[str, str | None]] = []
+    modules: list[dict[str, str | None]] = []
+    module_gamma_links: dict[str, str] = {}
     zoho_attachment_payload: dict | None = None
     try:
         payload = json.loads(getattr(job, "payload_json", "") or "{}")
@@ -77,14 +78,16 @@ def _job_to_dict(job: CourseJob) -> dict:
             if isinstance(raw_module_links, list):
                 for item in raw_module_links:
                     if isinstance(item, dict):
-                        module_gamma_links.append(
+                        key = str(item.get("link_name") or "").strip()
+                        value = str(item.get("gamma_link") or "").strip()
+                        if key and value:
+                            module_gamma_links[key] = value
+                        modules.append(
                             {
                                 "module_index": str(item.get("module_index") or "").strip() or None,
                                 "link_name": str(item.get("link_name") or "").strip() or None,
                                 "module_name": str(item.get("module_name") or "").strip() or None,
                                 "gamma_link": str(item.get("gamma_link") or "").strip() or None,
-                                "drive_link": str(item.get("drive_link") or "").strip() or None,
-                                "file_id": str(item.get("file_id") or "").strip() or None,
                             }
                         )
             raw_zoho_payload = payload.get("zoho_attachment_payload")
@@ -95,12 +98,14 @@ def _job_to_dict(job: CourseJob) -> dict:
         google_batch_links = []
         gamma_batch_links = []
         google_drive_course_folder_link = None
-        module_gamma_links = []
+        modules = []
+        module_gamma_links = {}
         zoho_attachment_payload = None
     return {
         "zoho_record_id": job.zoho_record_id,
         "job_type": getattr(job, "job_type", None),
         "status": job.status,
+        "modules": modules,
         "module_gamma_links": module_gamma_links,
         "error": getattr(job, "error", None),
         "created_at": created_at,
@@ -146,6 +151,50 @@ async def generate_slides(
     rid = (zoho_record_id or "").strip()
     if not rid:
         raise HTTPException(status_code=422, detail="zoho_record_id is required.")
+
+    active_statuses = (
+        "queued",
+        "extracting",
+        "planning",
+        "generating_slides",
+        "validating",
+        "batching",
+        "gamma_rendering",
+        "merging",
+        "attaching",
+    )
+    try:
+        existing_result = await db.execute(
+            select(CourseJob)
+            .where(
+                CourseJob.zoho_record_id == rid,
+                CourseJob.job_type == "slides",
+                CourseJob.status.in_(active_statuses),
+            )
+            .order_by(CourseJob.created_at.desc())
+        )
+        existing_job = existing_result.scalars().first()
+    except Exception:
+        logger.exception("Database error while checking existing slides jobs")
+        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+    if existing_job is not None:
+        logger.info(
+            "Slides job already running; skipping duplicate enqueue | zoho_record_id=%s existing_job_id=%s status=%s",
+            rid,
+            str(existing_job.id),
+            existing_job.status,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "zoho_record_id": rid,
+                "job_type": "slides",
+                "status": existing_job.status,
+                "message": "Slides job already running for this zoho_record_id.",
+                "job_id": str(existing_job.id),
+                "polling": {"by_zoho_record_id": f"/api/v1/slides/{rid}"},
+            },
+        )
 
     job_id = uuid.uuid4()
     upload_dir = os.path.join(slides_upload_dir(), str(job_id))
@@ -277,15 +326,15 @@ async def generate_slides(
     )
 
     try:
-        async with db.begin():
-            job = CourseJob(
-                id=job_id,
-                job_type="slides",
-                zoho_record_id=rid,
-                status="queued",
-                payload_json=json.dumps(payload),
-            )
-            db.add(job)
+        job = CourseJob(
+            id=job_id,
+            job_type="slides",
+            zoho_record_id=rid,
+            status="queued",
+            payload_json=json.dumps(payload),
+        )
+        db.add(job)
+        await db.commit()
     except (SQLAlchemyError, OSError, Exception):
         logger.exception("Database error while creating slides job")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")

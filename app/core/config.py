@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     GAMMA_API_KEY: str = ""
     GAMMA_BASE_URL: str = "https://public-api.gamma.app"
 
+    # Slides multi-bot pipeline configuration
+    SLIDES_PLANNER_MODEL: str = ""
+    SLIDES_GENERATOR_MODEL: str = ""
+    SLIDES_VALIDATOR_MODEL: str = ""
+    SLIDES_VALIDATION_MAX_LOOPS: int = 2
+    SLIDES_MIN_PER_MODULE: int = 10
+    SLIDES_MAX_PER_MODULE: int = 20
+
     # Google Apps Script merge endpoint (optional, for single merged editable Slides link)
     GOOGLE_SCRIPT_URL: str = ""
     GOOGLE_SCRIPT_KEY: str = ""
@@ -71,6 +79,9 @@ class Settings(BaseSettings):
         "ZOHO_CRM_MODULE_API_NAME",
         "ZOHO_CRM_OUTLINE_MODULE_API_NAME",
         "ZOHO_CRM_SLIDES_MODULE_API_NAME",
+        "SLIDES_PLANNER_MODEL",
+        "SLIDES_GENERATOR_MODEL",
+        "SLIDES_VALIDATOR_MODEL",
         mode="before",
     )
     @classmethod
