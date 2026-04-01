@@ -14,7 +14,11 @@ from app.core.config import settings
 from app.core.storage_paths import ppts_dir
 from app.core.database import AsyncSessionLocal
 from app.models.job import CourseJob
-from app.services.document_extractor import extract_pdf_text_async, extract_ppt_text_async
+from app.services.document_extractor import (
+    extract_pdf_module_rows_async,
+    extract_pdf_text_async,
+    extract_ppt_text_async,
+)
 from app.services.gamma_client import generate_ppt
 from app.services.slides_graph import run_module_slides_pipeline
 from app.services.zoho_crm import update_slides_links_field
@@ -263,6 +267,7 @@ async def process_slides_job(job_id) -> None:
 
             with open(outline_path, "rb") as f:
                 outline_bytes = f.read()
+            table_modules = await extract_pdf_module_rows_async(outline_bytes)
             outline_text = await extract_pdf_text_async(outline_bytes)
             logger.info(
                 "Slides extracted outline | job_id=%s chars=%s",
@@ -290,8 +295,16 @@ async def process_slides_job(job_id) -> None:
                     len(instructor_text or ""),
                 )
 
-            modules = _extract_outline_modules(outline_text, program_name=program_name)
-            logger.info("Outline modules detected | job_id=%s modules=%s", str(job.id), len(modules))
+            if len(table_modules) >= 2:
+                modules = table_modules
+                logger.info(
+                    "Outline modules detected via table extraction | job_id=%s modules=%s",
+                    str(job.id),
+                    len(modules),
+                )
+            else:
+                modules = _extract_outline_modules(outline_text, program_name=program_name)
+                logger.info("Outline modules detected | job_id=%s modules=%s", str(job.id), len(modules))
             outline_hash = _hash_text(outline_text)
             lesson_hash = _hash_text(lesson_text)
             instructor_hash = _hash_text(instructor_text)
@@ -310,6 +323,7 @@ async def process_slides_job(job_id) -> None:
             min_per_module = max(1, int(getattr(settings, "SLIDES_MIN_PER_MODULE", 10) or 10))
             max_per_module = max(min_per_module, int(getattr(settings, "SLIDES_MAX_PER_MODULE", 20) or 20))
             max_loops = max(1, int(getattr(settings, "SLIDES_VALIDATION_MAX_LOOPS", 2) or 2))
+            module_parallelism = max(1, int(getattr(settings, "SLIDES_MODULE_PARALLELISM", 3) or 3))
             if os.path.exists(validated_cache_path):
                 with open(validated_cache_path, "r", encoding="utf-8") as f:
                     cached = json.load(f)
@@ -346,22 +360,31 @@ async def process_slides_job(job_id) -> None:
                 await _set_status(db, job, "generating_slides")
                 await _set_status(db, job, "validating")
 
-                for mi, mod in enumerate(modules, start=1):
+                logger.info(
+                    "Module pipeline parallel start | job_id=%s modules=%s parallelism=%s",
+                    str(job.id),
+                    len(modules),
+                    module_parallelism,
+                )
+                semaphore = asyncio.Semaphore(module_parallelism)
+
+                async def _run_single_module(mi: int, mod: dict[str, str]) -> tuple[int, str, list[dict[str, Any]]]:
                     module_name = str(mod.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
                     module_text = str(mod.get("module_text") or "").strip()
                     t0 = time.time()
-                    validated_module = await run_module_slides_pipeline(
-                        module_name=module_name,
-                        module_text=module_text,
-                        lesson_text=lesson_text,
-                        instructor_text=instructor_text,
-                        planner_model=planner_model,
-                        generator_model=generator_model,
-                        validator_model=validator_model,
-                        min_slides=min_per_module,
-                        max_slides=max_per_module,
-                        max_loops=max_loops,
-                    )
+                    async with semaphore:
+                        validated_module = await run_module_slides_pipeline(
+                            module_name=module_name,
+                            module_text=module_text,
+                            lesson_text=lesson_text,
+                            instructor_text=instructor_text,
+                            planner_model=planner_model,
+                            generator_model=generator_model,
+                            validator_model=validator_model,
+                            min_slides=min_per_module,
+                            max_slides=max_per_module,
+                            max_loops=max_loops,
+                        )
                     logger.info(
                         "Module pipeline completed | job_id=%s module=%s slides=%s seconds=%.2f",
                         str(job.id),
@@ -369,6 +392,15 @@ async def process_slides_job(job_id) -> None:
                         len(validated_module),
                         time.time() - t0,
                     )
+                    return mi, module_name, validated_module
+
+                module_tasks = [
+                    asyncio.create_task(_run_single_module(mi, mod))
+                    for mi, mod in enumerate(modules, start=1)
+                ]
+                module_results = await asyncio.gather(*module_tasks)
+
+                for _, module_name, validated_module in module_results:
                     module_entries.append({"module_name": module_name, "slides": validated_module})
                     job.payload_json = json.dumps(
                         {
