@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -22,6 +23,7 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 MAX_SLIDES_PER_BATCH = 60
+CACHE_VERSION = "slides_cache_v2"
 
 
 def _safe_course_name(name: str | None) -> str:
@@ -38,6 +40,17 @@ def _safe_id(name: str | None) -> str:
     for ch in forbidden:
         cleaned = cleaned.replace(ch, "_")
     return cleaned[:120] or "unknown"
+
+
+def _normalize_for_hash(text: str | None) -> str:
+    raw = (text or "").lower()
+    raw = re.sub(r"\s+", " ", raw)
+    return raw.strip()
+
+
+def _hash_text(text: str | None) -> str:
+    normalized = _normalize_for_hash(text)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
@@ -179,7 +192,8 @@ async def process_slides_job(job_id) -> None:
             instructor_path = payload.get("instructor_ppt_path")
             course_name = _safe_course_name(payload.get("course_name"))
             program_name = str(payload.get("program_name") or "").strip() or None
-            cache_dir = os.path.join(ppts_dir(), "cache", _safe_id(job.zoho_record_id))
+            cache_root = os.path.join(ppts_dir(), "cache", _safe_id(job.zoho_record_id))
+            cache_dir = cache_root
             os.makedirs(cache_dir, exist_ok=True)
             validated_cache_path = os.path.join(cache_dir, "validated_slides.json")
             validated_text_path = os.path.join(cache_dir, "validated_slides.txt")
@@ -218,6 +232,16 @@ async def process_slides_job(job_id) -> None:
 
             modules = _extract_outline_modules(outline_text, program_name=program_name)
             logger.info("Outline modules detected | job_id=%s modules=%s", str(job.id), len(modules))
+            outline_hash = _hash_text(outline_text)
+            lesson_hash = _hash_text(lesson_text)
+            instructor_hash = _hash_text(instructor_text)
+            content_hash = hashlib.sha256(
+                f"{outline_hash}|{lesson_hash}|{instructor_hash}".encode("utf-8")
+            ).hexdigest()
+            cache_dir = os.path.join(cache_root, f"{CACHE_VERSION}_{content_hash[:16]}")
+            os.makedirs(cache_dir, exist_ok=True)
+            validated_cache_path = os.path.join(cache_dir, "validated_slides.json")
+            validated_text_path = os.path.join(cache_dir, "validated_slides.txt")
 
             module_entries: list[dict[str, Any]] = []
             planner_model = (settings.SLIDES_PLANNER_MODEL or "").strip() or None
@@ -230,7 +254,22 @@ async def process_slides_job(job_id) -> None:
                 with open(validated_cache_path, "r", encoding="utf-8") as f:
                     cached = json.load(f)
                 if isinstance(cached, dict) and isinstance(cached.get("modules"), list):
-                    module_entries = [m for m in cached["modules"] if isinstance(m, dict)]
+                    cached_hash = str(cached.get("content_hash") or "").strip()
+                    cached_version = str(cached.get("cache_version") or "").strip()
+                    cached_modules_detected = int(cached.get("modules_detected") or 0)
+                    cache_valid = cached_hash == content_hash and cached_version == CACHE_VERSION
+                    if len(modules) >= 2 and cached_modules_detected < 2:
+                        cache_valid = False
+                    if cache_valid:
+                        module_entries = [m for m in cached["modules"] if isinstance(m, dict)]
+                    else:
+                        logger.info(
+                            "Ignoring stale/low-quality cache | job_id=%s cache_version=%s cached_modules=%s detected_modules=%s",
+                            str(job.id),
+                            cached_version or "-",
+                            cached_modules_detected,
+                            len(modules),
+                        )
                 elif isinstance(cached, list):
                     # Backward-compatible cache format.
                     module_entries = [{"module_name": modules[0]["module_name"], "slides": cached}]
@@ -286,7 +325,18 @@ async def process_slides_job(job_id) -> None:
                     raise RuntimeError("No modules produced slides.")
 
                 with open(validated_cache_path, "w", encoding="utf-8") as f:
-                    json.dump({"modules": module_entries}, f, ensure_ascii=False, indent=2)
+                    json.dump(
+                        {
+                            "cache_version": CACHE_VERSION,
+                            "content_hash": content_hash,
+                            "modules_detected": len(modules),
+                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            "modules": module_entries,
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
                 with open(validated_text_path, "w", encoding="utf-8") as f:
                     for module in module_entries:
                         m_name = str(module.get("module_name") or "Module").strip()
