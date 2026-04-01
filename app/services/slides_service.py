@@ -16,6 +16,7 @@ from app.models.job import CourseJob
 from app.services.document_extractor import extract_pdf_text_async, extract_ppt_text_async
 from app.services.gamma_client import generate_ppt
 from app.services.slides_graph import run_module_slides_pipeline
+from app.services.zoho_crm import update_slides_links_field
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -429,6 +430,17 @@ async def process_slides_job(job_id) -> None:
                 job.zoho_record_id,
                 primary_link,
             )
+            try:
+                await update_slides_links_field(
+                    zoho_record_id=job.zoho_record_id,
+                    module_links=module_gamma_links,
+                )
+            except Exception:
+                logger.exception(
+                    "Zoho slides links write-back skipped due to error | job_id=%s zoho_record_id=%s",
+                    str(job.id),
+                    job.zoho_record_id,
+                )
 
             await _set_status(db, job, "completed")
             logger.info(

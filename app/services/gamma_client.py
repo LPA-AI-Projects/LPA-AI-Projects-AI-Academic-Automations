@@ -19,6 +19,23 @@ def _gamma_configured() -> bool:
     return bool(getattr(settings, "GAMMA_API_KEY", "") and getattr(settings, "GAMMA_BASE_URL", ""))
 
 
+def _build_sharing_options() -> dict[str, Any]:
+    workspace_access = str(getattr(settings, "GAMMA_WORKSPACE_ACCESS", "") or "").strip() or "edit"
+    external_access = str(getattr(settings, "GAMMA_EXTERNAL_ACCESS", "") or "").strip() or "edit"
+    sharing: dict[str, Any] = {
+        "workspaceAccess": workspace_access,
+        "externalAccess": external_access,
+    }
+    recipients = settings.get_gamma_email_edit_list()
+    if recipients:
+        # Gamma docs use emailOptions as an object with recipients + access.
+        sharing["emailOptions"] = {
+            "recipients": recipients,
+            "access": "edit",
+        }
+    return sharing
+
+
 async def generate_ppt(
     slides_batch: list[dict[str, Any]],
     *,
@@ -55,7 +72,10 @@ async def generate_ppt(
 
     input_text = "\n".join(lines).strip()
 
-    create_url = f"{base}/v1.0/generations"
+    use_template = bool(getattr(settings, "GAMMA_USE_TEMPLATE", False))
+    template_id = str(getattr(settings, "GAMMA_TEMPLATE_ID", "") or "").strip()
+    use_template = use_template and bool(template_id)
+    create_url = f"{base}/v1.0/generations/from-template" if use_template else f"{base}/v1.0/generations"
     headers = {"X-API-KEY": api_key, "Accept": "application/json"}
     desired_cards = max(1, len(slides_batch))
     strict_instructions = (
@@ -77,26 +97,34 @@ async def generate_ppt(
     if (additional_instructions or "").strip():
         merged_instructions = f"{merged_instructions} {(additional_instructions or '').strip()}"
 
-    payload = {
-        "inputText": input_text,
-        # Gamma defaults can condense aggressively; generate + numCards gives tighter count control.
-        "textMode": "generate",
-        "format": "presentation",
-        "numCards": desired_cards,
-        "exportAs": "pptx",
-        "additionalInstructions": merged_instructions[:5000],
-        # Editable access is controlled by sharing settings; gammaUrl remains the same live URL.
-        "sharingOptions": {
-            "workspaceAccess": "edit",
-            "externalAccess": "edit",
-        },
-    }
+    payload: dict[str, Any]
+    sharing_options = _build_sharing_options()
+    if use_template:
+        prompt = f"{input_text}\n\nInstructions:\n{merged_instructions[:5000]}"
+        payload = {
+            "gammaId": template_id,
+            "prompt": prompt,
+            "exportAs": "pptx",
+            "sharingOptions": sharing_options,
+        }
+    else:
+        payload = {
+            "inputText": input_text,
+            # Gamma defaults can condense aggressively; generate + numCards gives tighter count control.
+            "textMode": "generate",
+            "format": "presentation",
+            "numCards": desired_cards,
+            "exportAs": "pptx",
+            "additionalInstructions": merged_instructions[:5000],
+            "sharingOptions": sharing_options,
+        }
 
     logger.info(
-        "Gamma createGeneration | slides=%s num_cards=%s input_chars=%s",
+        "Gamma createGeneration | slides=%s num_cards=%s input_chars=%s mode=%s",
         len(slides_batch),
         desired_cards,
         len(input_text),
+        "from-template" if use_template else "generate",
     )
 
     async with httpx.AsyncClient(timeout=60.0) as client:

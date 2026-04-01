@@ -399,3 +399,68 @@ async def download_file_upload_content(
                 logger.exception("Zoho file download exception | strategy=%s", label)
 
     raise RuntimeError("Unable to download Zoho file from any supported endpoint.")
+
+
+def _format_module_links_text(module_links: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for item in module_links:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("link_name") or "").strip()
+        link = str(item.get("gamma_link") or "").strip()
+        if name and link:
+            lines.append(f"{name}: {link}")
+    return "\n".join(lines)
+
+
+async def update_slides_links_field(
+    *,
+    zoho_record_id: str,
+    module_links: list[dict[str, Any]],
+    field_api_name: str | None = None,
+) -> None:
+    """
+    Update slides CRM record with module-wise Gamma links string in a multi-line field.
+    Non-critical caller should catch exceptions and continue.
+    """
+    if not _crm_configured():
+        logger.info(
+            "Zoho slides links update skipped: CRM OAuth not configured (ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN)."
+        )
+        return
+
+    rid = (zoho_record_id or "").strip()
+    if not rid:
+        return
+    text_value = _format_module_links_text(module_links)
+    if not text_value:
+        logger.info("Zoho slides links update skipped: no module links to write | record_id=%s", rid)
+        return
+
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    module_api = get_slides_module_api_name().strip("/")
+    field_name = (field_api_name or settings.ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME or "Link_for_Courseware").strip()
+    url = f"{base}/crm/v8/{module_api}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"data": [{"id": rid, field_name: text_value}]}
+    logger.info(
+        "Zoho slides links update started | module=%s record_id=%s field=%s lines=%s",
+        module_api,
+        rid,
+        field_name,
+        len(text_value.splitlines()),
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.put(url, headers=headers, json=payload)
+    if resp.status_code >= 400:
+        logger.warning(
+            "Zoho slides links update failed | status=%s body=%s",
+            resp.status_code,
+            (resp.text or "")[:2000],
+        )
+        resp.raise_for_status()
+    logger.info("Zoho slides links update success | record_id=%s field=%s", rid, field_name)

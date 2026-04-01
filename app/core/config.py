@@ -42,12 +42,22 @@ class Settings(BaseSettings):
     ZOHO_CRM_OUTLINE_MODULE_API_NAME: str = ""
     # Slides flow module (source record where File Upload field `outline` is read).
     ZOHO_CRM_SLIDES_MODULE_API_NAME: str = ""
+    # Field API name in slides module to store module-wise Gamma links text.
+    ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME: str = "Link_for_Courseware"
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 
     # Gamma Public API (PPT generation)
     GAMMA_API_KEY: str = ""
     GAMMA_BASE_URL: str = "https://public-api.gamma.app"
+    # Optional Gamma template flow (POST /v1.0/generations/from-template)
+    GAMMA_USE_TEMPLATE: bool = False
+    GAMMA_TEMPLATE_ID: str = ""
+    # Optional sharing/access controls for generated Gamma docs
+    GAMMA_WORKSPACE_ACCESS: str = "edit"
+    GAMMA_EXTERNAL_ACCESS: str = "edit"
+    # Comma-separated emails to grant edit access, e.g. "a@x.com,b@y.com"
+    GAMMA_EMAIL_EDIT_LIST: str = ""
 
     # Slides multi-bot pipeline configuration
     SLIDES_PLANNER_MODEL: str = ""
@@ -79,9 +89,14 @@ class Settings(BaseSettings):
         "ZOHO_CRM_MODULE_API_NAME",
         "ZOHO_CRM_OUTLINE_MODULE_API_NAME",
         "ZOHO_CRM_SLIDES_MODULE_API_NAME",
+        "ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME",
         "SLIDES_PLANNER_MODEL",
         "SLIDES_GENERATOR_MODEL",
         "SLIDES_VALIDATOR_MODEL",
+        "GAMMA_TEMPLATE_ID",
+        "GAMMA_WORKSPACE_ACCESS",
+        "GAMMA_EXTERNAL_ACCESS",
+        "GAMMA_EMAIL_EDIT_LIST",
         mode="before",
     )
     @classmethod
@@ -144,6 +159,13 @@ class Settings(BaseSettings):
         if normalized_value.startswith("postgresql://"):
             return normalized_value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return normalized_value
+
+    def get_gamma_email_edit_list(self) -> list[str]:
+        """Parse comma-separated GAMMA_EMAIL_EDIT_LIST into clean email strings."""
+        raw = str(self.GAMMA_EMAIL_EDIT_LIST or "").strip()
+        if not raw:
+            return []
+        return [email.strip() for email in raw.split(",") if email.strip()]
 
 
 @lru_cache

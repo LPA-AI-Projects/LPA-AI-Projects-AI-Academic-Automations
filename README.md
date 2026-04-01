@@ -82,6 +82,10 @@ Health check endpoint: `/api/v1/health`
   - `SLIDES_MIN_PER_MODULE` (default `10`)
   - `SLIDES_MAX_PER_MODULE` (default `20`)
 - Final Gamma safety remains enforced with batching at `MAX_SLIDES_PER_BATCH=60`.
+- Optional Gamma template/sharing config for slides:
+  - `GAMMA_USE_TEMPLATE=true` + `GAMMA_TEMPLATE_ID=<id>` to use `/v1.0/generations/from-template`
+  - `GAMMA_WORKSPACE_ACCESS` / `GAMMA_EXTERNAL_ACCESS` (`view`, `comment`, `edit`, etc.)
+  - `GAMMA_EMAIL_EDIT_LIST` (comma-separated recipients granted edit access)
 
 ## Zoho CRM V8 — OAuth + attach PDF link (optional)
 
@@ -100,6 +104,7 @@ See [OAuth overview](https://www.zoho.com/crm/developer/docs/api/v8/oauth-overvi
 | `ZOHO_CRM_MODULE_API_NAME` | Legacy fallback module API name (used when specific outline/slides vars are not set). |
 | `ZOHO_CRM_OUTLINE_MODULE_API_NAME` | CRM module API name for **course-outline attach** (recommended). |
 | `ZOHO_CRM_SLIDES_MODULE_API_NAME` | CRM module API name for **slides input fetch** from file-upload field `outline`. |
+| `ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME` | Slides module field API name to write module-wise Gamma links text (default: `Link_for_Courseware`). |
 | `ZOHO_ATTACH_PDF_LINK_TO_CRM` | `true` to attach the generated public PDF URL to the record after the job completes |
 
 3. **`zoho_record_id` in `POST /courses` must be the outline-module record ID** Zoho sends (the long numeric **Record Id** from CRM, same id used in the URL when you open the record). The backend attaches the generated **PDF public link** to that record via `POST .../crm/v8/{outline_module}/{record_id}/Attachments` (link attachment). Set `ZOHO_CRM_OUTLINE_MODULE_API_NAME` for this flow.
