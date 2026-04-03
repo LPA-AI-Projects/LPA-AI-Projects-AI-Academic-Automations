@@ -306,12 +306,12 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 logger.info("Outline graph pipeline started | job_id=%s", str(job_id))
                 graph_result = await wait_for(
                     run_outline_langgraph_like_pipeline(input_data=input_data),
-                    timeout=620,
+                    timeout=3600,
                 )
                 outline_payload = graph_result.outline_payload
                 outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
                 logger.info("Outline graph pipeline completed | job_id=%s", str(job_id))
-            except RuntimeError:
+            except (RuntimeError, AsyncTimeoutError):
                 # Preserve old fallback behavior if modular pipeline fails.
                 logger.warning("Outline graph failed, using legacy AI fallback | job_id=%s", str(job_id))
                 learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)

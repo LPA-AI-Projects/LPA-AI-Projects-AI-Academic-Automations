@@ -10,8 +10,10 @@ class Settings(BaseSettings):
     # LLM routing: "anthropic" = Claude (ANTHROPIC_*), "openai" = OpenAI Chat (OPENAI_*)
     AI_PROVIDER: str = "anthropic"
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    # httpx read timeout for Anthropic (long generations + web_search often exceed 2 minutes).
+    ANTHROPIC_READ_TIMEOUT_S: float = 600.0
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com"

@@ -653,7 +653,12 @@ class ClaudeService:
 
         candidate_models: list[str] = []
         preferred_model = (model_override or "").strip() or self.model
-        for m in (preferred_model, self.model, "claude-3-5-sonnet-latest", "claude-sonnet-4-20250514"):
+        # Fallbacks if primary model errors (avoid deprecated/invalid IDs).
+        fallback_models = (
+            "claude-sonnet-4-20250514",
+            "claude-3-5-haiku-20241022",
+        )
+        for m in (preferred_model, self.model, *fallback_models):
             mm = (m or "").strip()
             if mm and mm not in candidate_models:
                 candidate_models.append(mm)
@@ -673,6 +678,14 @@ class ClaudeService:
                             model_name,
                             body_preview,
                         )
+                        # If only model is invalid, try next fallback candidate instead of hard fail.
+                        body_l = body_preview.lower()
+                        if ("model:" in body_l or "not_found_error" in body_l) and model_idx < len(candidate_models):
+                            logger.warning(
+                                "Anthropic model not found; trying fallback model next | current_model=%s",
+                                model_name,
+                            )
+                            break
                         raise AnthropicConfigurationError(
                             "Anthropic API returned 404. Check ANTHROPIC_BASE_URL (must be "
                             "https://api.anthropic.com without /v1) and ANTHROPIC_MODEL "
