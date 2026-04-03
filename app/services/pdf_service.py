@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import tempfile
@@ -693,8 +694,12 @@ def _build_dynamic_module_pages_from_payload(modules: list[dict[str, object]]) -
     for module in modules[:6]:
         title = _compress_text(str(module.get("module_title", "")), 12)
         topics = [_compress_text(str(t), 12) for t in (module.get("topics", []) or []) if str(t).strip()][:6]
-        activities = [_compress_text(str(a), 15) for a in (module.get("activities", []) or []) if str(a).strip()][:4]
-        records.append({"name": title or "Module", "topics": topics, "exercises": activities})
+        exercises = [_compress_text(str(a), 15) for a in (module.get("exercises", []) or []) if str(a).strip()]
+        case_studies = [_compress_text(str(a), 15) for a in (module.get("case_studies", []) or []) if str(a).strip()]
+        simulations = [_compress_text(str(a), 15) for a in (module.get("simulations", []) or []) if str(a).strip()]
+        legacy_activities = [_compress_text(str(a), 15) for a in (module.get("activities", []) or []) if str(a).strip()]
+        activity_pool = (exercises + case_studies + simulations + legacy_activities)[:6]
+        records.append({"name": title or "Module", "topics": topics, "exercises": activity_pool})
     return _build_dynamic_module_pages(records)
 
 
@@ -724,7 +729,14 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
     )
     modules_html = _build_dynamic_module_pages_from_payload(
         [
-            {"module_title": m.module_title, "topics": m.topics, "activities": m.activities}
+            {
+                "module_title": m.module_title,
+                "topics": m.topics,
+                "exercises": m.exercises,
+                "case_studies": m.case_studies,
+                "simulations": m.simulations,
+                "activities": m.activities,
+            }
             for m in payload.modules
         ]
     )
@@ -888,7 +900,18 @@ async def generate_pdf_path_async(outline_text: str | CourseOutlinePayload, vers
     if isinstance(outline_text, CourseOutlinePayload):
         final_html = inject_content_from_structured_payload(template_html, outline_text)
     else:
-        final_html = inject_content_into_template(template_html, outline_text)
+        # Prefer structured rendering even when outline is provided as JSON text.
+        parsed_payload: CourseOutlinePayload | None = None
+        try:
+            candidate = json.loads(outline_text or "")
+            if isinstance(candidate, dict):
+                parsed_payload = CourseOutlinePayload(**candidate)
+        except Exception:
+            parsed_payload = None
+        if parsed_payload is not None:
+            final_html = inject_content_from_structured_payload(template_html, parsed_payload)
+        else:
+            final_html = inject_content_into_template(template_html, outline_text)
     final_html = _ensure_base_href(final_html, TEMPLATE_DIR)
     final_html = _strip_scripts_for_pdf(final_html)
 

@@ -30,7 +30,12 @@ class CapabilityImpact(BaseModel):
 
 class ModuleItem(BaseModel):
     module_title: str
+    overview: str = ""
     topics: list[str] = Field(default_factory=list)
+    exercises: list[str] = Field(default_factory=list)
+    case_studies: list[str] = Field(default_factory=list)
+    simulations: list[str] = Field(default_factory=list)
+    # Backward compatibility for older payloads.
     activities: list[str] = Field(default_factory=list)
 
 

@@ -532,7 +532,14 @@ The JSON must match this exact shape:
     {"title": "string", "description": "string"}
   ],
   "modules": [
-    {"module_title": "string", "topics": ["string"], "activities": ["string"]}
+    {
+      "module_title": "string",
+      "overview": "string",
+      "topics": ["string"],
+      "exercises": ["string"],
+      "case_studies": ["string"],
+      "simulations": ["string"]
+    }
   ]
 }
 Use empty strings/lists where needed, but keep all keys present.
@@ -576,8 +583,21 @@ ROI_STYLE_CONSTRAINTS = """
 Style constraints:
 - Do not use em dashes; use commas or periods instead.
 - Keep modules dynamic based on context and objectives, never force a fixed count.
-- Include practical exercises/activities in every module.
+- Include practical exercises in every module.
+- Include realistic case studies and simulations where relevant.
 - Prefer natural narrative paragraphs over robotic bullet-only writing in overview sections.
+"""
+
+ROI_CONTENT_WRITER_PROMPT = """You are a senior corporate training content writer.
+Write a practical, human-sounding course outline from context, objectives, and research notes.
+Keep output concise, delivery-ready, and industry-specific.
+
+Rules:
+- Do not use em dashes.
+- Keep module count dynamic, based on scope and duration.
+- Each module must include overview, topics, exercises, case studies, and simulations.
+- Exercises must be concrete and realistic, not generic placeholders.
+- Program insight should be narrative paragraphs first, then concise bullets.
 """
 
 
@@ -998,7 +1018,7 @@ class ClaudeService:
             f"{research_notes_text}\n"
         )
         return await self._call_messages_api(
-            system_prompt=ROI_OUTLINE_PROMPT + "\n\n" + ROI_STYLE_CONSTRAINTS,
+            system_prompt=ROI_CONTENT_WRITER_PROMPT + "\n\n" + ROI_STYLE_CONSTRAINTS,
             user_prompt=user_prompt,
             timeout_s=timeout_s,
             max_attempts=max_attempts,
