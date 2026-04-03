@@ -104,6 +104,20 @@ class Settings(BaseSettings):
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
 
+    @field_validator("GAMMA_USE_TEMPLATE", mode="before")
+    @classmethod
+    def coerce_gamma_use_template(cls, value: object) -> bool:
+        """Railway/.env often provide booleans as strings; accept common variants."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
+
     @field_validator("AI_PROVIDER", mode="before")
     @classmethod
     def normalize_ai_provider(cls, value: object) -> str:

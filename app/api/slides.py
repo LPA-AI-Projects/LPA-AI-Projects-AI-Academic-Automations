@@ -3,7 +3,7 @@ import os
 import shutil
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, UploadFile, status
@@ -59,6 +59,7 @@ def _job_to_dict(job: CourseJob) -> dict:
     modules: list[dict[str, str | None]] = []
     module_gamma_links: dict[str, str] = {}
     zoho_attachment_payload: dict | None = None
+    gamma_request_log: list[dict[str, Any]] | None = None
     try:
         payload = json.loads(getattr(job, "payload_json", "") or "{}")
         if isinstance(payload, dict):
@@ -93,6 +94,9 @@ def _job_to_dict(job: CourseJob) -> dict:
             raw_zoho_payload = payload.get("zoho_attachment_payload")
             if isinstance(raw_zoho_payload, dict):
                 zoho_attachment_payload = raw_zoho_payload
+            raw_grl = payload.get("gamma_request_log")
+            if isinstance(raw_grl, list):
+                gamma_request_log = [x for x in raw_grl if isinstance(x, dict)]
     except Exception:
         google_file_id = None
         google_batch_links = []
@@ -101,12 +105,14 @@ def _job_to_dict(job: CourseJob) -> dict:
         modules = []
         module_gamma_links = {}
         zoho_attachment_payload = None
+        gamma_request_log = None
     return {
         "zoho_record_id": job.zoho_record_id,
         "job_type": getattr(job, "job_type", None),
         "status": job.status,
         "modules": modules,
         "module_gamma_links": module_gamma_links,
+        "gamma_request_log": gamma_request_log,
         "error": getattr(job, "error", None),
         "created_at": created_at,
     }

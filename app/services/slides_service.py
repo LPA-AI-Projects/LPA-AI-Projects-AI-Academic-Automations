@@ -452,6 +452,7 @@ async def process_slides_job(job_id) -> None:
             ppt_paths: list[str] = []
             gamma_batch_links: list[str] = []
             gamma_generation_ids: list[str] = []
+            gamma_request_log: list[dict[str, Any]] = []
             google_batch_links: list[str] = []
             google_batch_file_ids: list[str] = []
             module_gamma_links: list[dict[str, str | None]] = []
@@ -489,6 +490,20 @@ async def process_slides_job(job_id) -> None:
                         len(slides_batch),
                     )
                     gamma_result = await generate_ppt(slides_batch, include_export_bytes=False)
+                    req_payload = gamma_result.get("request_payload")
+                    if not isinstance(req_payload, dict):
+                        req_payload = {}
+                    gamma_request_log.append(
+                        {
+                            "module_index": mi,
+                            "batch_index": bi,
+                            "module_name": module_name,
+                            "gamma_endpoint": gamma_result.get("gamma_endpoint"),
+                            "gamma_create_url": gamma_result.get("gamma_create_url"),
+                            "generation_id": gamma_result.get("generation_id"),
+                            "request_payload": req_payload,
+                        }
+                    )
                     gamma_url = str(gamma_result.get("gamma_url") or "").strip()
                     editable_gamma_url = str(gamma_result.get("editable_gamma_url") or "").strip()
                     generation_id = str(gamma_result.get("generation_id") or "").strip()
@@ -521,6 +536,7 @@ async def process_slides_job(job_id) -> None:
                 payload_progress["module_gamma_links"] = module_gamma_links
                 payload_progress["gamma_batch_links"] = gamma_batch_links
                 payload_progress["gamma_generation_ids"] = gamma_generation_ids
+                payload_progress["gamma_request_log"] = gamma_request_log
                 job.payload_json = json.dumps(payload_progress)
                 await db.commit()
                 await asyncio.sleep(0)
@@ -546,6 +562,7 @@ async def process_slides_job(job_id) -> None:
             payload_state["google_drive_course_folder_id"] = drive_folder_id
             payload_state["google_drive_course_folder_link"] = drive_folder_link
             payload_state["module_gamma_links"] = module_gamma_links
+            payload_state["gamma_request_log"] = gamma_request_log
             payload_state["zoho_attachment_payload"] = {
                 "zoho_record_id": job.zoho_record_id,
                 "primary_link": primary_link,

@@ -119,12 +119,15 @@ async def generate_ppt(
             "sharingOptions": sharing_options,
         }
 
+    gamma_endpoint = "from-template" if use_template else "generate"
     logger.info(
-        "Gamma createGeneration | slides=%s num_cards=%s input_chars=%s mode=%s",
+        "Gamma createGeneration | slides=%s num_cards=%s input_chars=%s mode=%s url_suffix=%s template_set=%s",
         len(slides_batch),
         desired_cards,
         len(input_text),
-        "from-template" if use_template else "generate",
+        gamma_endpoint,
+        "/v1.0/generations/from-template" if use_template else "/v1.0/generations",
+        bool(template_id),
     )
 
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -174,6 +177,15 @@ async def generate_ppt(
                 logger.info("Gamma generation polling | generationId=%s attempt=%s status=%s", gen_id, attempt, status)
             await asyncio.sleep(2.0)
 
+        out_base: dict[str, Any] = {
+            "generation_id": gen_id,
+            "gamma_url": gamma_url,
+            "editable_gamma_url": editable_gamma_url,
+            # Echoes the JSON body sent to Gamma (for DB/debugging; no API key in body).
+            "gamma_endpoint": gamma_endpoint,
+            "gamma_create_url": create_url,
+            "request_payload": dict(payload),
+        }
         if include_export_bytes:
             if not export_url or not isinstance(export_url, str):
                 raise RuntimeError("Gamma generation did not complete with exportUrl.")
@@ -182,17 +194,13 @@ async def generate_ppt(
             dl.raise_for_status()
             logger.info("Gamma export downloaded | generationId=%s bytes=%s", gen_id, len(dl.content))
             return {
+                **out_base,
                 "ppt_bytes": dl.content,
-                "generation_id": gen_id,
-                "gamma_url": gamma_url,
-                "editable_gamma_url": editable_gamma_url,
             }
 
         logger.info("Gamma link-only mode | generationId=%s", gen_id)
         return {
+            **out_base,
             "ppt_bytes": b"",
-            "generation_id": gen_id,
-            "gamma_url": gamma_url,
-            "editable_gamma_url": editable_gamma_url,
         }
 

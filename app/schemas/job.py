@@ -1,5 +1,6 @@
 from datetime import datetime
 import uuid
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -50,6 +51,7 @@ class SlidesPipelineJobResponse(BaseModel):
     google_drive_course_folder_link: str | None = None
     gamma_batch_links: list[str] | None = None
     module_gamma_links: list[dict[str, str | None]] | None = None
+    gamma_request_log: list[dict[str, Any]] | None = None
     zoho_attachment_payload: dict | None = None
     error: str | None = None
     version_number: int | None = None
@@ -73,6 +75,7 @@ class JobResponse(BaseModel):
     google_drive_course_folder_link: str | None = None
     gamma_batch_links: list[str] | None = None
     module_gamma_links: list[dict[str, str | None]] | None = None
+    gamma_request_log: list[dict[str, Any]] | None = None
     zoho_attachment_payload: dict | None = None
     error: str | None = None
     version_number: int | None = None
