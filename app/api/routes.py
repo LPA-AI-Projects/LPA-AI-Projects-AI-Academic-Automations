@@ -34,6 +34,7 @@ from app.services.zoho_integration import (
     zoho_notify_course_outline_job_finished,
     zoho_notify_refined_outline_version,
 )
+from app.services.course_outline_graph import run_outline_langgraph_like_pipeline
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -301,25 +302,31 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
 
             context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
             ai = ClaudeService()
-            logger.info("AI step 1 started (learning objectives) | job_id=%s", str(job_id))
-            learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
-            logger.info("AI step 1 completed | job_id=%s", str(job_id))
             try:
-                logger.info("AI step 2 started (structured outline) | job_id=%s", str(job_id))
-                outline_payload = await wait_for(
-                    ai.build_roi_course_outline_json(context_text, learning_objectives),
-                    timeout=310,
+                logger.info("Outline graph pipeline started | job_id=%s", str(job_id))
+                graph_result = await wait_for(
+                    run_outline_langgraph_like_pipeline(input_data=input_data),
+                    timeout=620,
                 )
+                outline_payload = graph_result.outline_payload
                 outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
-                logger.info("AI step 2 completed with structured output | job_id=%s", str(job_id))
+                logger.info("Outline graph pipeline completed | job_id=%s", str(job_id))
             except RuntimeError:
-                logger.warning("Structured AI output failed, using text fallback | job_id=%s", str(job_id))
-                outline = await wait_for(
-                    ai.build_roi_course_outline(context_text, learning_objectives),
-                    timeout=310,
-                )
-                outline_payload = None
-                logger.info("AI fallback output completed | job_id=%s", str(job_id))
+                # Preserve old fallback behavior if modular pipeline fails.
+                logger.warning("Outline graph failed, using legacy AI fallback | job_id=%s", str(job_id))
+                learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
+                try:
+                    outline_payload = await wait_for(
+                        ai.build_roi_course_outline_json(context_text, learning_objectives),
+                        timeout=310,
+                    )
+                    outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
+                except RuntimeError:
+                    outline = await wait_for(
+                        ai.build_roi_course_outline(context_text, learning_objectives),
+                        timeout=310,
+                    )
+                    outline_payload = None
 
             pdf_path: str | None = None
             pdf_url = None

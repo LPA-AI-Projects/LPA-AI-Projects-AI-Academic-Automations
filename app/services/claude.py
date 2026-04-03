@@ -545,6 +545,41 @@ Apply feedback precisely without degrading formatting quality.
 Return the same strict JSON schema as requested.
 """
 
+CONTEXT_PROFILE_PROMPT = """You are a training-context profiler.
+From the input JSON, extract a compact context profile for downstream outline generation.
+Return strict JSON only with keys:
+{
+  "sector": "string",
+  "company_size": "string",
+  "training_level": "string",
+  "duration": "string",
+  "pax": "string",
+  "delivery_mode": "string",
+  "roles": ["string"]
+}
+Use empty strings/lists when unknown.
+"""
+
+RESEARCH_SUPPORT_PROMPT = """You are a training research assistant.
+Use web search when needed and produce practical support notes for course design.
+Return strict JSON only with keys:
+{
+  "duration_guidance": ["string"],
+  "exercise_patterns": ["string"],
+  "industry_roi_points": ["string"],
+  "risks_and_constraints": ["string"]
+}
+Keep each bullet specific and implementation-oriented.
+"""
+
+ROI_STYLE_CONSTRAINTS = """
+Style constraints:
+- Do not use em dashes; use commas or periods instead.
+- Keep modules dynamic based on context and objectives, never force a fixed count.
+- Include practical exercises/activities in every module.
+- Prefer natural narrative paragraphs over robotic bullet-only writing in overview sections.
+"""
+
 
 class ClaudeService:
     def __init__(self) -> None:
@@ -852,6 +887,8 @@ class ClaudeService:
         self,
         context_text: str,
         learning_objectives_text: str,
+        research_notes_text: str = "",
+        context_profile_text: str = "",
         *,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
@@ -862,6 +899,10 @@ class ClaudeService:
             "Learning Objectives Output:\n"
             f"{learning_objectives_text}\n"
         )
+        if (context_profile_text or "").strip():
+            user_prompt += f"\nContext Profile:\n{context_profile_text}\n"
+        if (research_notes_text or "").strip():
+            user_prompt += f"\nResearch Notes:\n{research_notes_text}\n"
         system_prompt = ROI_OUTLINE_PROMPT + "\n\n" + STRICT_JSON_OUTPUT_RULES
 
         for attempt in range(1, max_attempts + 1):
@@ -887,6 +928,101 @@ class ClaudeService:
                     await asyncio.sleep(2 ** (attempt - 1))
                     continue
                 raise RuntimeError("AI service returned invalid structured output.")
+
+    async def build_context_profile(
+        self,
+        context_text: str,
+        *,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    ) -> str:
+        return await self._call_messages_api(
+            system_prompt=CONTEXT_PROFILE_PROMPT,
+            user_prompt=context_text,
+            timeout_s=timeout_s,
+            max_attempts=max_attempts,
+        )
+
+    async def research_support_data(
+        self,
+        context_text: str,
+        learning_objectives_text: str,
+        *,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    ) -> str:
+        user_prompt = (
+            "Input Context:\n"
+            f"{context_text}\n\n"
+            "Learning Objectives Output:\n"
+            f"{learning_objectives_text}\n"
+        )
+        return await self._call_messages_api(
+            system_prompt=RESEARCH_SUPPORT_PROMPT,
+            user_prompt=user_prompt,
+            timeout_s=timeout_s,
+            max_attempts=max_attempts,
+        )
+
+    async def build_roi_outline_with_research(
+        self,
+        context_text: str,
+        learning_objectives_text: str,
+        research_notes_text: str,
+        context_profile_text: str,
+        *,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    ) -> str:
+        user_prompt = (
+            "Input Context:\n"
+            f"{context_text}\n\n"
+            "Context Profile:\n"
+            f"{context_profile_text}\n\n"
+            "Learning Objectives Output:\n"
+            f"{learning_objectives_text}\n\n"
+            "Research Notes:\n"
+            f"{research_notes_text}\n"
+        )
+        return await self._call_messages_api(
+            system_prompt=ROI_OUTLINE_PROMPT + "\n\n" + ROI_STYLE_CONSTRAINTS,
+            user_prompt=user_prompt,
+            timeout_s=timeout_s,
+            max_attempts=max_attempts,
+        )
+
+    async def normalize_to_payload(
+        self,
+        outline_text: str,
+        *,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    ) -> CourseOutlinePayload:
+        user_prompt = (
+            "Convert the following outline to the required schema JSON.\n\n"
+            f"{outline_text}\n"
+        )
+        system_prompt = (
+            "You are a strict schema normalizer for training outlines.\n\n"
+            + STRICT_JSON_OUTPUT_RULES
+        )
+        for attempt in range(1, max_attempts + 1):
+            raw = await self._call_messages_api(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                timeout_s=timeout_s,
+                max_attempts=1,
+            )
+            try:
+                json_candidate = self._extract_json_candidate(raw)
+                data = json.loads(json_candidate)
+                return CourseOutlinePayload(**data)
+            except Exception as exc:
+                logger.warning("Outline normalize failed attempt=%s/%s error=%r", attempt, max_attempts, exc)
+                if attempt < max_attempts:
+                    await asyncio.sleep(2 ** (attempt - 1))
+                    continue
+                raise RuntimeError("AI service returned invalid normalized structured output.")
 
     async def refine_course_outline_json(
         self,
