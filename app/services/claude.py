@@ -506,6 +506,38 @@ When a client brings a custom training need, your job is the same discipline app
 Both modes demand the same standard: researched, accurate, delivery-ready.
 """
 
+STRICT_JSON_OUTPUT_RULES = """Return ONLY valid JSON (no markdown fences, no extra commentary).
+The JSON must match this exact shape:
+{
+  "course_title": "string",
+  "duration": "string",
+  "total_hours": "string",
+  "program_insight": {
+    "paragraphs": ["string"],
+    "bullets": ["string"]
+  },
+  "course_details": {
+    "regions_served": "string",
+    "course_duration": "string",
+    "total_learning_hours": "string",
+    "key_benefits": "string",
+    "value_addition": "string",
+    "location": "string",
+    "date_time": "string"
+  },
+  "learning_objectives": [
+    {"title": "string", "description": "string"}
+  ],
+  "capability_impact": [
+    {"title": "string", "description": "string"}
+  ],
+  "modules": [
+    {"module_title": "string", "topics": ["string"], "activities": ["string"]}
+  ]
+}
+Use empty strings/lists where needed, but keep all keys present.
+"""
+
 REFINE_OUTLINE_PROMPT = """
 You are refining an existing course outline based on stakeholder feedback.
 Preserve quality, structure, and readability.
