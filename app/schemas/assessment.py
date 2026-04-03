@@ -28,3 +28,35 @@ class AssessmentQueuedResponse(BaseModel):
     status: str
     message: str
     polling: dict[str, str]
+
+
+class AssessmentAppGenerateResponse(BaseModel):
+    course_name: str
+    pre_level: str
+    post_level: str
+    num_questions: int
+    project_dir: str
+    commands: list[str]
+    validation: dict[str, Any]
+    pre_questions: list[dict[str, Any]]
+    post_questions: list[dict[str, Any]]
+    # Two separate builds (pre + post); each has its own theme/layout for LMS variety.
+    project_dir_pre: str | None = None
+    project_dir_post: str | None = None
+    zip_path: str | None = None
+    zip_path_pre: str | None = None
+    zip_path_post: str | None = None
+    validation_pre: dict[str, Any] | None = None
+    validation_post: dict[str, Any] | None = None
+    ui_variant_pre: dict[str, Any] | None = None
+    ui_variant_post: dict[str, Any] | None = None
+    codesandbox_url_pre: str | None = None
+    codesandbox_url_post: str | None = None
+    codesandbox_id_pre: str | None = None
+    codesandbox_id_post: str | None = None
+    codesandbox_deploy_error_pre: str | None = None
+    codesandbox_deploy_error_post: str | None = None
+    # Backward compatibility: first successful deploy URL / pre id.
+    codesandbox_url: str | None = None
+    codesandbox_id: str | None = None
+    codesandbox_deploy_error: str | None = None
