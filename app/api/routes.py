@@ -18,6 +18,7 @@ from sqlalchemy import text
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings
 from app.schemas.course import (
+    CourseInputData,
     GenerateCourseRequest,
     RefineCourseRequest,
     CourseVersionResponse,
@@ -56,6 +57,11 @@ def verify_api_key(
 
 
 auth = Depends(verify_api_key)
+
+
+def _input_data_dict_for_job(data: CourseInputData) -> dict:
+    """Flatten outline job input for JSON context; drop unset optional CRM fields."""
+    return data.model_dump(exclude_none=True, mode="json")
 
 
 @router.get(
@@ -179,6 +185,12 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
             "designation": form_data.get("designation", ""),
             "duration": form_data.get("duration", ""),
             "level_of_training": form_data.get("level_of_training", ""),
+            # Optional Zoho / CRM fields (also accept arbitrary extra keys below).
+            "no_of_pax": form_data.get("no_of_pax", ""),
+            "languages_prefered": form_data.get("languages_prefered")
+            or form_data.get("languages_preferred", ""),
+            "additional_certifications": form_data.get("additional_certifications", ""),
+            "additional_notes": form_data.get("additional_notes", ""),
         }
 
         # If questions are provided as a plain text blob, split by lines.
@@ -192,6 +204,14 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
                 ]
             else:
                 input_data["specific_questions"] = []
+
+        # Pass through any other non-empty form fields (future Zoho columns) into input_data.
+        _reserved_top = {"zoho_record_id", "record_id", "id", "crm_record_id"}
+        for k, v in form_data.items():
+            if k in _reserved_top:
+                continue
+            if k not in input_data and str(v).strip():
+                input_data[k] = v.strip() if isinstance(v, str) else v
 
         payload = {
             "zoho_record_id": str(zoho_record_id),
@@ -456,8 +476,11 @@ async def generate_course(
     req = await _parse_generate_request(request)
     logger.info("Queueing course generation | zoho_record_id=%s sync=%s", req.zoho_record_id, sync)
     # Debug visibility for Zoho webhook mappings: log full request payload and top-level input keys.
-    logger.info("Incoming /courses payload: %s", json.dumps(req.model_dump(), ensure_ascii=False))
-    logger.info("Incoming input_data keys: %s", sorted(list((req.input_data or {}).keys())))
+    logger.info("Incoming /courses payload: %s", json.dumps(req.model_dump(mode="json"), ensure_ascii=False))
+    logger.info(
+        "Incoming input_data keys: %s",
+        sorted(req.input_data.model_dump(exclude_none=False).keys()),
+    )
     try:
         # Short-lived session only: do not hold DB across sync LLM/PDF work or background latency.
         async with AsyncSessionLocal() as db:
@@ -478,7 +501,7 @@ async def generate_course(
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
     if sync:
-        await process_course_job(job.id, req.zoho_record_id, req.input_data)
+        await process_course_job(job.id, req.zoho_record_id, _input_data_dict_for_job(req.input_data))
         async with AsyncSessionLocal() as db2:
             result = await db2.execute(select(CourseJob).where(CourseJob.id == job.id))
             job_done = result.scalars().first()
@@ -490,7 +513,12 @@ async def generate_course(
             content=_job_to_course_outline_response(job_done).model_dump(mode="json"),
         )
 
-    background_tasks.add_task(process_course_job, job.id, req.zoho_record_id, req.input_data)
+    background_tasks.add_task(
+        process_course_job,
+        job.id,
+        req.zoho_record_id,
+        _input_data_dict_for_job(req.input_data),
+    )
     logger.info("Background task scheduled | job_id=%s", str(job.id))
     rid = req.zoho_record_id
     body = CourseOutlineQueuedResponse(

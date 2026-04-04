@@ -537,6 +537,7 @@ COURSE DETAILS TABLE (course_details)
 - key_benefits: ONE paragraph for the Key Benefits table cell. EXACTLY TWO sentences. Target about 38 to 52 words total. Brochure style: high-level participant outcomes (skills, dashboards, reporting, stakeholders). Do not write four long sentences. Do not list SQL keywords (SELECT, JOIN, GROUP BY), week numbers, or step-by-step syllabus detail here. No bullet characters. Tone like: first sentence on what participants enhance; second sentence on capabilities and presenting to stakeholders (adapt to course).
 - value_addition: ONE paragraph for the Value Addition & Impact cell. EXACTLY TWO sentences. Same length band (about 38 to 52 words). Organization-level value: reporting quality, insights, visibility, alignment, efficiency. Do not duplicate key_benefits sentence openings. No bullet characters. No em dash.
 - location, date_time: "To be confirmed" when unknown.
+- If the client JSON includes optional CRM fields (no_of_pax, languages_preferred, additional_certifications, additional_notes), use them only when present: mention language or cohort scale where it helps credibility (e.g. delivery pacing); reflect certification context in objectives or modules when relevant. Do not invent these values when the fields are absent or empty.
 
 LEARNING OBJECTIVES BLOCK (standard brochure page: intro paragraph, then a. through g., then two closing paragraphs)
 Match the compact brochure reference, not a dense technical spec.
