@@ -437,7 +437,6 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
 async def generate_course(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
     sync: bool = Query(
         False,
         description=(
@@ -454,13 +453,15 @@ async def generate_course(
     logger.info("Incoming /courses payload: %s", json.dumps(req.model_dump(), ensure_ascii=False))
     logger.info("Incoming input_data keys: %s", sorted(list((req.input_data or {}).keys())))
     try:
-        async with db.begin():
-            job = CourseJob(
-                zoho_record_id=req.zoho_record_id,
-                status="pending",
-            )
-            db.add(job)
-        await db.refresh(job)
+        # Short-lived session only: do not hold DB across sync LLM/PDF work or background latency.
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                job = CourseJob(
+                    zoho_record_id=req.zoho_record_id,
+                    status="pending",
+                )
+                db.add(job)
+            await db.refresh(job)
         logger.info(
             "Course generation job created | job_id=%s zoho_record_id=%s",
             str(job.id),
@@ -507,12 +508,9 @@ async def generate_course(
     dependencies=[auth],
     summary="Refine a course outline with feedback (zoho_record_id in request body)",
 )
-async def refine_course_from_body(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
+async def refine_course_from_body(request: Request):
     rid, req = await _parse_refine_request(request)
-    return await refine_course(zoho_record_id=rid, req=req, db=db)
+    return await refine_course(zoho_record_id=rid, req=req)
 
 
 @router.post(
@@ -524,7 +522,6 @@ async def refine_course_from_body(
 async def refine_course(
     zoho_record_id: str,
     req: RefineCourseRequest,
-    db: AsyncSession = Depends(get_db),
 ):
     rid = (zoho_record_id or "").strip()
     if not rid:
@@ -532,41 +529,38 @@ async def refine_course(
 
     logger.info("Refine requested | zoho_record_id=%s", rid)
 
-    try:
-        cres = await db.execute(select(Course).where(Course.zoho_record_id == rid))
-        course = cres.scalars().first()
-    except (SQLAlchemyError, OSError, Exception):
-        logger.exception("Database error while reading course")
-        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+    async with AsyncSessionLocal() as db:
+        try:
+            cres = await db.execute(select(Course).where(Course.zoho_record_id == rid))
+            course = cres.scalars().first()
+        except (SQLAlchemyError, OSError, Exception):
+            logger.exception("Database error while reading course")
+            raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
-    if not course:
-        logger.warning("Refine failed: course not found | zoho_record_id=%s", rid)
-        raise HTTPException(status_code=404, detail="Course not found for this zoho_record_id.")
+        if not course:
+            logger.warning("Refine failed: course not found | zoho_record_id=%s", rid)
+            raise HTTPException(status_code=404, detail="Course not found for this zoho_record_id.")
 
-    course_uuid = course.id
+        course_uuid = course.id
 
-    # Fetch latest version (read-only; do not hold locks during AI call)
-    try:
-        result = await db.execute(
-            select(CourseVersion)
-            .where(CourseVersion.course_id == course_uuid)
-            .order_by(CourseVersion.version_number.desc())
-        )
-        last_version = result.scalars().first()
-    except (SQLAlchemyError, OSError, Exception):
-        logger.exception("Database error while reading last version")
-        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+        try:
+            result = await db.execute(
+                select(CourseVersion)
+                .where(CourseVersion.course_id == course_uuid)
+                .order_by(CourseVersion.version_number.desc())
+            )
+            last_version = result.scalars().first()
+        except (SQLAlchemyError, OSError, Exception):
+            logger.exception("Database error while reading last version")
+            raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
-    if not last_version:
-        logger.warning("Refine failed: no versions | zoho_record_id=%s", rid)
-        raise HTTPException(status_code=404, detail="No outline versions found for this course.")
+        if not last_version:
+            logger.warning("Refine failed: no versions | zoho_record_id=%s", rid)
+            raise HTTPException(status_code=404, detail="No outline versions found for this course.")
 
-    # Close out the implicit transaction opened by the SELECT so we don't hold it
-    # during the long-running AI call (and to avoid "transaction already begun").
-    base_outline = last_version.outline_text
-    await db.rollback()
+        base_outline = last_version.outline_text or ""
 
-    # Call AI (structured refine first, fallback to text refine)
+    # Call AI (structured refine first, fallback to text refine) — no DB session held here
     try:
         ai = ClaudeService()
         try:
@@ -619,36 +613,47 @@ async def refine_course(
             str(e),
         )
 
-    # Save new version (single transaction + basic race-safe increment)
-    try:
-        # Lock the course row so concurrent refinements serialize version increments.
-        locked_course = await db.execute(
-            select(Course).where(Course.id == course_uuid).with_for_update()
-        )
-        if locked_course.scalars().first() is None:
-            raise HTTPException(status_code=404, detail="Course not found.")
+    new_version_id: uuid.UUID
+    new_version_number: int
+    saved_outline: str
+    saved_pdf_url: str | None
+    saved_created_at: object
 
-        current_max = await db.execute(
-            select(func.max(CourseVersion.version_number)).where(
-                CourseVersion.course_id == course_uuid
+    async with AsyncSessionLocal() as db:
+        try:
+            locked_course = await db.execute(
+                select(Course).where(Course.id == course_uuid).with_for_update()
             )
-        )
-        max_version_number = current_max.scalar_one_or_none() or 0
-        new_version_number = int(max_version_number) + 1
+            if locked_course.scalars().first() is None:
+                raise HTTPException(status_code=404, detail="Course not found.")
 
-        new_version = CourseVersion(
-            course_id=course_uuid,
-            version_number=new_version_number,
-            outline_text=updated_outline,
-            pdf_url=pdf_url,
-            feedback=req.feedback,
-        )
-        db.add(new_version)
-        await db.commit()
-        await db.refresh(new_version)
-    except (SQLAlchemyError, OSError, Exception):
-        logger.exception("Database error while saving refined version")
-        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
+            current_max = await db.execute(
+                select(func.max(CourseVersion.version_number)).where(
+                    CourseVersion.course_id == course_uuid
+                )
+            )
+            max_version_number = current_max.scalar_one_or_none() or 0
+            new_version_number = int(max_version_number) + 1
+
+            new_version = CourseVersion(
+                course_id=course_uuid,
+                version_number=new_version_number,
+                outline_text=updated_outline,
+                pdf_url=pdf_url,
+                feedback=req.feedback,
+            )
+            db.add(new_version)
+            await db.commit()
+            await db.refresh(new_version)
+            new_version_id = new_version.id
+            saved_outline = new_version.outline_text or ""
+            saved_pdf_url = new_version.pdf_url
+            saved_created_at = new_version.created_at
+        except HTTPException:
+            raise
+        except (SQLAlchemyError, OSError, Exception):
+            logger.exception("Database error while saving refined version")
+            raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
     if pdf_path and os.path.isfile(pdf_path):
         try:
@@ -657,16 +662,24 @@ async def refine_course(
                 pdf_path,
                 course_name=name_for_file,
                 zoho_record_id=rid,
-                version_number=new_version.version_number,
+                version_number=new_version_number,
             )
             if drive_up and isinstance(drive_up.get("edit_link"), str) and drive_up["edit_link"].strip():
-                new_version.pdf_url = drive_up["edit_link"].strip()
-                await db.commit()
-                await db.refresh(new_version)
+                edit_link = drive_up["edit_link"].strip()
+                async with AsyncSessionLocal() as db:
+                    vres = await db.execute(
+                        select(CourseVersion).where(CourseVersion.id == new_version_id)
+                    )
+                    vrow = vres.scalars().first()
+                    if vrow is not None:
+                        vrow.pdf_url = edit_link
+                        await db.commit()
+                        await db.refresh(vrow)
+                        saved_pdf_url = vrow.pdf_url
                 logger.info(
                     "Refine: outline PDF uploaded to Drive | zoho_record_id=%s url=%s",
                     rid,
-                    new_version.pdf_url,
+                    saved_pdf_url,
                 )
         except GoogleDriveUploadError as e:
             logger.warning(
@@ -680,9 +693,9 @@ async def refine_course(
     try:
         await zoho_notify_refined_outline_version(
             zoho_record_id=rid,
-            pdf_url=new_version.pdf_url,
-            version_number=new_version.version_number,
-            course_name_for_title=f"{name_for_file} — outline v{new_version.version_number}",
+            pdf_url=saved_pdf_url,
+            version_number=new_version_number,
+            course_name_for_title=f"{name_for_file} — outline v{new_version_number}",
         )
     except Exception:
         logger.exception("Refine: Zoho notify skipped due to error | zoho_record_id=%s", rid)
@@ -690,12 +703,12 @@ async def refine_course(
     logger.info("Course refined | zoho_record_id=%s version=%s", rid, new_version_number)
 
     return CourseVersionResponse(
-        version_id=new_version.id,
+        version_id=new_version_id,
         zoho_record_id=rid,
-        version_number=new_version.version_number,
-        pdf_url=new_version.pdf_url,
-        outline=new_version.outline_text,
-        created_at=new_version.created_at,
+        version_number=new_version_number,
+        pdf_url=saved_pdf_url,
+        outline=saved_outline,
+        created_at=saved_created_at,
     )
 
 
