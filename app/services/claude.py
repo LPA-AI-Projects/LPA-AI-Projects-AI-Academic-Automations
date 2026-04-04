@@ -452,11 +452,11 @@ ROI Categories:
 STEP 5 — MODULE COUNT (CUSTOM MODE ONLY)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- 1-day → 2–3 modules
-- 2-day → 4–5 modules
-- 3-day → 5–7 modules
-- 4-day → 6–9 modules
-- 5+ day → 8–12 modules
+- 1-day → 3–4 modules
+- 2-day → 6–8 modules (session-sized blocks; do not stop at five unless the brief explicitly asks for fewer)
+- 3-day → 7–10 modules
+- 4-day → 8–12 modules
+- 5+ day → 10–14 modules
 
 Flow: Foundation → Application → Mastery
 Theory: 40% | Practice: 60%
@@ -564,8 +564,12 @@ CAPABILITY IMPACT (slim brochure page: keep density similar to a compact Learnin
 - capability_impact_closing: EXACTLY ONE paragraph (no blank line, no second or third paragraph). Two or three sentences total, roughly 45 to 75 words. Summarize the shift or outcome at a high level. You may include one **bold phrase** for emphasis. Do not repeat the six rows or add extra essay-style paragraphs.
 
 MODULES (compact table: Sno., Modules, Topics, Exercises)
-- Choose how many modules to include from context: course duration (hours or days), total learning hours, accreditation domains, scope, and delivery format. Do NOT fix a single number. A short intensive course may need 3 to 4 modules; a multi-day program may need 5 to 8. Each module should map to a coherent block of content (concept, day, or official domain).
-- For analytics / Power BI / workforce reporting programs, a common pattern for longer courses is: foundations and tool intro; transformation and modeling; dashboards; KPIs and insights; visualization and storytelling; automation and business application. Use only as many of these as fit the duration; merge or split to match the chosen module count.
+- MODULE COUNT (must follow duration and total_learning_hours from input; never invent a fixed count of five for every course)
+  - Read course_duration and total_learning_hours (or infer from phrases like "2 days", "16 hours"). When days and hours both appear, prefer splitting into enough modules to fill the real schedule.
+  - Guide by contact time: 1 day (~6–8 h): 3–4 modules. **2 days (~12–16 h): 6–8 modules** (morning/afternoon blocks). 3 days: 7–10. Longer programs: scale up. A **two-day** program should **not** default to five modules unless the client explicitly requested a compact five-module agenda.
+  - Broad scope or high total hours for the same calendar days: use the **upper** end of the range (more modules, thinner slices per module).
+- Each module should map to a coherent block (half-day, theme, or official domain). Do not merge whole days into one module just to keep the array short.
+- For analytics / Power BI / workforce reporting programs, a common pattern for longer courses is: foundations and tool intro; transformation and modeling; dashboards; KPIs and insights; visualization and storytelling; automation and business application. Split across enough modules to match the duration rules above; merge only when the brief is narrow.
 - module_title: topic name ONLY (no "Module N:"). Keep titles readable.
 - topics: exactly 5 or 6 strings per module. Each string is ONE line of 4 to 8 words (hard limit). Single phrase or short sentence, not a paragraph. Sentence case. No numbering in the topic text.
 - overview: optional; if used, at most 2 short sentences. Prefer leaving overview tight or empty rather than long.
@@ -590,7 +594,7 @@ STRICT_JSON_OUTPUT_RULES = """Return ONLY valid JSON (no markdown fences, no ext
 learning_objectives must contain exactly 7 objects; capability_impact must contain exactly 6 objects with the fixed titles.
 key_benefits and value_addition must each be exactly two sentences and roughly 38-52 words (compact brochure table cells, not long technical essays).
 program_insight.paragraphs: three strings; each at most two sentences, about 38-58 words; first sentence of each forms the Course Details page summary; total ~120-175 words. Exactly six bullets (10-18 words each).
-modules: array length is chosen from duration, hours, and scope (typically about 4 to 8 items; fewer for short courses).
+modules: array length follows the brochure MODULE COUNT rules (e.g. **6–8** for a typical **two-day** course). Do not default to exactly five modules for two-day programs unless the input explicitly asks for five.
 capability_impact_intro: two sentences; each capability_impact[].description: one sentence 18-28 words; capability_impact_closing: one paragraph only, 2-3 sentences.
 The JSON must match this exact shape (all keys present; use "" or [] only where the brochure rules allow empty):
 {
@@ -639,7 +643,7 @@ You are refining an existing course outline JSON based on stakeholder feedback.
 Preserve: brochure tone; do NOT use em dashes or en dashes in any field; 3 program_insight paragraphs (~38-58 words each, max 2 sentences, **bold** phrases allowed) + exactly 6 bullets; first sentence of each insight paragraph forms Course Details summary;
 exactly 7 learning objectives: compact brochure titles (no colon), 8-16 word descriptions; intro 4 sentences; closing 2 paragraphs of 3 sentences each with **bold** phrases;
 capability impact: intro 2 sentences; each of 6 rows one sentence only (18-28 words); closing ONE short paragraph (2-3 sentences), not multiple long closings;
-module count from context (duration, hours, scope); module titles without "Module N:" prefix;
+module count from context (duration, hours, scope): for **two-day** programs prefer **6–8** modules unless feedback says to keep five; module titles without "Module N:" prefix;
 topics: 4 to 8 words per line; modules: three activity lines per module; at most 6 words after each activity label; progression: first module Exercise/Case study/Simulation only (no Hands-on, no Role-play), middle modules Hands-on and Simulation, Role-play in late modules when course length allows, last module business application;
 key_benefits and value_addition: each exactly TWO sentences, about 38 to 52 words; brochure table style, not four-sentence technical deep dives.
 Return the same strict JSON schema as in STRICT_JSON_OUTPUT_RULES.
