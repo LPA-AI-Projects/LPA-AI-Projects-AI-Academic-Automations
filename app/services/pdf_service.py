@@ -23,6 +23,134 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
 TEMPLATE_PATH = TEMPLATE_DIR / "index.html"
 
+# Brochure copy: strip em/en dashes so output matches print style (commas instead of "AI" dashes).
+_DASH_CHARS = ("\u2014", "\u2013", "\u2012", "\u2015")
+
+
+def _brochure_strip_dashes(text: str | None) -> str:
+    if text is None:
+        return ""
+    s = str(text)
+    for ch in _DASH_CHARS:
+        s = s.replace(ch, ", ")
+    s = re.sub(r",\s*,+", ", ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def _brochure_details_table_blurb(text: str | None, *, max_sentences: int = 2, max_words: int = 58) -> str:
+    """
+    Key Benefits / Value Addition cells: match compact brochure samples (two short sentences, ~40-50 words).
+    If the model returns long multi-sentence blocks, keep the first sentences and trim words.
+    """
+    s = _brochure_strip_dashes((text or "").strip())
+    if not s:
+        return ""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", s) if p.strip()]
+    if not parts:
+        return _compress_text(s, max_words)
+    merged = " ".join(parts[:max_sentences]).strip()
+    if merged and merged[-1] not in ".!?":
+        merged += "."
+    if len(merged.split()) > max_words:
+        merged = _compress_text(merged, max_words)
+        if merged and merged[-1] not in ".!?":
+            merged += "."
+    return merged
+
+
+def _details_page_summary_from_insight(paragraphs: list[str]) -> str:
+    """
+    Course Details page (pDetSummary): one flowing paragraph of three sentences, built from the
+    first sentence of each Program Insight paragraph so it matches full-brochure samples.
+    """
+    sentences: list[str] = []
+    for raw in (paragraphs or [])[:3]:
+        ps = _brochure_strip_dashes(str(raw).strip())
+        if not ps:
+            continue
+        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", ps) if p.strip()]
+        if parts:
+            sentences.append(parts[0])
+    merged = " ".join(sentences).strip()
+    if not merged:
+        return ""
+    if merged[-1] not in ".!?":
+        merged += "."
+    if len(merged.split()) > 105:
+        merged = _compress_text(merged, 100)
+        if merged and merged[-1] not in ".!?":
+            merged += "."
+    return merged
+
+
+def _slim_insight_paragraph(text: str, max_sentences: int = 2, max_words: int = 62) -> str:
+    """Program Insight body: max two sentences per paragraph, brochure density."""
+    s = _brochure_strip_dashes(text.strip())
+    if not s:
+        return ""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", s) if p.strip()]
+    merged = " ".join(parts[:max_sentences]).strip()
+    if merged and merged[-1] not in ".!?":
+        merged += "."
+    if len(merged.split()) > max_words:
+        merged = _compress_text(merged, max_words)
+        if merged and merged[-1] not in ".!?":
+            merged += "."
+    return merged
+
+
+def _slim_insight_bullet(text: str, max_words: int = 18) -> str:
+    """Six outcome lines: one compact line each."""
+    s = _brochure_strip_dashes(text.strip())
+    if not s:
+        return ""
+    return _compress_text(s, max_words)
+
+
+def _slim_capability_row_description(text: str | None, max_words: int = 28) -> str:
+    """One sentence per row; trim if the model returns multiple sentences or long text."""
+    s = _brochure_strip_dashes((text or "").strip())
+    if not s:
+        return ""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", s) if p.strip()]
+    first = parts[0] if parts else s
+    return _compress_text(first, max_words)
+
+
+def _slim_capability_closing(text: str | None, max_sentences: int = 3, max_words: int = 88) -> str:
+    """Single closing paragraph: ignore extra paragraphs; cap sentences and words."""
+    s = _brochure_strip_dashes((text or "").strip())
+    if not s:
+        return ""
+    first_block = s.split("\n\n")[0].strip()
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", first_block) if p.strip()]
+    merged = " ".join(parts[:max_sentences]).strip()
+    if merged and merged[-1] not in ".!?":
+        merged += "."
+    if len(merged.split()) > max_words:
+        merged = _compress_text(merged, max_words)
+        if merged and merged[-1] not in ".!?":
+            merged += "."
+    return merged
+
+
+def _clean_learning_objective_title(title: str | None) -> str:
+    """Match brochure samples: compact heading, no trailing colon, cap length if the model over-stuffs the title."""
+    t = _brochure_strip_dashes((title or "").strip())
+    while t.endswith(":"):
+        t = t[:-1].strip()
+    return _compress_text(t, 12)
+
+
+def _clean_module_title_for_table(title: str | None) -> str:
+    """Remove redundant 'Module 1:' prefixes; table column already means module."""
+    t = _brochure_strip_dashes(title)
+    t = re.sub(r"(?i)^module\s*\d+\s*[:.)-]?\s*", "", t)
+    t = re.sub(r"(?i)^module\s+[a-z]\s*[:.)-]?\s*", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
 
 def load_template() -> str:
     """
@@ -110,6 +238,25 @@ def _compress_text(text: str, max_words: int) -> str:
         return ""
     words = cleaned.split()
     return " ".join(words[:max_words]).strip()
+
+
+def _cap_activity_after_label(line: str, max_words: int = 6) -> str:
+    """
+    Brochure rule: at most max_words after the first colon (label: tail).
+    Keeps short lines like "Simulation: resolving data issues."
+    """
+    s = _clean_line(line)
+    if ":" not in s:
+        return s
+    label, sep, tail = s.partition(":")
+    tail = tail.strip()
+    if not tail:
+        return f"{label.strip()}{sep} "
+    words = tail.rstrip(".").strip().split()
+    if not words:
+        return f"{label.strip()}{sep} "
+    capped = " ".join(words[:max_words]).rstrip(",;:")
+    return f"{label.strip()}{sep} {capped}."
 
 
 def _collect_section_lines(lines: list[str], heading_keywords: Iterable[str]) -> list[str]:
@@ -270,6 +417,31 @@ def _render_bold_markdown_to_html(text: str) -> str:
     return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
 
 
+_MODULE_EXERCISE_LABEL = re.compile(
+    r"^\s*((?:Exercise|Case study|Simulation|Hands-on|Role-play)\s*:\s*)",
+    re.IGNORECASE,
+)
+
+
+def _render_module_exercise_line_html(text: str) -> str:
+    """
+    Training Modules / Exercises column: bold the label (Exercise:, Case study:, etc.), normal weight after.
+    Matches brochure reference styling.
+    """
+    s = (text or "").strip()
+    if not s:
+        return ""
+    m = _MODULE_EXERCISE_LABEL.match(s)
+    if not m:
+        return _render_bold_markdown_to_html(s)
+    prefix = m.group(1).strip()
+    rest = s[m.end() :].strip()
+    head = f"<strong>{escape(prefix)}</strong>"
+    if rest:
+        return f"{head} {escape(rest)}"
+    return head
+
+
 def _build_cover_title_html(title: str) -> str:
     """
     Keep cover heading visually aligned for short and long titles.
@@ -294,20 +466,16 @@ def _build_cover_title_html(title: str) -> str:
 
 def _build_cover_title_text(raw_title: str) -> str:
     """
-    Create a cleaner, sample-like cover title.
-    Example:
-    "Avaloq Core MDB Certification Preparation (Avaloq-ABR/S)"
-    -> "Avaloq Core MDB"
+    Cover main line. Only split on colon ":" so hyphenated program names stay intact.
+    Example: "Data Analytics - Power BI for HR" stays one title (not split into title + subtitle).
+    Use "Title: Tagline" only when the tagline is truly separate after a colon.
     """
     base = _clean_line(raw_title or "COURSE OUTLINE")
     if not base:
         return "COURSE OUTLINE"
 
-    # Prefer concise heading: use part before ":" or " - " as title.
-    # Example:
-    # "Data Science for Software Developers: Building Data-Driven Solutions..."
-    # -> "Data Science for Software Developers"
-    split_match = re.split(r"\s*[:\-–—]\s*", base, maxsplit=1)
+    # Split only on colon — not on hyphen (hyphens are common inside course names).
+    split_match = re.split(r"\s*:\s*", base, maxsplit=1)
     primary = split_match[0].strip() if split_match else base
 
     # Remove bracketed suffix noise from title line.
@@ -315,25 +483,26 @@ def _build_cover_title_text(raw_title: str) -> str:
 
     # Keep heading short and readable on cover.
     words = primary.split()
-    if len(words) > 8:
-        primary = " ".join(words[:8]).strip()
-    if len(primary) > 64:
-        primary = primary[:64].rstrip()
+    if len(words) > 12:
+        primary = " ".join(words[:12]).strip()
+    if len(primary) > 80:
+        primary = primary[:80].rstrip()
 
     return primary or "COURSE OUTLINE"
 
 
 def _build_cover_subtitle_text(raw_title: str, current_subtitle: str = "") -> str:
     """
-    Produce a meaningful subtitle (instead of generic filler).
+    Subtitle: explicit subtitle, or text after a single colon in course_title, or generic fallback.
+    Hyphens in the title do not create a subtitle (see _build_cover_title_text).
     """
     subtitle = _clean_line(current_subtitle)
     if subtitle and subtitle.lower() != "course curriculum":
         return subtitle[:90]
 
     raw = _clean_line(raw_title)
-    # If title contains "Title: Subtitle", use right side as subtitle.
-    split_match = re.split(r"\s*[:\-–—]\s*", raw, maxsplit=1)
+    # Only "Title: tagline" uses colon — not hyphen.
+    split_match = re.split(r"\s*:\s*", raw, maxsplit=1)
     if len(split_match) == 2:
         rhs = split_match[1].strip()
         if rhs:
@@ -562,7 +731,10 @@ def _build_objective_html(items: list[tuple[str, str]], intro: str, closing: str
             blocks.append("</div>")
         blocks.append("</div>")
     if closing:
-        blocks.append(f'<p class="obj-closing">{_render_bold_markdown_to_html(closing)}</p>')
+        for para in closing.split("\n\n"):
+            p = para.strip()
+            if p:
+                blocks.append(f'<p class="obj-closing">{_render_bold_markdown_to_html(p)}</p>')
     blocks.append("</div>")
     return "".join(blocks)
 
@@ -582,7 +754,10 @@ def _build_impact_html(items: list[tuple[str, str]], intro: str, closing: str) -
             "</div>"
         )
     if closing:
-        rows.append(f'<p class="impact-closing">{_render_bold_markdown_to_html(closing)}</p>')
+        for para in closing.split("\n\n"):
+            p = para.strip()
+            if p:
+                rows.append(f'<p class="impact-closing">{_render_bold_markdown_to_html(p)}</p>')
     return "".join(rows)
 
 
@@ -631,12 +806,14 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
             topics = rec.get("topics", [])
             exercises = rec.get("exercises", [])
             topics_html = "".join(
-                f"<li>{_render_bold_markdown_to_html(str(t))}</li>"
+                f"<li>{escape(str(t).strip())}</li>"
                 for t in (topics if isinstance(topics, list) else [])
+                if str(t).strip()
             )
             ex_html = "".join(
-                f"<li>{_render_bold_markdown_to_html(str(e))}</li>"
+                f"<li>{_render_module_exercise_line_html(str(e))}</li>"
                 for e in (exercises if isinstance(exercises, list) else [])
+                if str(e).strip()
             )
             rows.append(
                 "<tr>"
@@ -689,16 +866,49 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
     return "".join(pages)
 
 
+# Brochure activity lines: Exercise / Case study / Simulation / Hands-on / Role-play
+_ACTIVITY_LABEL_OK = re.compile(
+    r"(?i)^(case study|exercise|simulation|hands-on|role-play)\s*:",
+)
+
+
+def _collect_payload_module_exercises(module: dict[str, object]) -> list[str]:
+    """
+    Merge exercises + case_studies + simulations slots into the three table lines (order preserved).
+    Lines should already include a label; Role-play and Hands-on are first-class.
+    """
+    out: list[str] = []
+
+    def _push(raw: str, default_if_unlabeled: str) -> None:
+        s = _brochure_strip_dashes(str(raw).strip())
+        if not s:
+            return
+        line = s if _ACTIVITY_LABEL_OK.match(s) else f"{default_if_unlabeled}: {s}"
+        out.append(_cap_activity_after_label(line, 6))
+
+    for a in module.get("exercises") or []:
+        _push(a, "Exercise")
+    if len(out) >= 3:
+        return out[:8]
+    for a in module.get("case_studies") or []:
+        _push(a, "Case study")
+    for a in module.get("simulations") or []:
+        _push(a, "Simulation")
+    for a in module.get("activities") or []:
+        _push(a, "Hands-on")
+    return out[:8]
+
+
 def _build_dynamic_module_pages_from_payload(modules: list[dict[str, object]]) -> str:
     records: list[dict[str, list[str] | str]] = []
-    for module in modules[:6]:
-        title = _compress_text(str(module.get("module_title", "")), 12)
-        topics = [_compress_text(str(t), 12) for t in (module.get("topics", []) or []) if str(t).strip()][:6]
-        exercises = [_compress_text(str(a), 15) for a in (module.get("exercises", []) or []) if str(a).strip()]
-        case_studies = [_compress_text(str(a), 15) for a in (module.get("case_studies", []) or []) if str(a).strip()]
-        simulations = [_compress_text(str(a), 15) for a in (module.get("simulations", []) or []) if str(a).strip()]
-        legacy_activities = [_compress_text(str(a), 15) for a in (module.get("activities", []) or []) if str(a).strip()]
-        activity_pool = (exercises + case_studies + simulations + legacy_activities)[:6]
+    for module in modules[:12]:
+        title = _compress_text(_clean_module_title_for_table(str(module.get("module_title", ""))), 16)
+        topics = [
+            _compress_text(_brochure_strip_dashes(str(t)), 8)
+            for t in (module.get("topics", []) or [])
+            if str(t).strip()
+        ][:8]
+        activity_pool = _collect_payload_module_exercises(module)
         records.append({"name": title or "Module", "topics": topics, "exercises": activity_pool})
     return _build_dynamic_module_pages(records)
 
@@ -706,26 +916,70 @@ def _build_dynamic_module_pages_from_payload(modules: list[dict[str, object]]) -
 def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayload) -> str:
     insight_html_parts: list[str] = []
     for p in payload.program_insight.paragraphs:
-        if p.strip():
-            insight_html_parts.append(f'<p class="insight-para">{_render_bold_markdown_to_html(p.strip())}</p>')
+        ps = _slim_insight_paragraph(p)
+        if ps:
+            insight_html_parts.append(f'<p class="insight-para">{_render_bold_markdown_to_html(ps)}</p>')
     if payload.program_insight.bullets:
         bullets = "".join(
-            f'<li class="insight-bullet-item">{_render_bold_markdown_to_html(b.strip())}</li>'
+            f'<li class="insight-bullet-item">{_render_bold_markdown_to_html(_slim_insight_bullet(b))}</li>'
             for b in payload.program_insight.bullets
-            if b.strip()
+            if str(b).strip()
         )
         insight_html_parts.append(f'<ul class="insight-bullets">{bullets}</ul>')
-    insight_html = "".join(insight_html_parts) or '<p class="insight-para">—</p>'
+    insight_html = "".join(insight_html_parts) or '<p class="insight-para">Content pending.</p>'
 
+    lo_intro = _brochure_strip_dashes((payload.learning_objectives_intro or "").strip())
+    lo_closing = _brochure_strip_dashes((payload.learning_objectives_closing or "").strip())
+    objective_rows: list[tuple[str, str]] = []
+    for o in payload.learning_objectives:
+        t = _clean_learning_objective_title(o.title)
+        d = _brochure_strip_dashes((o.description or "").strip())
+        if d:
+            d = _compress_text(d, 18)
+        objective_rows.append((t, d))
     objective_html = _build_objective_html(
-        [(o.title, o.description) for o in payload.learning_objectives],
-        intro="By the end of this program, participants will be able to:",
-        closing="These objectives align to the target role and business context.",
+        objective_rows,
+        intro=lo_intro
+        or (
+            "This program focuses on enhancing participants' ability to apply new skills in a real work context. "
+            "It is designed to build on existing knowledge with clear methods and practical exercises. "
+            "Participants will learn to structure work effectively and produce outcomes that support decisions. "
+            "The objective is to enable confident use of what they learn after the program ends."
+        ),
+        closing=lo_closing
+        or (
+            "By the end of the program, participants will be equipped to apply methods independently in their roles. "
+            "They will gain hands-on experience in scenarios that mirror real workflows, ensuring immediate applicability. "
+            "The training emphasizes **practical application and analytical confidence**, moving beyond basic familiarity.\n\n"
+            "Participants will also strengthen how they interpret and present insights to stakeholders. "
+            "The program supports **job-ready skills and improved decision-making capability** for organizational goals. "
+            "Learners will be better prepared to use analytics as part of day-to-day responsibilities."
+        ),
     )
+    raw_ci = (payload.capability_impact_intro or "").strip()
+    ci_intro = _brochure_details_table_blurb(raw_ci, max_sentences=2, max_words=58) if raw_ci else ""
+    raw_cc = (payload.capability_impact_closing or "").strip()
+    ci_closing = _slim_capability_closing(raw_cc) if raw_cc else ""
+    impact_rows: list[tuple[str, str]] = []
+    for i in payload.capability_impact:
+        impact_rows.append(
+            (
+                _brochure_strip_dashes(i.title),
+                _slim_capability_row_description(i.description),
+            )
+        )
     impact_html = _build_impact_html(
-        [(i.title, i.description) for i in payload.capability_impact],
-        intro="Expected capability and business impact from this program:",
-        closing="Final outcomes depend on adoption, reinforcement, and execution discipline.",
+        impact_rows,
+        intro=ci_intro
+        or (
+            "This program strengthens how teams apply new skills in real workflows and measure results. "
+            "Outcomes depend on reinforcement, leadership support, and consistent use of insights after training."
+        ),
+        closing=ci_closing
+        or (
+            "The shift from ad hoc reporting to repeatable analytics is a meaningful upgrade for people and planning. "
+            "**Sustainable performance** grows when teams keep using what they learned in day-to-day decisions."
+        ),
     )
     modules_html = _build_dynamic_module_pages_from_payload(
         [
@@ -747,14 +1001,35 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
     updated = html
     updated = _replace_inner_html_by_id(updated, "pTitle", _build_cover_title_html(display_title))
     updated = _replace_inner_html_by_id(updated, "pSubtitle", escape(display_subtitle))
-    updated = _replace_inner_html_by_id(updated, "pDuration", escape(payload.duration or "—"))
+    updated = _replace_inner_html_by_id(updated, "pDuration", escape(_brochure_strip_dashes(payload.duration or "TBC")))
     updated = _replace_inner_html_by_id(updated, "pInsight", insight_html)
-    updated = _replace_inner_html_by_id(updated, "pDetSummary", _render_bold_markdown_to_html("Business-aligned, outcome-focused training roadmap."))
-    updated = _replace_inner_html_by_id(updated, "pRegions", escape(payload.course_details.regions_served or "Global"))
-    updated = _replace_inner_html_by_id(updated, "pDetDuration", escape(payload.course_details.course_duration or payload.duration or "—"))
-    updated = _replace_inner_html_by_id(updated, "pHours", escape(payload.course_details.total_learning_hours or payload.total_hours or "—"))
-    updated = _replace_inner_html_by_id(updated, "pBenefits", escape(payload.course_details.key_benefits or "—"))
-    updated = _replace_inner_html_by_id(updated, "pValue", escape(payload.course_details.value_addition or "—"))
+    det_summary = _details_page_summary_from_insight(payload.program_insight.paragraphs)
+    updated = _replace_inner_html_by_id(updated, "pDetSummary", _render_bold_markdown_to_html(det_summary))
+    updated = _replace_inner_html_by_id(updated, "pRegions", escape(_brochure_strip_dashes(payload.course_details.regions_served or "Global")))
+    updated = _replace_inner_html_by_id(
+        updated,
+        "pDetDuration",
+        escape(_brochure_strip_dashes(payload.course_details.course_duration or payload.duration or "TBC")),
+    )
+    updated = _replace_inner_html_by_id(
+        updated,
+        "pHours",
+        escape(_brochure_strip_dashes(payload.course_details.total_learning_hours or payload.total_hours or "TBC")),
+    )
+    updated = _replace_inner_html_by_id(
+        updated,
+        "pBenefits",
+        escape(
+            _brochure_details_table_blurb(payload.course_details.key_benefits or "See program overview.")
+        ),
+    )
+    updated = _replace_inner_html_by_id(
+        updated,
+        "pValue",
+        escape(
+            _brochure_details_table_blurb(payload.course_details.value_addition or "See program overview.")
+        ),
+    )
     updated = _replace_inner_html_by_id(updated, "pLocation", escape(payload.course_details.location or "To be confirmed"))
     updated = _replace_inner_html_by_id(updated, "pDatetime", escape(payload.course_details.date_time or "To be confirmed"))
     updated = _replace_inner_html_by_id(updated, "pObjective", objective_html)

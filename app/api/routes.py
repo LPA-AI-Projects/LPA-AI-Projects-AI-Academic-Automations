@@ -24,6 +24,7 @@ from app.schemas.course import (
     CourseVersionsResponse,
     VersionSummary,
 )
+from app.schemas.integration import CourseOutlineIntegrationStatus
 from app.schemas.job import CourseOutlineJobResponse, CourseOutlineQueuedResponse
 from app.models.course import Course, CourseVersion
 from app.models.job import CourseJob
@@ -34,7 +35,6 @@ from app.services.zoho_integration import (
     zoho_notify_course_outline_job_finished,
     zoho_notify_refined_outline_version,
 )
-from app.services.course_outline_graph import run_outline_langgraph_like_pipeline
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,6 +56,21 @@ def verify_api_key(
 
 
 auth = Depends(verify_api_key)
+
+
+@router.get(
+    "/integrations/course-outline-status",
+    response_model=CourseOutlineIntegrationStatus,
+    dependencies=[auth],
+    tags=["integrations"],
+    summary="Course outline: Google Drive + Zoho env configuration (no secrets)",
+    description=(
+        "Returns booleans only: whether OAuth/folder/webhook/CRM attach prerequisites are set. "
+        "Does not validate tokens against Google or Zoho."
+    ),
+)
+def course_outline_integration_status():
+    return get_course_outline_integration_status()
 
 
 def _job_to_course_outline_response(job: CourseJob) -> CourseOutlineJobResponse:
@@ -302,31 +317,22 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
 
             context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
             ai = ClaudeService()
+            # Legacy outline pipeline only (no LangGraph / multi-node graph).
+            logger.info("Outline generation started | job_id=%s", str(job_id))
+            learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
             try:
-                logger.info("Outline graph pipeline started | job_id=%s", str(job_id))
-                graph_result = await wait_for(
-                    run_outline_langgraph_like_pipeline(input_data=input_data),
-                    timeout=3600,
+                outline_payload = await wait_for(
+                    ai.build_roi_course_outline_json(context_text, learning_objectives),
+                    timeout=310,
                 )
-                outline_payload = graph_result.outline_payload
                 outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
-                logger.info("Outline graph pipeline completed | job_id=%s", str(job_id))
-            except (RuntimeError, AsyncTimeoutError):
-                # Preserve old fallback behavior if modular pipeline fails.
-                logger.warning("Outline graph failed, using legacy AI fallback | job_id=%s", str(job_id))
-                learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
-                try:
-                    outline_payload = await wait_for(
-                        ai.build_roi_course_outline_json(context_text, learning_objectives),
-                        timeout=310,
-                    )
-                    outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
-                except RuntimeError:
-                    outline = await wait_for(
-                        ai.build_roi_course_outline(context_text, learning_objectives),
-                        timeout=310,
-                    )
-                    outline_payload = None
+            except RuntimeError:
+                outline = await wait_for(
+                    ai.build_roi_course_outline(context_text, learning_objectives),
+                    timeout=310,
+                )
+                outline_payload = None
+            logger.info("Outline generation completed | job_id=%s", str(job_id))
 
             pdf_path: str | None = None
             pdf_url = None
@@ -603,7 +609,7 @@ async def refine_course(
     pdf_url = None
     try:
         logger.info("Refine PDF generation started | zoho_record_id=%s", rid)
-        pdf_path = await generate_pdf_path_async(refined_payload if "refined_payload" in locals() and refined_payload is not None else updated_outline)
+        pdf_path = await generate_pdf_path_async(refined_payload if refined_payload is not None else updated_outline)
         pdf_url = _build_pdf_url(pdf_path)
         logger.info("Refine PDF generation completed | zoho_record_id=%s pdf_url=%s", rid, pdf_url)
     except RuntimeError as e:

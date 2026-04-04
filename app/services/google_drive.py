@@ -38,6 +38,33 @@ def _get_env(name: str) -> str:
     return value
 
 
+def _credential_str(name: str) -> str:
+    """Same lookup as ``_get_env`` but returns empty string instead of raising."""
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        value = str(getattr(settings, name, "") or "").strip()
+    return value
+
+
+def course_outline_drive_env_status() -> dict[str, bool]:
+    """
+    Whether Drive OAuth and folder env are present (token or API may still fail at runtime).
+    """
+    oauth = bool(
+        _credential_str("GOOGLE_CLIENT_ID")
+        and _credential_str("GOOGLE_CLIENT_SECRET")
+        and _credential_str("GOOGLE_REFRESH_TOKEN")
+    )
+    folder = bool(
+        _credential_str("GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID")
+        or _credential_str("GOOGLE_DRIVE_FOLDER_ID")
+    )
+    return {
+        "google_drive_oauth_configured": oauth,
+        "google_drive_folder_configured": folder,
+    }
+
+
 def _get_access_token() -> str:
     client_id = _get_env("GOOGLE_CLIENT_ID")
     client_secret = _get_env("GOOGLE_CLIENT_SECRET")

@@ -15,7 +15,8 @@ import httpx
 
 from app.core.config import settings
 from app.models.job import CourseJob
-from app.services.zoho_crm import maybe_attach_course_pdf
+from app.services.google_drive import course_outline_drive_env_status
+from app.services.zoho_crm import _crm_configured, maybe_attach_course_pdf
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,6 +29,18 @@ _CALLBACK_PLACEHOLDER_MARKERS = (
     "callback-endpoint.example",
     "localhost",
 )
+
+
+def get_course_outline_integration_status() -> dict[str, bool]:
+    """
+    Snapshot of which course-outline integrations have required env (no network calls).
+    """
+    out = course_outline_drive_env_status()
+    out["zoho_webhook_configured"] = zoho_completion_webhook_is_configured()
+    out["zoho_crm_attach_configured"] = bool(
+        settings.ZOHO_ATTACH_PDF_LINK_TO_CRM and _crm_configured()
+    )
+    return out
 
 
 def zoho_completion_webhook_is_configured() -> bool:
