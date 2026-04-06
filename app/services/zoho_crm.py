@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -33,7 +34,41 @@ def _crm_configured() -> bool:
         settings.ZOHO_CLIENT_ID
         and settings.ZOHO_CLIENT_SECRET
         and settings.ZOHO_REFRESH_TOKEN
-        and settings.ZOHO_CRM_MODULE_API_NAME
+    )
+
+
+def get_outline_module_api_name() -> str:
+    """
+    Module API name used for course-outline CRM attachment flow.
+    Backward compatible with legacy ZOHO_CRM_MODULE_API_NAME.
+    """
+    return (
+        (settings.ZOHO_CRM_OUTLINE_MODULE_API_NAME or "").strip()
+        or (settings.ZOHO_CRM_MODULE_API_NAME or "").strip()
+        or "Course_Outline"
+    )
+
+
+def get_slides_module_api_name() -> str:
+    """
+    Module API name used for slides input fetch flow.
+    Backward compatible with legacy ZOHO_CRM_MODULE_API_NAME.
+    """
+    return (
+        (settings.ZOHO_CRM_SLIDES_MODULE_API_NAME or "").strip()
+        or (settings.ZOHO_CRM_MODULE_API_NAME or "").strip()
+        or "Course_Outline"
+    )
+
+
+def get_course_status_module_api_name() -> str:
+    """
+    Module API name used for course job status sync.
+    Defaults to Pre-Closure Tasks module API name: Closure_Activities.
+    """
+    return (
+        (settings.ZOHO_CRM_COURSE_STATUS_MODULE_API_NAME or "").strip()
+        or "Closure_Activities"
     )
 
 
@@ -183,14 +218,15 @@ async def maybe_attach_course_pdf(
     if not _crm_configured():
         logger.info(
             "Zoho CRM attach skipped: set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, "
-            "ZOHO_REFRESH_TOKEN, and ZOHO_CRM_MODULE_API_NAME (e.g. Course_Outline), "
+            "ZOHO_REFRESH_TOKEN, and outline module API name "
+            "(ZOHO_CRM_OUTLINE_MODULE_API_NAME or ZOHO_CRM_MODULE_API_NAME), "
             "and ZOHO_ATTACH_PDF_LINK_TO_CRM=true"
         )
         return
 
     try:
         await attach_pdf_link_to_record(
-            module_api_name=settings.ZOHO_CRM_MODULE_API_NAME,
+            module_api_name=get_outline_module_api_name(),
             crm_record_id=zoho_record_id.strip(),
             public_pdf_url=pdf_url,
             attachment_title=course_name_for_title or "Course outline",
@@ -202,3 +238,302 @@ async def maybe_attach_course_pdf(
         )
     except Exception:
         logger.exception("Zoho CRM: attach PDF link failed | record_id=%s", zoho_record_id)
+
+
+async def maybe_update_course_job_status(
+    *,
+    zoho_record_id: str,
+    status_value: str,
+) -> None:
+    """
+    Best-effort status sync for course job into Zoho CRM.
+    Writes picklist value to configured field on configured module.
+    """
+    rid = (zoho_record_id or "").strip()
+    sval = (status_value or "").strip()
+    if not rid or not sval:
+        return
+    if not _crm_configured():
+        logger.info(
+            "Zoho course status sync skipped: CRM OAuth not configured "
+            "(ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN)."
+        )
+        return
+
+    module_api = get_course_status_module_api_name().strip("/")
+    field_name = (settings.ZOHO_CRM_COURSE_STATUS_FIELD_API_NAME or "Status").strip()
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    url = f"{base}/crm/v8/{module_api}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"data": [{"id": rid, field_name: sval}]}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.put(url, headers=headers, json=payload)
+        if resp.status_code >= 400:
+            logger.warning(
+                "Zoho course status sync failed | module=%s record_id=%s field=%s status=%s http=%s body=%s",
+                module_api,
+                rid,
+                field_name,
+                sval,
+                resp.status_code,
+                (resp.text or "")[:2000],
+            )
+            return
+        logger.info(
+            "Zoho course status sync success | module=%s record_id=%s field=%s status=%s",
+            module_api,
+            rid,
+            field_name,
+            sval,
+        )
+    except Exception:
+        logger.exception(
+            "Zoho course status sync exception | module=%s record_id=%s field=%s status=%s",
+            module_api,
+            rid,
+            field_name,
+            sval,
+        )
+
+
+def _auth_header(token: str) -> dict[str, str]:
+    return {"Authorization": f"Zoho-oauthtoken {token}"}
+
+
+def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
+    """
+    Normalize Zoho File Upload field value into a small dict.
+    Handles list/dict/string formats seen across tenants/DCs.
+    """
+    item: Any = value
+    if isinstance(value, list):
+        item = value[0] if value else {}
+    if isinstance(item, str):
+        return {
+            "file_id": item.strip() or None,
+            "file_token": None,
+            "download_url": None,
+            "file_name": None,
+            "raw": value,
+        }
+    if not isinstance(item, dict):
+        return {"file_id": None, "file_token": None, "download_url": None, "file_name": None, "raw": value}
+
+    file_id = (
+        item.get("id")
+        or item.get("file_id")
+        or item.get("File_Id")
+        or item.get("attachment_id")
+        or item.get("$file_id")
+    )
+    # Zoho File Upload fields commonly include an opaque file token in File_Id__s.
+    # This is often the correct identifier for /crm/v8/files endpoints.
+    file_token = item.get("File_Id__s") or item.get("file_id__s")
+    download_url = (
+        item.get("download_url")
+        or item.get("Download_URL")
+        or item.get("file_url")
+        or item.get("File_URL")
+        or item.get("link_url")
+        or item.get("preview_url")
+    )
+    file_name = (
+        item.get("name")
+        or item.get("file_name")
+        or item.get("File_Name")
+        or item.get("File_Name__s")
+    )
+    return {
+        "file_id": str(file_id).strip() if file_id else None,
+        "file_token": str(file_token).strip() if file_token else None,
+        "download_url": str(download_url).strip() if download_url else None,
+        "file_name": str(file_name).strip() if file_name else None,
+        "raw": value,
+    }
+
+
+async def get_record_file_upload_field(
+    *,
+    module_api_name: str,
+    crm_record_id: str,
+    field_api_name: str = "outline",
+) -> dict[str, Any]:
+    """
+    Fetch a File Upload field from a Zoho CRM record.
+    Returns normalized metadata and logs the raw field shape.
+    """
+    rid = (crm_record_id or "").strip()
+    mod = (module_api_name or "").strip("/")
+    field = (field_api_name or "").strip()
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    url = f"{base}/crm/v8/{mod}/{quote(rid, safe='')}?fields={quote(field, safe=',_')}"
+
+    logger.info(
+        "Zoho CRM fetch file field | module=%s record_id=%s field=%s",
+        mod,
+        rid,
+        field,
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url, headers=_auth_header(token))
+    if response.status_code >= 400:
+        logger.warning(
+            "Zoho CRM fetch file field failed | status=%s body=%s",
+            response.status_code,
+            (response.text or "")[:2000],
+        )
+        response.raise_for_status()
+
+    payload = response.json() if response.content else {}
+    records = payload.get("data") if isinstance(payload, dict) else None
+    record = records[0] if isinstance(records, list) and records else {}
+    raw_value = record.get(field) if isinstance(record, dict) else None
+    normalized = _extract_file_upload_candidate(raw_value)
+    logger.info(
+        "Zoho CRM file field payload | record_id=%s field=%s file_id=%s file_token=%s has_download_url=%s file_name=%s raw=%s",
+        rid,
+        field,
+        normalized.get("file_id"),
+        normalized.get("file_token"),
+        bool(normalized.get("download_url")),
+        normalized.get("file_name"),
+        str(raw_value)[:1200],
+    )
+    return normalized
+
+
+async def download_file_upload_content(
+    *,
+    file_id: str | None,
+    file_token: str | None = None,
+    download_url: str | None,
+) -> bytes:
+    """
+    Download Zoho File Upload bytes.
+    Tries direct URL first (if provided), then known Zoho file endpoints by file_id.
+    """
+    token = await get_access_token()
+    headers = _auth_header(token)
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    candidates: list[tuple[str, str]] = []
+
+    if (download_url or "").strip():
+        candidates.append(("direct_download_url", (download_url or "").strip()))
+    # Prefer opaque File_Id__s token first (when present), then numeric id fallback.
+    for label_prefix, raw_id in (("file_token", file_token), ("file_id", file_id)):
+        if (raw_id or "").strip():
+            fid = quote((raw_id or "").strip(), safe="")
+            candidates.append((f"{label_prefix}_files_query", f"{base}/crm/v8/files?id={fid}"))
+            candidates.append((f"{label_prefix}_files_path", f"{base}/crm/v8/files/{fid}"))
+            candidates.append((f"{label_prefix}_files_download", f"{base}/crm/v8/files/{fid}/download"))
+
+    if not candidates:
+        raise RuntimeError("No Zoho file identifier found (missing file_id/file_token/download_url).")
+
+    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        for label, url in candidates:
+            try:
+                logger.info("Zoho file download attempt | strategy=%s url=%s", label, url)
+                resp = await client.get(url, headers=headers)
+                content_type = (resp.headers.get("content-type") or "").lower()
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "Zoho file download rejected | strategy=%s status=%s body=%s",
+                        label,
+                        resp.status_code,
+                        (resp.text or "")[:500],
+                    )
+                    continue
+                if "application/json" in content_type and not resp.content.startswith(b"%PDF"):
+                    logger.warning(
+                        "Zoho file download returned JSON, not file bytes | strategy=%s body=%s",
+                        label,
+                        (resp.text or "")[:700],
+                    )
+                    continue
+                if not resp.content:
+                    logger.warning("Zoho file download empty response | strategy=%s", label)
+                    continue
+                logger.info(
+                    "Zoho file download success | strategy=%s bytes=%s content_type=%s",
+                    label,
+                    len(resp.content),
+                    resp.headers.get("content-type"),
+                )
+                return resp.content
+            except Exception:
+                logger.exception("Zoho file download exception | strategy=%s", label)
+
+    raise RuntimeError("Unable to download Zoho file from any supported endpoint.")
+
+
+def _format_module_links_text(module_links: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for item in module_links:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("link_name") or "").strip()
+        link = str(item.get("gamma_link") or "").strip()
+        if name and link:
+            lines.append(f"{name}: {link}")
+    return "\n".join(lines)
+
+
+async def update_slides_links_field(
+    *,
+    zoho_record_id: str,
+    module_links: list[dict[str, Any]],
+    field_api_name: str | None = None,
+) -> None:
+    """
+    Update slides CRM record with module-wise Gamma links string in a multi-line field.
+    Non-critical caller should catch exceptions and continue.
+    """
+    if not _crm_configured():
+        logger.info(
+            "Zoho slides links update skipped: CRM OAuth not configured (ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN)."
+        )
+        return
+
+    rid = (zoho_record_id or "").strip()
+    if not rid:
+        return
+    text_value = _format_module_links_text(module_links)
+    if not text_value:
+        logger.info("Zoho slides links update skipped: no module links to write | record_id=%s", rid)
+        return
+
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    module_api = get_slides_module_api_name().strip("/")
+    field_name = (field_api_name or settings.ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME or "Link_for_Courseware").strip()
+    url = f"{base}/crm/v8/{module_api}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"data": [{"id": rid, field_name: text_value}]}
+    logger.info(
+        "Zoho slides links update started | module=%s record_id=%s field=%s lines=%s",
+        module_api,
+        rid,
+        field_name,
+        len(text_value.splitlines()),
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.put(url, headers=headers, json=payload)
+    if resp.status_code >= 400:
+        logger.warning(
+            "Zoho slides links update failed | status=%s body=%s",
+            resp.status_code,
+            (resp.text or "")[:2000],
+        )
+        resp.raise_for_status()
+    logger.info("Zoho slides links update success | record_id=%s field=%s", rid, field_name)

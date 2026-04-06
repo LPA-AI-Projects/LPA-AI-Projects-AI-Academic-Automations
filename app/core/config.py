@@ -7,11 +7,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
-    # Claude (Anthropic)
+    # LLM routing: "anthropic" = Claude (ANTHROPIC_*), "openai" = OpenAI Chat (OPENAI_*)
     AI_PROVIDER: str = "anthropic"
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    # httpx read timeout for Anthropic (long generations + web_search often exceed 2 minutes).
+    ANTHROPIC_READ_TIMEOUT_S: float = 600.0
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com"
@@ -36,14 +38,40 @@ class Settings(BaseSettings):
     ZOHO_ACCOUNTS_BASE_URL: str = "https://accounts.zoho.com"
     # e.g. https://www.zohoapis.com
     ZOHO_CRM_API_BASE: str = "https://www.zohoapis.com"
-    # CRM module API name for Attachments API (path: /crm/v8/{module}/{record_id}/Attachments)
+    # Legacy default module API name (fallback for both outline/slides when specific vars are unset).
     ZOHO_CRM_MODULE_API_NAME: str = "Course_Outline"
+    # Course outline flow module (PDF link attach target).
+    ZOHO_CRM_OUTLINE_MODULE_API_NAME: str = ""
+    # Slides flow module (source record where File Upload field `outline` is read).
+    ZOHO_CRM_SLIDES_MODULE_API_NAME: str = ""
+    # Field API name in slides module to store module-wise Gamma links text.
+    ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME: str = "Link_for_Courseware"
+    # Course generation status sync target (for Pre-Closure Tasks module).
+    ZOHO_CRM_COURSE_STATUS_MODULE_API_NAME: str = "Closure_Activities"
+    ZOHO_CRM_COURSE_STATUS_FIELD_API_NAME: str = "Status"
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 
     # Gamma Public API (PPT generation)
     GAMMA_API_KEY: str = ""
     GAMMA_BASE_URL: str = "https://public-api.gamma.app"
+    # Optional Gamma template flow (POST /v1.0/generations/from-template)
+    GAMMA_USE_TEMPLATE: bool = False
+    GAMMA_TEMPLATE_ID: str = ""
+    # Optional sharing/access controls for generated Gamma docs
+    GAMMA_WORKSPACE_ACCESS: str = "edit"
+    GAMMA_EXTERNAL_ACCESS: str = "edit"
+    # Comma-separated emails to grant edit access, e.g. "a@x.com,b@y.com"
+    GAMMA_EMAIL_EDIT_LIST: str = ""
+
+    # Slides multi-bot pipeline configuration
+    SLIDES_PLANNER_MODEL: str = ""
+    SLIDES_GENERATOR_MODEL: str = ""
+    SLIDES_VALIDATOR_MODEL: str = ""
+    SLIDES_VALIDATION_MAX_LOOPS: int = 2
+    SLIDES_MIN_PER_MODULE: int = 10
+    SLIDES_MAX_PER_MODULE: int = 20
+    SLIDES_MODULE_PARALLELISM: int = 3
 
     # Google Apps Script merge endpoint (optional, for single merged editable Slides link)
     GOOGLE_SCRIPT_URL: str = ""
@@ -52,6 +80,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REFRESH_TOKEN: str = ""
     GOOGLE_DRIVE_FOLDER_ID: str = ""
+    # Optional. If empty, course outlines go under My Drive root: ai_automation/course_outline/...
+    # If set, that folder is the parent (same hierarchy underneath).
+    GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -61,11 +92,60 @@ class Settings(BaseSettings):
         "ZOHO_REFRESH_TOKEN",
         "ZOHO_ACCOUNTS_BASE_URL",
         "ZOHO_CRM_API_BASE",
+        "ZOHO_CRM_MODULE_API_NAME",
+        "ZOHO_CRM_OUTLINE_MODULE_API_NAME",
+        "ZOHO_CRM_SLIDES_MODULE_API_NAME",
+        "ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME",
+        "ZOHO_CRM_COURSE_STATUS_MODULE_API_NAME",
+        "ZOHO_CRM_COURSE_STATUS_FIELD_API_NAME",
+        "SLIDES_PLANNER_MODEL",
+        "SLIDES_GENERATOR_MODEL",
+        "SLIDES_VALIDATOR_MODEL",
+        "GAMMA_TEMPLATE_ID",
+        "GAMMA_WORKSPACE_ACCESS",
+        "GAMMA_EXTERNAL_ACCESS",
+        "GAMMA_EMAIL_EDIT_LIST",
         mode="before",
     )
     @classmethod
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
+
+    @field_validator("GAMMA_USE_TEMPLATE", mode="before")
+    @classmethod
+    def coerce_gamma_use_template(cls, value: object) -> bool:
+        """Railway/.env often provide booleans as strings; accept common variants."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
+
+    @field_validator("AI_PROVIDER", mode="before")
+    @classmethod
+    def normalize_ai_provider(cls, value: object) -> str:
+        """anthropic → Claude API; openai → OpenAI Chat Completions. Accepts a few aliases."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return "anthropic"
+        s = str(value).strip().lower()
+        aliases: dict[str, str] = {
+            "anthropic": "anthropic",
+            "claude": "anthropic",
+            "antropic": "anthropic",  # common typo
+            "openai": "openai",
+            "chatgpt": "openai",
+        }
+        out = aliases.get(s, s)
+        if out not in ("anthropic", "openai"):
+            raise ValueError(
+                "AI_PROVIDER must be 'anthropic' (Claude) or 'openai' (OpenAI). "
+                f"Received: {value!r}"
+            )
+        return out
 
     @field_validator("ANTHROPIC_BASE_URL")
     @classmethod
@@ -101,6 +181,13 @@ class Settings(BaseSettings):
         if normalized_value.startswith("postgresql://"):
             return normalized_value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return normalized_value
+
+    def get_gamma_email_edit_list(self) -> list[str]:
+        """Parse comma-separated GAMMA_EMAIL_EDIT_LIST into clean email strings."""
+        raw = str(self.GAMMA_EMAIL_EDIT_LIST or "").strip()
+        if not raw:
+            return []
+        return [email.strip() for email in raw.split(",") if email.strip()]
 
 
 @lru_cache
