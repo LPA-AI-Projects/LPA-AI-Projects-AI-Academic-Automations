@@ -6,7 +6,6 @@
 <title>Learners Point Course Outline Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Serif+Display&display=swap" rel="stylesheet">
 <style>
 /* =========================================================
    VARIABLES & RESET
@@ -22,7 +21,7 @@
   --white:  #ffffff;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; font-family: 'DM Sans', sans-serif; }
+html, body { height: 100%; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
 body { background: var(--bg); color: var(--dark); }
 
 /* =========================================================
@@ -121,7 +120,7 @@ body { background: var(--bg); color: var(--dark); }
 .section-body textarea {
   width: 100%; padding: 9px 11px;
   border: 1px solid var(--border); border-radius: 7px;
-  font: 13px/1.5 'DM Sans', sans-serif; color: var(--dark);
+  font: 13px/1.5 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--dark);
   transition: border-color 0.15s, box-shadow 0.15s;
   background: #fdfdfd;
 }
@@ -382,6 +381,12 @@ body { background: var(--bg); color: var(--dark); }
 .mod-table th {
   text-align: left; font-size: 13px; font-weight: 600; color: var(--dark);
   padding: 10px 12px; border: 1px solid #ccc;
+}
+.mod-table th.col-sno,
+.mod-table th.col-mod,
+.mod-table th.col-top,
+.mod-table th.col-ex {
+  text-align: center;
 }
 .mod-table td { padding: 12px; border: 1px solid #ccc; vertical-align: top; }
 .mod-table .col-sno  { width: 52px; text-align: center; font-size: 17px; font-weight: 700; }
