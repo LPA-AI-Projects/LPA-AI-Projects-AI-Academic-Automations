@@ -226,7 +226,14 @@ body { background: var(--bg); color: var(--dark); }
   color: var(--dark); margin-bottom: 14px;
   letter-spacing: -1px;
 }
-.cover-title .dot { color: var(--orange); }
+.cover-title .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: var(--orange);
+  margin-right: 10px;
+  vertical-align: baseline;
+}
 .cover-subtitle {
   font-size: 22.55px; font-weight: 300; color: var(--dark);
   line-height: 1.5; margin-bottom: 24px;
@@ -1118,7 +1125,7 @@ function bindCover() {
   const duration = val('f-duration') || '—';
 
   setTEXT('pLabel',   label);
-  setHTML('pTitle', title ? escHtml(title) + '<span class="dot">.</span>' : '');
+  setHTML('pTitle', title ? '<span class="dot"></span>' + escHtml(title) : '');
   setTEXT('pSubtitle', subtitle);
   setTEXT('pDuration',  duration);
 }
