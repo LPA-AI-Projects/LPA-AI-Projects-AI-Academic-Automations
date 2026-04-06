@@ -2,6 +2,12 @@
 
 All Academic Operations
 
+## Layout
+
+- `app/` — FastAPI application (API, services, models)
+- `scripts/` — optional local utilities (not required at runtime)
+- `storage/` — generated PDFs, slide cache, and uploads (created on startup; gitignored). Override with `COURSE_AI_STORAGE_ROOT`.
+
 ## Docker Setup (Dev/Prod)
 
 ### 1) Local development (API + Postgres)
@@ -53,13 +59,33 @@ Health check endpoint: `/api/v1/health`
 ### 4) Important production notes
 
 - Railway provides dynamic `PORT`; container is already configured for it.
-- `generated_pdfs/` on Railway is ephemeral storage. Files can disappear on restart.
-- For production-grade persistence, store PDFs in object storage (S3/R2/GCS) and save the URL in DB.
+- Runtime files live under `storage/` (`storage/pdfs`, `storage/ppts`, `storage/uploads`). On Railway this volume is still ephemeral unless you attach persistent storage or use object storage (S3/R2/GCS).
+- Optional: set `COURSE_AI_STORAGE_ROOT` to point uploads/PDFs elsewhere.
 
-## Job API shape
+## Job API shape (course outline)
 
-- **Default** `POST /api/v1/courses` → **202** with only `{ "job_id", "zoho_record_id" }` (no `"processing"`). Poll `GET /api/v1/jobs/{job_id}` for the full object (`status`, `pdf_url`, `course_id`, …).
-- **Synchronous** `POST /api/v1/courses?sync=true` → **200** with the **full** result in one response (same shape as when the job is done). The request **waits** until AI + PDF finish (often **minutes**); many systems (including Zoho) **may time out**. Prefer async + poll, or use CRM attach below.
+- **Default** `POST /api/v1/courses` → **202** with `job_id`, `zoho_record_id`, `status`, `message`, and `polling.by_zoho_record_id` → `GET /api/v1/courses/{zoho_record_id}/outline-job` (slim JSON: no Gamma/slides fields).
+- **Poll** `GET /api/v1/courses/{zoho_record_id}/outline-job` (slim JSON for outline jobs).
+- **Synchronous** `POST /api/v1/courses?sync=true` → **200** when AI + PDF finish (same slim shape as outline job). May time out from Zoho; prefer async + poll.
+
+**Slides** (separate): `POST /api/v1/slides/` then `GET /api/v1/slides/{zoho_record_id}` for `module_gamma_links`, etc.
+
+### Slides LangGraph Pipeline
+
+- Module flow: **Planner -> Generator -> Validator -> (retry max N) -> Gamma**
+- Planner/Generator/Validator models are configurable via env vars:
+  - `SLIDES_PLANNER_MODEL`
+  - `SLIDES_GENERATOR_MODEL`
+  - `SLIDES_VALIDATOR_MODEL`
+- Validation loop: `SLIDES_VALIDATION_MAX_LOOPS` (default `2`)
+- Per-module slide bounds:
+  - `SLIDES_MIN_PER_MODULE` (default `10`)
+  - `SLIDES_MAX_PER_MODULE` (default `20`)
+- Final Gamma safety remains enforced with batching at `MAX_SLIDES_PER_BATCH=60`.
+- Optional Gamma template/sharing config for slides:
+  - `GAMMA_USE_TEMPLATE=true` + `GAMMA_TEMPLATE_ID=<id>` to use `/v1.0/generations/from-template`
+  - `GAMMA_WORKSPACE_ACCESS` / `GAMMA_EXTERNAL_ACCESS` (`view`, `comment`, `edit`, etc.)
+  - `GAMMA_EMAIL_EDIT_LIST` (comma-separated recipients granted edit access)
 
 ## Zoho CRM V8 — OAuth + attach PDF link (optional)
 
@@ -75,10 +101,13 @@ See [OAuth overview](https://www.zoho.com/crm/developer/docs/api/v8/oauth-overvi
 | `ZOHO_REFRESH_TOKEN` | Long-lived refresh token |
 | `ZOHO_ACCOUNTS_BASE_URL` | e.g. `https://accounts.zoho.com` (use `.eu` / `.in` etc. for your DC) |
 | `ZOHO_CRM_API_BASE` | Usually `https://www.zohoapis.com` |
-| `ZOHO_CRM_MODULE_API_NAME` | CRM **module API name** for attachments (default: `Course_Outline`). Must match **Setup → Developer Space → APIs** for that module. |
+| `ZOHO_CRM_MODULE_API_NAME` | Legacy fallback module API name (used when specific outline/slides vars are not set). |
+| `ZOHO_CRM_OUTLINE_MODULE_API_NAME` | CRM module API name for **course-outline attach** (recommended). |
+| `ZOHO_CRM_SLIDES_MODULE_API_NAME` | CRM module API name for **slides input fetch** from file-upload field `outline`. |
+| `ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME` | Slides module field API name to write module-wise Gamma links text (default: `Link_for_Courseware`). |
 | `ZOHO_ATTACH_PDF_LINK_TO_CRM` | `true` to attach the generated public PDF URL to the record after the job completes |
 
-3. **`zoho_record_id` in `POST /courses` must be the `Course_Outline` record ID** Zoho sends (the long numeric **Record Id** from CRM, same id used in the URL when you open the record). The backend attaches the generated **PDF public link** to that record via `POST .../crm/v8/Course_Outline/{record_id}/Attachments` (link attachment). If your module’s API name is not exactly `Course_Outline`, set `ZOHO_CRM_MODULE_API_NAME` accordingly.
+3. **`zoho_record_id` in `POST /courses` must be the outline-module record ID** Zoho sends (the long numeric **Record Id** from CRM, same id used in the URL when you open the record). The backend attaches the generated **PDF public link** to that record via `POST .../crm/v8/{outline_module}/{record_id}/Attachments` (link attachment). Set `ZOHO_CRM_OUTLINE_MODULE_API_NAME` for this flow.
 
 4. Access tokens are refreshed automatically (cached; refresh uses your refresh token before the ~1 hour expiry).
 
@@ -96,7 +125,9 @@ Required for attach-after-job:
 - `ZOHO_REFRESH_TOKEN` — generated once via OAuth grant with required CRM scopes (see Zoho OAuth docs); store securely.
 - `ZOHO_ACCOUNTS_BASE_URL` — `https://accounts.zoho.com` (US); use `https://accounts.zoho.eu`, `https://accounts.zoho.in`, etc. if your org is in that DC.
 - `ZOHO_CRM_API_BASE` — usually `https://www.zohoapis.com`.
-- `ZOHO_CRM_MODULE_API_NAME` — CRM **Setup → Developer Space → APIs** (or module settings) → **API Name** (e.g. `Leads`, `Deals`, `Custom_Module_X`).
+- `ZOHO_CRM_OUTLINE_MODULE_API_NAME` — CRM module API name for course-outline attach flow.
+- `ZOHO_CRM_SLIDES_MODULE_API_NAME` — CRM module API name for slides source fetch flow (field `outline`).
+- `ZOHO_CRM_MODULE_API_NAME` — optional legacy fallback when the two specific vars above are not set.
 - `ZOHO_ATTACH_PDF_LINK_TO_CRM` — `true` to attach the generated public PDF URL to the record after the job completes.
 
 ### Callback URL (`ZOHO_CALLBACK_URL`) — HTTP 400 / “file not received”

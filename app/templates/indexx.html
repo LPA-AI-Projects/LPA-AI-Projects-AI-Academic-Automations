@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Learners Point Course Outline Generator</title>
+<title>Learners Point Brochure by Balpeye</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700;800&family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Montserrat:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Lato:ital,wght@0,300;0,400;0,700;1,400&family=Nunito:ital,wght@0,300;0,400;0,600;0,700;0,800;1,400&family=Raleway:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Noto+Sans:ital,wght@0,300;0,400;0,700;1,400&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Josefin+Sans:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=PT+Serif:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Fira+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Mulish:ital,wght@0,300;0,400;0,600;0,700;0,800;1,400&family=Work+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Karla:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Cabin:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Quicksand:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Manrope:wght@300;400;500;600;700;800&family=Sora:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@300;400;500;600;700&family=Urbanist:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Jost:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Lexend:wght@300;400;500;600;700;800&family=Albert+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Rubik:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Exo+2:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Titillium+Web:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Arimo:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <style>
 /* =========================================================
    VARIABLES & RESET
@@ -53,7 +54,7 @@ body { background: var(--bg); color: var(--dark); }
   border: 1px solid var(--border); background: var(--white);
   padding: 8px 12px; border-radius: 8px; font-size: 13px;
   font-weight: 600; cursor: pointer; font-family: inherit;
-  min-width: 140px;
+  min-width: 190px;
 }
 
 /* =========================================================
@@ -177,38 +178,6 @@ body { background: var(--bg); color: var(--dark); }
 .bg-getintouch  { background-image: url('12.png'); }
 .bg-trustedby   { background-image: url('13.png'); }
 
-/*
- * Program Insight / Learning Objective / Capability Impact
- * - Use padding on .page (not margin on the first child) so margin-collapse does not
- *   pull text up under the header artwork and baked-in titles in 3.png / 5.png / 6.png.
- * - background-size 794px auto: one asset height at top; extra page length is white
- *   (avoid `cover` on height:auto pages, which stretches the graphic).
- */
-.page.bg-insight,
-.page.bg-objective,
-.page.bg-impact {
-  box-sizing: border-box;
-  min-height: 1123px;
-  height: auto;
-  overflow: visible;
-  padding: 245px 64px 78px 64px;
-}
-.page.bg-insight.page-fixed,
-.page.bg-objective.page-fixed,
-.page.bg-impact.page-fixed {
-  background-size: 794px auto;
-  background-position: top center;
-  background-repeat: no-repeat;
-}
-.page.bg-insight .content-overlay,
-.page.bg-objective .content-overlay,
-.page.bg-impact .content-overlay {
-  position: static;
-  width: 100%;
-  margin: 0;
-  overflow: visible;
-}
-
 /* =========================================================
    PAGE 1 – COVER OVERLAY
    ========================================================= */
@@ -226,14 +195,7 @@ body { background: var(--bg); color: var(--dark); }
   color: var(--dark); margin-bottom: 14px;
   letter-spacing: -1px;
 }
-.cover-title .dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  background: var(--orange);
-  margin-right: 10px;
-  vertical-align: baseline;
-}
+.cover-title .dot { color: var(--orange); }
 .cover-subtitle {
   font-size: 22.55px; font-weight: 300; color: var(--dark);
   line-height: 1.5; margin-bottom: 24px;
@@ -255,7 +217,7 @@ body { background: var(--bg); color: var(--dark); }
 .toc-page-no{
   position:absolute;
   right:48px;
-  font-family:'DM Sans', sans-serif;
+  font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-size:20px;
   font-weight:700;
   color:var(--dark);
@@ -316,8 +278,67 @@ body { background: var(--bg); color: var(--dark); }
 }
 
 /* =========================================================
-   PROGRAM INSIGHT TEXT
+   PROGRAM INSIGHT TABLE
    ========================================================= */
+.insight-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+.insight-table th {
+  background: var(--teal);
+  color: #fff;
+  font-weight: 700;
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid var(--teal);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+.insight-table td {
+  padding: 7px 12px;
+  border: 1px solid #ddd;
+  color: var(--dark);
+  font-weight: 400;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+.insight-table tr:nth-child(even) td { background: #f7f8fa; }
+.insight-table tr:nth-child(odd)  td { background: #fff; }
+.insight-table .col-sno { width: 44px; text-align: center; font-weight: 700; }
+.insight-table .col-wtg { width: 90px; text-align: center; font-weight: 600; color: var(--teal); }
+.insight-table thead .col-wtg { color: #fff; }
+
+
+/* =========================================================
+   COMMERCIAL QUOTATION TABLE (Program Details)
+   ========================================================= */
+.quotation-wrap { margin-top: 38px; }
+.quotation-title {
+  font-size: 16px; font-weight: 700; color: var(--dark);
+  margin-bottom: 10px;
+}
+.quotation-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  border: 1px solid var(--teal);
+}
+.quotation-table th {
+  background: var(--teal); color: #fff; font-weight: 700;
+  padding: 10px 14px; text-align: left;
+  border: 1px solid var(--teal); font-size: 12px;
+  letter-spacing: 0.2px;
+}
+.quotation-table th:last-child { color: #fff; }
+.quotation-table td {
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  color: #333; font-weight: 400; vertical-align: middle;
+  line-height: 1.4;
+}
+.quotation-table td:first-child { border-left: 1px solid var(--border); }
+.quotation-table tr:last-child td { border-bottom: none; }
+
 .insight-para {
   font-size: 14px; line-height: 18px; color: var(--dark);
   margin-bottom: 18px; text-align: left;
@@ -389,24 +410,33 @@ body { background: var(--bg); color: var(--dark); }
   text-align: left; font-size: 13px; font-weight: 600; color: var(--dark);
   padding: 10px 12px; border: 1px solid #ccc;
 }
-.mod-table th.col-sno,
-.mod-table th.col-mod,
-.mod-table th.col-top,
-.mod-table th.col-ex {
-  text-align: center;
-}
 .mod-table td { padding: 12px; border: 1px solid #ccc; vertical-align: top; }
-.mod-table .col-sno  { width: 52px; text-align: center; font-size: 17px; font-weight: 700; }
-.mod-table .col-mod  { width: 130px; font-weight: 700; font-size: 13px; color: var(--dark); }
+.mod-table .col-sno  { width: 48px; text-align: center; font-size: 17px; font-weight: 700; }
+.mod-table .col-mod  { width: 110px; font-weight: 700; font-size: 13px; color: var(--dark); }
 .mod-table .col-top,
 .mod-table .col-ex   { width: 275px; }
-/* Topics: normal weight; Exercises: normal with bold labels only (see _render_module_exercise_line_html) */
-.mod-table .col-top ul li { font-weight: 400; color: #333; }
-.mod-table .col-ex ul li  { font-weight: 400; color: #333; }
-.mod-table .col-ex ul li strong { font-weight: 700; }
 .mod-table ul        { list-style: disc; padding-left: 15px; }
 .mod-table ul li     { margin: 3px 0; }
 .mod-table strong    { font-weight: 700; }
+
+.industry-sim-box {
+  margin-top: 16px;
+  border: 1px solid #ccc;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.9);
+}
+.industry-sim-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dark);
+  margin-bottom: 8px;
+}
+.industry-sim-body {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #333;
+}
+.industry-sim-body p + p { margin-top: 10px; }
 
 /* =========================================================
    PRINT
@@ -421,35 +451,15 @@ body { background: var(--bg); color: var(--dark); }
     page-break-after: always; page-break-inside: avoid;
     box-shadow: none; margin: 0; width: 794px; height: 1123px;
   }
-  /* Insight / Learning Objective / Capability Impact: multi-page flow, padding not margin */
-  .page.bg-insight,
-  .page.bg-objective,
-  .page.bg-impact {
-    box-sizing: border-box !important;
-    min-height: 1123px;
-    height: auto !important;
-    overflow: visible !important;
-    page-break-inside: auto;
-    padding: 245px 64px 78px 64px !important;
-    background-size: 794px auto !important;
-    background-position: top center !important;
-    background-repeat: no-repeat !important;
-  }
-  .page.bg-insight .content-overlay,
-  .page.bg-objective .content-overlay,
-  .page.bg-impact .content-overlay {
-    position: static !important;
-    width: 100% !important;
-    margin: 0 !important;
-    overflow: visible !important;
-  }
-  .obj-item {
-    page-break-inside: avoid;
-  }
   .wrap { max-width: 794px; padding: 0; margin: 0 auto; }
   @page { size: A4 portrait; margin: 0; }
   /* Keep hyperlink overlay visible and clickable in PDF */
   .page a[href] { display: block !important; position: absolute !important; }
+  /* Remove contenteditable outlines from printed/exported PDF */
+  .canvas [contenteditable],
+  .canvas [contenteditable]:hover,
+  .canvas [contenteditable]:focus,
+  .canvas [contenteditable]:focus-within { outline: none !important; box-shadow: none !important; }
 }
 
 /* =========================================================
@@ -490,7 +500,7 @@ body { background: var(--bg); color: var(--dark); }
   font-size: 13px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.12s, color 0.12s;
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
   flex-shrink: 0;
 }
 .rt-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
@@ -627,7 +637,7 @@ body { background: var(--bg); color: var(--dark); }
 .modal-btn {
   flex: 1; padding: 13px 20px; border-radius: 12px;
   font-size: 14px; font-weight: 700; cursor: pointer;
-  border: none; font-family: 'DM Sans', sans-serif;
+  border: none; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
   transition: all 0.15s;
 }
 .modal-btn-secondary {
@@ -703,8 +713,7 @@ body { background: var(--bg); color: var(--dark); }
     </div>
     <div class="modal-badge">✦ Ready to Export</div>
     <div class="modal-title">Thanks for Downloading<span class="modal-dot">.</span></div>
-    <div class="modal-subtitle">Your brochure is ready to be exported as a PDF.<br>Make sure all pages look perfect before printing.</div>
-    <div class="modal-bbv">— Build by Bablu and Balpeye —</div>
+    <div class="modal-bbv">— Build by Balpeye Chakma —</div>
     <div class="modal-actions">
       <button class="modal-btn modal-btn-secondary" id="modalCancel">Cancel</button>
       <button class="modal-btn modal-btn-primary" id="modalPrint">⬇ Export PDF</button>
@@ -715,17 +724,66 @@ body { background: var(--bg); color: var(--dark); }
 <div class="toolbar">
   <div class="toolbar-logo">
     <img src="logo2.png" alt="LP" style="height:28px">
-    <span> Balpeye <span class="dot">•</span> Bablu </span>
+    <span> Balpeye's Builder <span class="dot">
   </div>
   <input type="file" id="uploadWord" accept=".docx" style="display:none"/>
   <button class="btn" id="uploadWordBtn">📄 Upload Word</button>
   <select class="font-select" id="fontSelector">
-    <option value="'DM Sans', sans-serif">DM Sans (Default)</option>
-    <option value="'Inter', sans-serif">Inter</option>
-    <option value="'Poppins', sans-serif">Poppins</option>
-    <option value="'Montserrat', sans-serif">Montserrat</option>
-    <option value="'Open Sans', sans-serif">Open Sans</option>
-    <option value="'Roboto', sans-serif">Roboto</option>
+    <optgroup label="— System —">
+      <option value="'Helvetica Neue', Helvetica, Arial, sans-serif" selected>Helvetica Neue (Default)</option>
+    </optgroup>
+    <optgroup label="— Modern Sans-Serif —">
+      <option value="'DM Sans', sans-serif">DM Sans</option>
+      <option value="'Inter', sans-serif">Inter</option>
+      <option value="'Plus Jakarta Sans', sans-serif">Plus Jakarta Sans</option>
+      <option value="'Manrope', sans-serif">Manrope</option>
+      <option value="'Outfit', sans-serif">Outfit</option>
+      <option value="'Sora', sans-serif">Sora</option>
+      <option value="'Space Grotesk', sans-serif">Space Grotesk</option>
+      <option value="'Urbanist', sans-serif">Urbanist</option>
+      <option value="'Jost', sans-serif">Jost</option>
+      <option value="'Lexend', sans-serif">Lexend</option>
+      <option value="'Albert Sans', sans-serif">Albert Sans</option>
+    </optgroup>
+    <optgroup label="— Classic Sans-Serif —">
+      <option value="'Poppins', sans-serif">Poppins</option>
+      <option value="'Montserrat', sans-serif">Montserrat</option>
+      <option value="'Raleway', sans-serif">Raleway</option>
+      <option value="'Nunito', sans-serif">Nunito</option>
+      <option value="'Open Sans', sans-serif">Open Sans</option>
+      <option value="'Lato', sans-serif">Lato</option>
+      <option value="'Roboto', sans-serif">Roboto</option>
+      <option value="'Source Sans 3', sans-serif">Source Sans 3</option>
+      <option value="'Noto Sans', sans-serif">Noto Sans</option>
+      <option value="'Ubuntu', sans-serif">Ubuntu</option>
+      <option value="'Josefin Sans', sans-serif">Josefin Sans</option>
+    </optgroup>
+    <optgroup label="— Humanist Sans-Serif —">
+      <option value="'Work Sans', sans-serif">Work Sans</option>
+      <option value="'Mulish', sans-serif">Mulish</option>
+      <option value="'Karla', sans-serif">Karla</option>
+      <option value="'Cabin', sans-serif">Cabin</option>
+      <option value="'Barlow', sans-serif">Barlow</option>
+      <option value="'Fira Sans', sans-serif">Fira Sans</option>
+      <option value="'Rubik', sans-serif">Rubik</option>
+      <option value="'Quicksand', sans-serif">Quicksand</option>
+      <option value="'IBM Plex Sans', sans-serif">IBM Plex Sans</option>
+    </optgroup>
+    <optgroup label="— Technical Sans-Serif —">
+      <option value="'Exo 2', sans-serif">Exo 2</option>
+      <option value="'Titillium Web', sans-serif">Titillium Web</option>
+      <option value="'Arimo', sans-serif">Arimo</option>
+    </optgroup>
+    <optgroup label="— Serif —">
+      <option value="'Playfair Display', serif">Playfair Display</option>
+      <option value="'Merriweather', serif">Merriweather</option>
+      <option value="'Lora', serif">Lora</option>
+      <option value="'PT Serif', serif">PT Serif</option>
+      <option value="'Libre Baskerville', serif">Libre Baskerville</option>
+      <option value="'Crimson Text', serif">Crimson Text</option>
+      <option value="'EB Garamond', serif">EB Garamond</option>
+      <option value="'Cormorant Garamond', serif">Cormorant Garamond</option>
+    </optgroup>
   </select>
   <button class="btn" id="fillSample">Fill Sample</button>
   <button class="btn" id="clearAll">Clear</button>
@@ -800,44 +858,6 @@ Builds practical reporting and stakeholder engagement skills"></textarea>
     <div class="form-section">
       <button class="section-toggle" onclick="toggleSec(this)">
         <div class="section-toggle-left">
-          <div class="section-num num-dark">4</div>
-          <div>
-            <div class="section-toggle-title">Program Details</div>
-            <div class="section-toggle-sub">Summary + info table</div>
-          </div>
-        </div>
-        <span class="chevron">▼</span>
-      </button>
-      <div class="section-body">
-        <label class="field-label">Summary Paragraph (supports **bold**)</label>
-        <textarea id="f-det-summary" rows="3" placeholder="**By the end of the programme, participants leave with a sharper perspective...**"></textarea>
-
-        <label class="field-label">Regions Served</label>
-        <input id="f-regions" placeholder="UAE, Saudi Arabia, Africa, MENA, and Europe" />
-
-        <label class="field-label">Course Duration</label>
-        <input id="f-det-duration" placeholder="2 Days of focused, structured, immersive development" />
-
-        <label class="field-label">Total Learning Hours</label>
-        <input id="f-hours" placeholder="16 Hours of facilitated, hands-on training" />
-
-        <label class="field-label">Key Benefits</label>
-        <textarea id="f-benefits" rows="2" placeholder="Participants walk away with sharper skills, greater self-awareness..."></textarea>
-
-        <label class="field-label">Value Addition & Impact</label>
-        <textarea id="f-value" rows="2" placeholder="Beyond individual growth, this programme creates a ripple effect..."></textarea>
-
-        <label class="field-label">Location</label>
-        <input id="f-location" placeholder="[Venue Name], [City] / Available Online" />
-
-        <label class="field-label">Date & Time</label>
-        <input id="f-datetime" placeholder="[Date] | [Start Time] — [End Time]" />
-      </div>
-    </div>
-
-    <div class="form-section">
-      <button class="section-toggle" onclick="toggleSec(this)">
-        <div class="section-toggle-left">
           <div class="section-num num-orange">5</div>
           <div>
             <div class="section-toggle-title">Learning Objective</div>
@@ -897,7 +917,9 @@ Builds practical reporting and stakeholder engagement skills"></textarea>
       <div class="section-body">
         <label class="field-label">Modules — one per line</label>
         <textarea id="f-modules" rows="10" placeholder="Understanding Leadership vs. Management | Differentiate managing tasks; Understand leadership styles; Know when to lead vs. manage | Leadership style self-assessment.; Team role-play scenarios.; Reflection: leadership challenge journal."></textarea>
-        <p class="hint">Format: <strong>Module Name | Topic 1; Topic 2; Topic 3 | Exercise 1; Exercise 2</strong> — each module on its own line. Use **text** for bold in exercises.</p>
+        <p class="hint">Format: <strong>Module Name | Topic 1; Topic 2; Topic 3 | Exercise 1; Exercise 2</strong> — each module on its own line. Existing older 4-part entries still work. Use **text** for bold in exercises.</p>
+
+
       </div>
     </div>
 
@@ -909,8 +931,8 @@ Builds practical reporting and stakeholder engagement skills"></textarea>
       <div class="cover-overlay">
         <div class="cover-label" id="pLabel">Course Curriculum</div>
         <div class="cover-rule"></div>
-        <div class="cover-title" id="pTitle" contenteditable="true" spellcheck="false">TITLE NAME<span class="dot">.</span></div>
-        <div class="cover-subtitle" id="pSubtitle" contenteditable="true" spellcheck="false">Subtitle goes here.</div>
+        <div class="cover-title" id="pTitle" contenteditable="true" spellcheck="false"></div>
+        <div class="cover-subtitle" id="pSubtitle" contenteditable="true" spellcheck="false"></div>
         <div class="cover-rule"></div>
         <div class="cover-duration">Total Duration: <strong id="pDuration" contenteditable="true" spellcheck="false">—</strong></div>
       </div>
@@ -928,38 +950,11 @@ Builds practical reporting and stakeholder engagement skills"></textarea>
       </div>
     </section>
 
-    <section class="page page-fixed bg-insight">
-      <div class="content-overlay" id="pInsight" contenteditable="true" spellcheck="false"></div>
-      <div class="page-num-overlay">Page 01</div>
-    </section>
+    <div id="dynamicInsight"></div>
 
-    <section class="page page-fixed bg-details">
-      <div class="details-overlay">
-        <div class="details-summary" id="pDetSummary" contenteditable="true" spellcheck="false"></div>
-        <table class="details-table">
-          <tbody>
-            <tr><td class="dt-label">Regions Served</td><td id="pRegions" contenteditable="true" spellcheck="false"></td></tr>
-            <tr><td class="dt-label">Course Duration</td><td id="pDetDuration" contenteditable="true" spellcheck="false"></td></tr>
-            <tr><td class="dt-label">Total Learning Hours</td><td id="pHours" contenteditable="true" spellcheck="false"></td></tr>
-            <tr><td class="dt-label">Key Benefits</td><td id="pBenefits" contenteditable="true" spellcheck="false"></td></tr>
-            <tr><td class="dt-label">Value Addition &amp; Impact</td><td id="pValue" contenteditable="true" spellcheck="false"></td></tr>
-            <tr><td class="dt-label">Location</td><td id="pLocation" contenteditable="true" spellcheck="false"></td></tr>
-            <tr><td class="dt-label">Date &amp; Time</td><td id="pDatetime" contenteditable="true" spellcheck="false"></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="page-num-overlay">Page 02</div>
-    </section>
+    <div id="dynamicObjective"></div>
 
-    <section class="page page-fixed bg-objective">
-      <div class="content-overlay" id="pObjective" contenteditable="true" spellcheck="false"></div>
-      <div class="page-num-overlay">Page 03</div>
-    </section>
-
-    <section class="page page-fixed bg-impact">
-      <div class="content-overlay" id="pImpact" contenteditable="true" spellcheck="false"></div>
-      <div class="page-num-overlay">Page 04</div>
-    </section>
+    <div id="dynamicImpact"></div>
 
     <div id="dynamicModules"></div>
 
@@ -993,9 +988,7 @@ const dirtyEls = new Set();
 
 function markDirtyListeners() {
   const editableIds = [
-    'pTitle','pSubtitle','pDuration','pInsight','pDetSummary',
-    'pRegions','pDetDuration','pHours','pBenefits','pValue',
-    'pLocation','pDatetime','pObjective','pImpact'
+    'pLabel','pTitle','pSubtitle','pDuration',
   ];
   editableIds.forEach(id => {
     const el = document.getElementById(id);
@@ -1038,9 +1031,7 @@ function addSyncBtn() {
 function resetDirty() {
   dirtyEls.clear();
   // Remove title attributes
-  ['pTitle','pSubtitle','pDuration','pInsight','pDetSummary',
-   'pRegions','pDetDuration','pHours','pBenefits','pValue',
-   'pLocation','pDatetime','pObjective','pImpact'].forEach(id => {
+  ['pLabel','pTitle','pSubtitle','pDuration'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.removeAttribute('title');
   });
@@ -1068,39 +1059,54 @@ function toggleSec(btn) {
 
 function bind() {
   bindCover();
-  bindInsight();
-  bindDetails();
-  bindObjective();
-  bindImpact();
-  const modulePgCount = bindModules() || 0;
-  requestAnimationFrame(() => { updateAllPageNums(modulePgCount); checkSyncBar(); });
+  const insightPgCount   = bindInsight()   || 1;
+  const objectivePgCount = bindObjective() || 1;
+  const impactPgCount    = bindImpact()    || 1;
+  const modulePgCount    = bindModules()   || 0;
+  requestAnimationFrame(() => { updateAllPageNums(modulePgCount, insightPgCount, objectivePgCount, impactPgCount); checkSyncBar(); });
 }
 
-function updateAllPageNums(modulePgCount) {
-  modulePgCount = (modulePgCount !== undefined && modulePgCount !== null)
-    ? modulePgCount
-    : document.getElementById('dynamicModules').children.length;
+function updateAllPageNums(modulePgCount, insightPgCount, objectivePgCount, impactPgCount) {
+  modulePgCount   = modulePgCount   || document.getElementById('dynamicModules').children.length   || 0;
+  insightPgCount  = insightPgCount  || document.getElementById('dynamicInsight').children.length   || 1;
+  objectivePgCount= objectivePgCount|| document.getElementById('dynamicObjective').children.length || 1;
+  impactPgCount   = impactPgCount   || document.getElementById('dynamicImpact').children.length    || 1;
 
   const insightPage   = 1;
-  const detailsPage   = 2;
-  const objectivePage = 3;
-  const impactPage    = 4;
-  const modulesPage   = 5;
+  const objectivePage = insightPage   + insightPgCount;
+  const impactPage    = objectivePage + objectivePgCount;
+  const modulesPage   = impactPage    + impactPgCount;
+  const fixedStart    = modulesPage   + modulePgCount;
 
-  const fixedStart = modulesPage + modulePgCount;
+  // --- Insight page numbers ---
+  document.querySelectorAll('#dynamicInsight [data-insight-page]').forEach(numDiv => {
+    const n = parseInt(numDiv.dataset.insightPage);
+    numDiv.textContent = 'Page ' + String(insightPage + n - 1).padStart(2, '0');
+  });
 
-  // fixedNum0=pedagogy1(Training Pedagogy), fixedNum1=pedagogy2(Evaluation&Cert), fixedNum2=evaluation(Trusted Partner)
-  // fixedNum3=whoweare, fixedNum4=getintouch, fixedNum5=trustedby — these do NOT show page numbers
+  // --- Objective page numbers ---
+  document.querySelectorAll('#dynamicObjective [data-objective-page]').forEach(numDiv => {
+    const n = parseInt(numDiv.dataset.objectivePage);
+    numDiv.textContent = 'Page ' + String(objectivePage + n - 1).padStart(2, '0');
+  });
+
+  // --- Impact page numbers ---
+  document.querySelectorAll('#dynamicImpact [data-impact-page]').forEach(numDiv => {
+    const n = parseInt(numDiv.dataset.impactPage);
+    numDiv.textContent = 'Page ' + String(impactPage + n - 1).padStart(2, '0');
+  });
+
+  // --- Fixed pages (pedagogy, evaluation, etc.) ---
   for (let i = 0; i <= 2; i++) {
     const el = document.getElementById('fixedNum' + i);
     if (el) el.textContent = 'Page ' + String(fixedStart + i).padStart(2, '0');
   }
-  // Clear numbers on fixedNum3,4,5
   for (let i = 3; i <= 5; i++) {
     const el = document.getElementById('fixedNum' + i);
     if (el) el.textContent = '';
   }
 
+  // --- TOC ---
   const tocInsight    = document.getElementById('tocInsight');
   const tocObjective  = document.getElementById('tocObjective');
   const tocImpact     = document.getElementById('tocImpact');
@@ -1113,9 +1119,9 @@ function updateAllPageNums(modulePgCount) {
   if (tocObjective)  tocObjective.textContent  = String(objectivePage).padStart(2, '0');
   if (tocImpact)     tocImpact.textContent     = String(impactPage).padStart(2, '0');
   if (tocModules)    tocModules.textContent    = String(modulesPage).padStart(2, '0');
-  if (tocPedagogy)   tocPedagogy.textContent   = String(fixedStart).padStart(2, '0');     // pedagogy1
-  if (tocEvaluation) tocEvaluation.textContent = String(fixedStart + 1).padStart(2, '0'); // pedagogy2 = Evaluation content
-  if (tocTrusted)    tocTrusted.textContent    = String(fixedStart + 2).padStart(2, '0'); // bg-evaluation = Trusted Partner content
+  if (tocPedagogy)   tocPedagogy.textContent   = String(fixedStart).padStart(2, '0');
+  if (tocEvaluation) tocEvaluation.textContent = String(fixedStart + 1).padStart(2, '0');
+  if (tocTrusted)    tocTrusted.textContent    = String(fixedStart + 2).padStart(2, '0');
 }
 
 function bindCover() {
@@ -1125,30 +1131,49 @@ function bindCover() {
   const duration = val('f-duration') || '—';
 
   setTEXT('pLabel',   label);
-  setHTML('pTitle', title ? '<span class="dot"></span>' + escHtml(title) : '');
+  setHTML('pTitle', title ? escHtml(title) + '<span class="dot">.</span>' : '');
   setTEXT('pSubtitle', subtitle);
   setTEXT('pDuration',  duration);
 }
 
 function bindInsight() {
-  if (dirtyEls.has('pInsight')) return;
-  const el = document.getElementById('pInsight');
-  el.innerHTML = '';
+  const container = document.getElementById('dynamicInsight');
+  container.innerHTML = '';
 
-  // --- Section 1: Description paragraphs (f-insight) ---
+  const USABLE_H = 800; // 1123px page - 245px top - 78px bottom
+  const OVERLAY_W = 666; // 794 - 64*2
+
+  // --- Ghost for measuring element heights ---
+  const ghost = document.createElement('div');
+  ghost.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;left:-9999px;top:0;
+    width:${OVERLAY_W}px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:18px;`;
+  document.body.appendChild(ghost);
+
+  function measure(el) {
+    ghost.appendChild(el);
+    void el.getBoundingClientRect();
+    const h = el.offsetHeight;
+    ghost.removeChild(el);
+    return h;
+  }
+
+  // --- Build all content items ---
+  const items = [];
+
+  // Description paragraphs — split on any newline (single or double)
   const rawDesc = val('f-insight');
   if (rawDesc) {
-    rawDesc.split(/\n\n+/).forEach(block => {
+    rawDesc.split(/\n+/).forEach(block => {
       const trimmed = block.trim();
       if (!trimmed) return;
       const p = document.createElement('p');
       p.className = 'insight-para';
-      p.innerHTML = bold(escHtml(trimmed).replace(/\n/g, '<br>'));
-      el.appendChild(p);
+      p.innerHTML = bold(escHtml(trimmed));
+      items.push({ el: p, h: measure(p) + 18 });
     });
   }
 
-  // --- Section 2: Dedicated bullet points (f-insight-bullets) ---
+  // Bullet points
   const rawBullets = val('f-insight-bullets');
   if (rawBullets) {
     const bulletLines = rawBullets.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -1156,7 +1181,6 @@ function bindInsight() {
       const ul = document.createElement('ul');
       ul.className = 'insight-bullets';
       bulletLines.forEach(line => {
-        // Strip any accidental - or • prefix users might type
         const text = line.replace(/^[-•]\s+/, '').trim();
         if (!text) return;
         const li = document.createElement('li');
@@ -1164,116 +1188,251 @@ function bindInsight() {
         li.innerHTML = bold(escHtml(text));
         ul.appendChild(li);
       });
-      el.appendChild(ul);
+      items.push({ el: ul, h: measure(ul) + 8 });
     }
   }
-}
 
-function bindDetails() {
-  setHTML('pDetSummary',   bold(escHtml(val('f-det-summary'))));
-  setTEXT('pRegions',      val('f-regions'));
-  setTEXT('pDetDuration',  val('f-det-duration'));
-  setTEXT('pHours',        val('f-hours'));
-  setTEXT('pBenefits',     val('f-benefits'));
-  setTEXT('pValue',        val('f-value'));
-  setTEXT('pLocation',     val('f-location'));
-  setTEXT('pDatetime',     val('f-datetime'));
+  document.body.removeChild(ghost);
+
+  // --- Paginate items across pages ---
+  function mkPage(pageNum) {
+    const sec = document.createElement('section');
+    sec.className = 'page page-fixed bg-insight';
+    const overlay = document.createElement('div');
+    overlay.className = 'content-overlay';
+    sec.appendChild(overlay);
+    const numDiv = document.createElement('div');
+    numDiv.className = 'page-num-overlay';
+    numDiv.dataset.insightPage = pageNum;
+    sec.appendChild(numDiv);
+    return { sec, overlay, numDiv };
+  }
+
+  let pageCount = 1;
+  let { sec: curSec, overlay: curOverlay } = mkPage(pageCount);
+  let usedH = 0;
+
+  items.forEach(item => {
+    if (usedH + item.h > USABLE_H && usedH > 0) {
+      container.appendChild(curSec);
+      pageCount++;
+      const next = mkPage(pageCount);
+      curSec    = next.sec;
+      curOverlay = next.overlay;
+      usedH = 0;
+    }
+    curOverlay.appendChild(item.el);
+    usedH += item.h;
+  });
+
+  container.appendChild(curSec);
+  return pageCount;
 }
 
 function bindObjective() {
-  if (dirtyEls.has('pObjective')) return;
-  const el = document.getElementById('pObjective');
-  el.innerHTML = '';
+  const container = document.getElementById('dynamicObjective');
+  container.innerHTML = '';
   const alpha = 'abcdefghijklmnopqrstuvwxyz';
 
-  // Create one bordered card that holds intro + items + closing
-  const card = document.createElement('div');
-  card.className = 'obj-card';
+  const USABLE_H = 800;
+  const OVERLAY_W = 666;
 
-  const intro = val('f-obj-intro');
-  if (intro) {
-    const p = document.createElement('p');
-    p.className = 'obj-intro';
-    p.innerHTML = bold(escHtml(intro));
-    card.appendChild(p);
+  const ghost = document.createElement('div');
+  ghost.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;left:-9999px;top:0;
+    width:${OVERLAY_W}px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13.5px;line-height:18px;`;
+  document.body.appendChild(ghost);
+
+  function measure(el) {
+    ghost.appendChild(el);
+    void el.getBoundingClientRect();
+    const h = el.offsetHeight;
+    ghost.removeChild(el);
+    return h;
   }
 
-  const objLines = lines('f-objectives');
-  if (objLines.length) {
-    const wrap = document.createElement('div');
-    wrap.className = 'obj-list';
-    objLines.forEach((line, i) => {
-      const sep   = line.indexOf('|');
-      const title = sep > -1 ? line.slice(0, sep).trim() : line.trim();
-      const desc  = sep > -1 ? line.slice(sep + 1).trim() : '';
-      const div = document.createElement('div');
-      div.className = 'obj-item';
-      div.innerHTML = `
-        <div class="obj-item-head">${alpha[i] || (i+1)}. ${escHtml(title)}</div>
-        ${desc ? `<div class="obj-item-desc">${bold(escHtml(desc))}</div>` : ''}
-      `;
-      wrap.appendChild(div);
+  const items = [];
+
+  // Intro — each line = new paragraph
+  const introRaw = val('f-obj-intro');
+  if (introRaw) {
+    introRaw.split(/\n+/).forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const p = document.createElement('p');
+      p.className = 'obj-intro';
+      p.innerHTML = bold(escHtml(trimmed));
+      items.push({ el: p, h: measure(p) + 10 });
     });
-    card.appendChild(wrap);
   }
 
-  const close = val('f-obj-close');
-  if (close) {
-    const p = document.createElement('p');
-    p.className = 'obj-closing';
-    p.innerHTML = bold(escHtml(close));
-    card.appendChild(p);
+  // Objective items — each line = one item
+  const objLines = lines('f-objectives');
+  objLines.forEach((line, i) => {
+    const sep   = line.indexOf('|');
+    const title = sep > -1 ? line.slice(0, sep).trim() : line.trim();
+    const desc  = sep > -1 ? line.slice(sep + 1).trim() : '';
+    const div = document.createElement('div');
+    div.className = 'obj-item';
+    div.innerHTML = `
+      <div class="obj-item-head">${alpha[i] || (i+1)}. ${escHtml(title)}</div>
+      ${desc ? `<div class="obj-item-desc">${bold(escHtml(desc))}</div>` : ''}
+    `;
+    items.push({ el: div, h: measure(div) + 14 });
+  });
+
+  // Closing — each line = new paragraph
+  const closeRaw = val('f-obj-close');
+  if (closeRaw) {
+    closeRaw.split(/\n+/).forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const p = document.createElement('p');
+      p.className = 'obj-closing';
+      p.innerHTML = bold(escHtml(trimmed));
+      items.push({ el: p, h: measure(p) + 10 });
+    });
   }
 
-  el.appendChild(card);
+  document.body.removeChild(ghost);
+
+  function mkPage(num) {
+    const sec = document.createElement('section');
+    sec.className = 'page page-fixed bg-objective';
+    const overlay = document.createElement('div');
+    overlay.className = 'content-overlay';
+    sec.appendChild(overlay);
+    const numDiv = document.createElement('div');
+    numDiv.className = 'page-num-overlay';
+    numDiv.dataset.objectivePage = num;
+    sec.appendChild(numDiv);
+    return { sec, overlay };
+  }
+
+  let pageCount = 1;
+  let { sec: curSec, overlay: curOverlay } = mkPage(pageCount);
+  let usedH = 0;
+
+  items.forEach(item => {
+    if (usedH + item.h > USABLE_H && usedH > 0) {
+      container.appendChild(curSec);
+      pageCount++;
+      const next = mkPage(pageCount);
+      curSec = next.sec; curOverlay = next.overlay;
+      usedH = 0;
+    }
+    curOverlay.appendChild(item.el);
+    usedH += item.h;
+  });
+
+  container.appendChild(curSec);
+  return pageCount;
 }
 
 function bindImpact() {
-  if (dirtyEls.has('pImpact')) return;
-  const el = document.getElementById('pImpact');
-  el.innerHTML = '';
+  const container = document.getElementById('dynamicImpact');
+  container.innerHTML = '';
 
-  const intro = val('f-imp-intro');
-  if (intro) {
-    const p = document.createElement('p');
-    p.className = 'impact-intro';
-    p.innerHTML = bold(escHtml(intro));
-    el.appendChild(p);
+  const USABLE_H = 800;
+  const OVERLAY_W = 666;
+
+  const ghost = document.createElement('div');
+  ghost.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;left:-9999px;top:0;
+    width:${OVERLAY_W}px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:18px;`;
+  document.body.appendChild(ghost);
+
+  function measure(el) {
+    ghost.appendChild(el);
+    void el.getBoundingClientRect();
+    const h = el.offsetHeight;
+    ghost.removeChild(el);
+    return h;
   }
 
-  const itemLines = lines('f-imp-items');
-  if (itemLines.length) {
-    const wrap = document.createElement('div');
-    itemLines.forEach(line => {
-      const sep   = line.indexOf('|');
-      const title = sep > -1 ? line.slice(0, sep).trim() : line.trim();
-      const desc  = sep > -1 ? line.slice(sep + 1).trim() : '';
-      const row = document.createElement('div');
-      row.className = 'impact-row';
-      row.innerHTML = `
-        <div class="impact-icon-box">
-          <svg class="impact-check" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-        </div>
-        <div>
-          <div class="impact-row-title">${bold(escHtml(title))}</div>
-          ${desc ? `<div class="impact-row-desc">${bold(escHtml(desc))}</div>` : ''}
-        </div>
-      `;
-      wrap.appendChild(row);
+  const items = [];
+
+  // Intro — each line = new paragraph
+  const introRaw = val('f-imp-intro');
+  if (introRaw) {
+    introRaw.split(/\n+/).forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const p = document.createElement('p');
+      p.className = 'impact-intro';
+      p.innerHTML = bold(escHtml(trimmed));
+      items.push({ el: p, h: measure(p) + 10 });
     });
-    el.appendChild(wrap);
   }
 
-  const close = val('f-imp-close');
-  if (close) {
-    const p = document.createElement('p');
-    p.className = 'impact-closing';
-    p.innerHTML = bold(escHtml(close));
-    el.appendChild(p);
+  // Impact rows — each line = one row
+  const itemLines = lines('f-imp-items');
+  itemLines.forEach(line => {
+    const sep   = line.indexOf('|');
+    const title = sep > -1 ? line.slice(0, sep).trim() : line.trim();
+    const desc  = sep > -1 ? line.slice(sep + 1).trim() : '';
+    const row = document.createElement('div');
+    row.className = 'impact-row';
+    row.innerHTML = `
+      <div class="impact-icon-box">
+        <svg class="impact-check" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+      <div>
+        <div class="impact-row-title">${bold(escHtml(title))}</div>
+        ${desc ? `<div class="impact-row-desc">${bold(escHtml(desc))}</div>` : ''}
+      </div>
+    `;
+    items.push({ el: row, h: measure(row) + 16 });
+  });
+
+  // Closing — each line = new paragraph
+  const closeRaw = val('f-imp-close');
+  if (closeRaw) {
+    closeRaw.split(/\n+/).forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const p = document.createElement('p');
+      p.className = 'impact-closing';
+      p.innerHTML = bold(escHtml(trimmed));
+      items.push({ el: p, h: measure(p) + 10 });
+    });
   }
+
+  document.body.removeChild(ghost);
+
+  function mkPage(num) {
+    const sec = document.createElement('section');
+    sec.className = 'page page-fixed bg-impact';
+    const overlay = document.createElement('div');
+    overlay.className = 'content-overlay';
+    sec.appendChild(overlay);
+    const numDiv = document.createElement('div');
+    numDiv.className = 'page-num-overlay';
+    numDiv.dataset.impactPage = num;
+    sec.appendChild(numDiv);
+    return { sec, overlay };
+  }
+
+  let pageCount = 1;
+  let { sec: curSec, overlay: curOverlay } = mkPage(pageCount);
+  let usedH = 0;
+
+  items.forEach(item => {
+    if (usedH + item.h > USABLE_H && usedH > 0) {
+      container.appendChild(curSec);
+      pageCount++;
+      const next = mkPage(pageCount);
+      curSec = next.sec; curOverlay = next.overlay;
+      usedH = 0;
+    }
+    curOverlay.appendChild(item.el);
+    usedH += item.h;
+  });
+
+  container.appendChild(curSec);
+  return pageCount;
 }
+
 
 function bindModules() {
   const container = document.getElementById('dynamicModules');
@@ -1282,13 +1441,65 @@ function bindModules() {
   const raw = val('f-modules');
   if (!raw) return 0;
 
-  const modules = raw.split(/\r?\n/).filter(Boolean).map((line, i) => {
+  const parsedModules = raw ? raw.split(/\r?\n/).filter(Boolean).map((line, i) => {
     const parts  = line.split('|');
     const name   = (parts[0] || '').trim();
     const topics = (parts[1] || '').split(';').map(s => s.trim()).filter(Boolean);
-    const exs    = (parts[2] || '').split(';').map(s => s.trim()).filter(Boolean);
-    return { sno: String(i + 1).padStart(2, '0'), name, topics, exs };
-  });
+    const legacySims = (parts.length >= 4 ? (parts[2] || '') : '').split(';').map(s => s.trim()).filter(Boolean);
+    const exSrc  = parts.length >= 4 ? (parts[3] || '') : (parts[2] || '');
+    const exs    = exSrc.split(';').map(s => s.trim()).filter(Boolean);
+    return { sno: String(i + 1).padStart(2, '0'), name, topics, legacySims, exs };
+  }) : [];
+
+  const legacySimText = parsedModules
+    .flatMap(mod => mod.legacySims || [])
+    .filter(Boolean)
+    .map(t => '• ' + t)
+    .join('<br>');
+
+  function splitLongText(text) {
+    const clean = (text || '').trim();
+    if (!clean) return [];
+    const baseParts = clean
+      .split(/\n{2,}/)
+      .flatMap(block => block.split(/\n/))
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const out = [];
+    baseParts.forEach(part => {
+      if (part.length <= 320) {
+        out.push(part);
+        return;
+      }
+      const sentences = part.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+      if (sentences.length <= 1) {
+        for (let i = 0; i < part.length; i += 280) out.push(part.slice(i, i + 280).trim());
+        return;
+      }
+      let cur = '';
+      sentences.forEach(s => {
+        const test = cur ? (cur + ' ' + s) : s;
+        if (test.length > 320 && cur) {
+          out.push(cur.trim());
+          cur = s;
+        } else {
+          cur = test;
+        }
+      });
+      if (cur.trim()) out.push(cur.trim());
+    });
+    return out;
+  }
+
+  function segmentToHtml(seg, bullet=false) {
+    const bulletMatch = /^([-•*]|\d+[.)]) /.test(seg);
+    if (bullet || bulletMatch) {
+      const text = bulletMatch ? seg.replace(/^([-•*]|\d+[.)]) /, '').trim() : seg;
+      return `<p style="padding-left:16px;position:relative;margin-bottom:3px;"><span style="position:absolute;left:0;">•</span>${bold(escHtml(text))}</p>`;
+    }
+    return `<p>${bold(escHtml(seg).replace(/\n/g, '<br>'))}</p>`;
+  }
 
   function mkRowInner(mod) {
     const topHtml = mod.topics.length
@@ -1303,13 +1514,12 @@ function bindModules() {
     `;
   }
 
-  const USABLE  = 800; // 1123px page height - 245px top - 78px bottom
+  const USABLE  = 800;
   const THEAD_H = 42;
+  const PAGE_W = 708;
 
   const ghost = document.createElement('div');
-  ghost.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;left:-9999px;top:0;
-    width:${OVERLAY_W}px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:18px;`;
-  document.body.appendChild(ghost);
+  ghost.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;left:-9999px;top:0;width:${PAGE_W}px;`;
   const ghostTable = document.createElement('table');
   ghostTable.className = 'mod-table';
   ghostTable.style.width = '100%';
@@ -1318,7 +1528,7 @@ function bindModules() {
   ghost.appendChild(ghostTable);
   document.body.appendChild(ghost);
 
-  const ghostRows = modules.map(mod => {
+  const ghostRows = parsedModules.map(mod => {
     const tr = document.createElement('tr');
     tr.innerHTML = mkRowInner(mod);
     ghostTbody.appendChild(tr);
@@ -1327,7 +1537,16 @@ function bindModules() {
 
   void ghost.getBoundingClientRect();
   const heights = ghostRows.map(tr => tr.offsetHeight);
-  document.body.removeChild(ghost);
+
+  function measureBoxHeight(title, html) {
+    const box = document.createElement('div');
+    box.className = 'industry-sim-box';
+    box.innerHTML = `<div class="industry-sim-title">${title}</div><div class="industry-sim-body">${html}</div>`;
+    ghost.appendChild(box);
+    const h = box.offsetHeight;
+    box.remove();
+    return h;
+  }
 
   function mkPage() {
     const sec = document.createElement('section');
@@ -1349,10 +1568,19 @@ function bindModules() {
     `;
     wrap.appendChild(table);
     sec.appendChild(wrap);
-    return { sec, tbody: table.querySelector('tbody') };
+    return { sec, wrap, tbody: table.querySelector('tbody'), mode: 'modules' };
   }
 
-  let { sec: curSec, tbody: curBody } = mkPage();
+  function mkTextPage() {
+    const sec = document.createElement('section');
+    sec.className = 'page page-fixed bg-modules';
+    const wrap = document.createElement('div');
+    wrap.className = 'modules-wrap';
+    sec.appendChild(wrap);
+    return { sec, wrap, tbody: null, mode: 'text' };
+  }
+
+  let { sec: curSec, wrap: curWrap, tbody: curBody, mode: curMode } = mkPage();
   let usedH = THEAD_H;
   let modulePageNum = 5;
 
@@ -1363,15 +1591,89 @@ function bindModules() {
     sec.appendChild(d);
   }
 
-  modules.forEach((mod, i) => {
+  function finalizeCurrentPage() {
+    attachPageNum(curSec, modulePageNum++);
+    container.appendChild(curSec);
+  }
+
+  function pushNewPage() {
+    finalizeCurrentPage();
+    const next = curMode === 'modules' ? mkPage() : mkTextPage();
+    curSec  = next.sec;
+    curWrap = next.wrap;
+    curBody = next.tbody;
+    curMode = next.mode;
+    usedH   = curMode === 'modules' ? THEAD_H : 0;
+  }
+
+  function switchToTextPage() {
+    finalizeCurrentPage();
+    const next = mkTextPage();
+    curSec  = next.sec;
+    curWrap = next.wrap;
+    curBody = next.tbody;
+    curMode = next.mode;
+    usedH   = 0;
+  }
+
+  function appendPaginatedBox(title, segments, bullet=false) {
+    if (!segments.length) return;
+
+    let idx = 0;
+    while (idx < segments.length) {
+      let chunk = [];
+      let j = idx;
+      let lastGoodHeight = 0;
+
+      while (j < segments.length) {
+        const testChunk = [...chunk, segments[j]];
+        const html = testChunk.map(seg => segmentToHtml(seg, bullet)).join('');
+        const h = measureBoxHeight(title, html);
+        const fitsCurrent = usedH + h <= USABLE;
+        const emptyBase = curMode === 'modules' ? THEAD_H : 0;
+        const fitsEmptyPage = emptyBase + h <= USABLE;
+
+        if (fitsCurrent) {
+          chunk = testChunk;
+          lastGoodHeight = h;
+          j++;
+          continue;
+        }
+
+        const minUsed = curMode === 'modules' ? THEAD_H : 0;
+        if (!chunk.length && usedH > minUsed) {
+          pushNewPage();
+          continue;
+        }
+
+        if (!chunk.length && !fitsEmptyPage) {
+          chunk = testChunk;
+          lastGoodHeight = Math.min(h, USABLE - minUsed);
+          j++;
+        }
+        break;
+      }
+
+      if (!chunk.length) {
+        pushNewPage();
+        continue;
+      }
+
+      const box = document.createElement('div');
+      box.className = 'industry-sim-box';
+      box.innerHTML = `<div class="industry-sim-title">${title}</div><div class="industry-sim-body">${chunk.map(seg => segmentToHtml(seg, bullet)).join('')}</div>`;
+      curWrap.appendChild(box);
+      usedH += lastGoodHeight || measureBoxHeight(title, chunk.map(seg => segmentToHtml(seg, bullet)).join(''));
+      idx = j;
+
+      if (idx < segments.length) pushNewPage();
+    }
+  }
+
+  parsedModules.forEach((mod, i) => {
     const rh = heights[i] || 80;
     if (usedH + rh > USABLE && usedH > THEAD_H) {
-      attachPageNum(curSec, modulePageNum++);
-      container.appendChild(curSec);
-      const next = mkPage();
-      curSec  = next.sec;
-      curBody = next.tbody;
-      usedH   = THEAD_H;
+      pushNewPage();
     }
     const tr = document.createElement('tr');
     tr.innerHTML = mkRowInner(mod);
@@ -1379,9 +1681,10 @@ function bindModules() {
     usedH += rh;
   });
 
+  document.body.removeChild(ghost);
   attachPageNum(curSec, modulePageNum);
   container.appendChild(curSec);
-  return modulePageNum - 5 + 1; // total module pages created
+  return modulePageNum - 5 + 1;
 }
 
 function escHtml(str) {
@@ -1414,17 +1717,6 @@ Over the years, **thousands of professionals from emerging leaders to experience
 Enhances ability to identify risks, non-conformities, and improvement opportunities
 Enables alignment of systems with organisational objectives
 Builds practical audit, reporting, and stakeholder engagement skills`;
-
-  document.getElementById('f-det-summary').value =
-`**By the end of the programme, participants leave with a sharper perspective, stronger professional confidence, and a practical toolkit they can use immediately.** The goal is not only personal development but also meaningful contribution to the teams, departments, and organisations participants are part of.`;
-
-  document.getElementById('f-regions').value      = 'UAE, Kingdom of Saudi Arabia, Africa, MENA and Europe; delivering consistent, high-quality learning experiences across borders and industries';
-  document.getElementById('f-det-duration').value = '2 Days of focused, structured, and immersive professional development';
-  document.getElementById('f-hours').value        = '16 Hours of facilitated, hands-on, and application-driven training';
-  document.getElementById('f-benefits').value     = 'Participants walk away with sharper skills, greater self-awareness, and the confidence to lead, decide, and deliver at a higher level starting from day one back at work';
-  document.getElementById('f-value').value        = 'Beyond individual growth, this programme creates a ripple effect across teams and departments improving collaboration, driving performance, and contributing directly to organisational outcomes that matter';
-  document.getElementById('f-location').value     = '[Venue Name], [City] / Available Online via Virtual Classroom for remote and regional participants';
-  document.getElementById('f-datetime').value     = '[Date] | [Start Time] — [End Time]';
 
   document.getElementById('f-obj-intro').value =
     'Effective leadership combines self-awareness, strong communication, and emotional intelligence to guide teams, build trust, and drive shared success.';
@@ -1463,6 +1755,8 @@ Decision-Making and Problem Solving | Learn critical thinking frameworks and str
 Leading Through Change and Uncertainty | Understand adaptive leadership principles.; Learn change management strategies to guide teams.; Build resilience for yourself and your team.; Identify ways to communicate change effectively. | Case study on change management.; Personal resilience action plan.; Team scenario: Leading through uncertainty.; Role-play: Communicating a major change to the team.; Reflection: How to overcome resistance to change.
 Action Planning for Growth | Translate learning into practical leadership actions.; Create a roadmap for continued leadership development.; Set measurable leadership goals for the next 3–6 months.; Develop strategies to track progress and sustain improvements | Personal leadership development plan creation.; Peer coaching session.; Commitment to implement 3 key leadership practices in the next 30 days.; Group discussion: Sharing leadership growth goals and accountability partners.; Reflection: Identify three immediate actions to enhance leadership impact`;
 
+
+
   bind();
 });
 
@@ -1473,8 +1767,35 @@ document.getElementById('clearAll').addEventListener('click', () => {
 });
 
 document.getElementById('fontSelector').addEventListener('change', function () {
-  document.getElementById('brochure').style.fontFamily = this.value;
+  const font = this.value;
+  const brochure = document.getElementById('brochure');
+  // Apply to canvas wrapper
+  brochure.style.fontFamily = font;
+  // Apply to all page content elements so inherited font takes effect
+  brochure.querySelectorAll(
+    '.content-overlay, .details-overlay, .modules-wrap, .cover-overlay, ' +
+    '.insight-para, .insight-bullet-item, .obj-intro, .obj-item-head, ' +
+    '.obj-item-desc, .obj-closing, .impact-intro, .impact-row-title, ' +
+    '.impact-row-desc, .impact-closing, .details-summary, .details-table, ' +
+    '.mod-table, .industry-sim-body, .cover-title, .cover-subtitle, .cover-duration'
+  ).forEach(el => { el.style.fontFamily = font; });
 });
+
+// Apply default font (Helvetica Neue) on load
+(function applyDefaultFont() {
+  const font = "'Helvetica Neue', Helvetica, Arial, sans-serif";
+  const brochure = document.getElementById('brochure');
+  if (brochure) {
+    brochure.style.fontFamily = font;
+    brochure.querySelectorAll(
+      '.content-overlay, .details-overlay, .modules-wrap, .cover-overlay, ' +
+      '.insight-para, .insight-bullet-item, .obj-intro, .obj-item-head, ' +
+      '.obj-item-desc, .obj-closing, .impact-intro, .impact-row-title, ' +
+      '.impact-row-desc, .impact-closing, .details-summary, .details-table, ' +
+      '.mod-table, .industry-sim-body, .cover-title, .cover-subtitle, .cover-duration'
+    ).forEach(el => { el.style.fontFamily = font; });
+  }
+})();
 
 document.getElementById('uploadWordBtn').addEventListener('click', () =>
   document.getElementById('uploadWord').click());
@@ -1596,62 +1917,6 @@ document.getElementById('uploadWord').addEventListener('change', async function 
       });
       if (para.length) insightFormatted.push(para.join(' '));
       document.getElementById('f-insight').value = insightFormatted.join('\n\n');
-    }
-
-    /* ================================================================
-       3. PROGRAM DETAILS
-    ================================================================ */
-    const detailLines = getLinesInSection(
-      ['program detail', 'programme detail', 'course detail', 'course information'],
-      ['learning objective', 'capability impact', 'training module', 'module outline']
-    );
-
-    if (detailLines.length) {
-      // Summary = first paragraph-like lines before a table row pattern
-      const summaryLines = [];
-      const tableMap = {};
-      detailLines.forEach(line => {
-        const colonIdx = line.indexOf(':');
-        if (colonIdx > 2 && colonIdx < 40) {
-          const key = line.slice(0, colonIdx).trim().toLowerCase();
-          const val = line.slice(colonIdx + 1).trim();
-          if (/region/i.test(key))                        tableMap.regions     = val;
-          else if (/duration/i.test(key))                 tableMap.detDuration = val;
-          else if (/hour/i.test(key))                     tableMap.hours       = val;
-          else if (/benefit/i.test(key))                  tableMap.benefits    = val;
-          else if (/value|impact/i.test(key))             tableMap.value       = val;
-          else if (/location|venue/i.test(key))           tableMap.location    = val;
-          else if (/date|time/i.test(key))                tableMap.datetime    = val;
-          else summaryLines.push(line);
-        } else {
-          summaryLines.push(line);
-        }
-      });
-
-      if (summaryLines.length) document.getElementById('f-det-summary').value = summaryLines.join(' ');
-      if (tableMap.regions)     document.getElementById('f-regions').value      = tableMap.regions;
-      if (tableMap.detDuration) document.getElementById('f-det-duration').value = tableMap.detDuration;
-      if (tableMap.hours)       document.getElementById('f-hours').value         = tableMap.hours;
-      if (tableMap.benefits)    document.getElementById('f-benefits').value      = tableMap.benefits;
-      if (tableMap.value)       document.getElementById('f-value').value          = tableMap.value;
-      if (tableMap.location)    document.getElementById('f-location').value       = tableMap.location;
-      if (tableMap.datetime)    document.getElementById('f-datetime').value       = tableMap.datetime;
-
-      // Also scan HTML tables for key:value rows
-      tmp.querySelectorAll('table tr').forEach(tr => {
-        const cells = Array.from(tr.querySelectorAll('td,th')).map(c => elText(c));
-        if (cells.length >= 2) {
-          const key = cells[0].toLowerCase();
-          const val = cells[1];
-          if (/region/i.test(key))              document.getElementById('f-regions').value      = val;
-          else if (/duration/i.test(key))       document.getElementById('f-det-duration').value = val;
-          else if (/hour/i.test(key))           document.getElementById('f-hours').value         = val;
-          else if (/benefit/i.test(key))        document.getElementById('f-benefits').value      = val;
-          else if (/value|impact/i.test(key))   document.getElementById('f-value').value          = val;
-          else if (/location|venue/i.test(key)) document.getElementById('f-location').value       = val;
-          else if (/date|time/i.test(key))      document.getElementById('f-datetime').value       = val;
-        }
-      });
     }
 
     /* ================================================================
@@ -1993,6 +2258,66 @@ document.getElementById('exportModal').addEventListener('click', function(e) {
 
 document.getElementById('formPanel').addEventListener('input', bind);
 
+/* ============================================================
+   PASTE HANDLER — preserve bold formatting from clipboard HTML
+   ============================================================ */
+(function() {
+  function htmlToMarkdown(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+
+    function walk(node) {
+      if (node.nodeType === 3) return node.textContent;
+      const tag = node.nodeName.toLowerCase();
+      const children = Array.from(node.childNodes).map(walk).join('');
+      if (tag === 'b' || tag === 'strong') {
+        const t = children.trim();
+        return t ? '**' + t + '**' : '';
+      }
+      if (tag === 'br') return '\n';
+      if (['p','div','li','h1','h2','h3','h4','h5','h6','tr'].includes(tag)) {
+        return children + '\n';
+      }
+      return children;
+    }
+
+    const raw = walk(tmp);
+    // Collapse 3+ newlines to 2, trim trailing whitespace per line
+    return raw
+      .split('\n')
+      .map(l => l.trimEnd())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  document.getElementById('formPanel').addEventListener('paste', function(e) {
+    const target = e.target;
+    if (target.tagName !== 'TEXTAREA' && target.tagName !== 'INPUT') return;
+
+    const html = e.clipboardData.getData('text/html');
+    if (!html) return; // no HTML in clipboard — let default paste happen
+
+    // Check if there's any bold content worth converting
+    if (!/<(b|strong)\b/i.test(html)) return;
+
+    e.preventDefault();
+
+    const converted = htmlToMarkdown(html);
+
+    // Insert at cursor position
+    const start = target.selectionStart;
+    const end   = target.selectionEnd;
+    const before = target.value.slice(0, start);
+    const after  = target.value.slice(end);
+    target.value = before + converted + after;
+    target.selectionStart = target.selectionEnd = start + converted.length;
+
+    // Trigger bind
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+})();
+
 addSyncBtn();
 markDirtyListeners();
 bind();
@@ -2103,42 +2428,6 @@ document.getElementById('exportWord').addEventListener('click', async () => {
           spacing: { after: 80 }
         }));
       });
-    }
-    children.push(divider());
-
-    // PROGRAM DETAILS
-    children.push(h2('Program Details'));
-    const detSummary = getFieldText('pDetSummary');
-    if (detSummary) children.push(body(detSummary));
-
-    const detailRows = [
-      ['Regions Served',       getFieldText('pRegions')],
-      ['Course Duration',      getFieldText('pDetDuration')],
-      ['Total Learning Hours', getFieldText('pHours')],
-      ['Key Benefits',         getFieldText('pBenefits')],
-      ['Value Addition',       getFieldText('pValue')],
-      ['Location',             getFieldText('pLocation')],
-      ['Date & Time',          getFieldText('pDatetime')],
-    ].filter(r => r[1]);
-
-    if (detailRows.length) {
-      const tableRows = detailRows.map(([label, value]) =>
-        new TableRow({
-          children: [
-            new TableCell({
-              children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 20 })] })],
-              width: { size: 30, type: WidthType.PERCENTAGE },
-              shading: { type: ShadingType.CLEAR, fill: 'f5f5f5' }
-            }),
-            new TableCell({
-              children: [new Paragraph({ children: [new TextRun({ text: value, size: 20 })] })],
-              width: { size: 70, type: WidthType.PERCENTAGE }
-            })
-          ]
-        })
-      );
-      children.push(new Table({ rows: tableRows, width: { size: 100, type: WidthType.PERCENTAGE } }));
-      children.push(new Paragraph({ spacing: { after: 200 } }));
     }
     children.push(divider());
 
@@ -2313,23 +2602,6 @@ document.getElementById('exportPpt').addEventListener('click', async () => {
       });
     }
     sectionSlide(pptx, 'Program Insight', insightLines, ORANGE);
-
-    // Slide 3: Program Details
-    const detLines = [];
-    const detSummary = getFieldText('pDetSummary');
-    if (detSummary) detLines.push({ text: detSummary });
-    [
-      ['Regions Served',       getFieldText('pRegions')],
-      ['Course Duration',      getFieldText('pDetDuration')],
-      ['Total Learning Hours', getFieldText('pHours')],
-      ['Key Benefits',         getFieldText('pBenefits')],
-      ['Value Addition',       getFieldText('pValue')],
-      ['Location',             getFieldText('pLocation')],
-      ['Date & Time',          getFieldText('pDatetime')],
-    ].filter(r => r[1]).forEach(([label, value]) => {
-      detLines.push({ text: label + ': ' + value, bold: false });
-    });
-    sectionSlide(pptx, 'Program Details', detLines, DARK);
 
     // Slide 4: Learning Objective
     const objLines = [];

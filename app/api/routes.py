@@ -33,22 +33,14 @@ from app.services.claude import ClaudeService
 from app.services.pdf_service import generate_pdf_path_async
 from app.services.google_drive import GoogleDriveUploadError, upload_course_outline_pdf_to_drive
 from app.services.zoho_integration import (
-    get_course_outline_integration_status,
     zoho_notify_course_outline_job_finished,
     zoho_notify_refined_outline_version,
 )
-from app.services.zoho_crm import maybe_update_course_job_status
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["courses"])
 REGIONS_SERVED_CONSTANT = "UAE, Saudi Arabia, Africa, MENA, and Europe"
-ZOHO_COURSE_STATUS_PICKLIST_MAP = {
-    "pending": "Pending",
-    "processing": "In Progress",
-    "completed": "Completed",
-    "failed": "Failed to create - Try Again",
-}
 
 
 # ─── Auth dependency ──────────────────────────────────────────────────────────
@@ -82,14 +74,6 @@ def _enforce_regions_served_constant(payload) -> None:
     except Exception:
         # Structured payload may be absent in fallback paths.
         pass
-
-
-def _zoho_picklist_status(local_status: str) -> str:
-    """
-    Map internal job status to Zoho picklist values.
-    """
-    key = (local_status or "").strip().lower()
-    return ZOHO_COURSE_STATUS_PICKLIST_MAP.get(key, "Pending")
 
 
 @router.get(
@@ -361,10 +345,6 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             job.status = "processing"
             job.error = None
             await db.commit()
-            await maybe_update_course_job_status(
-                zoho_record_id=zoho_record_id,
-                status_value=_zoho_picklist_status("processing"),
-            )
             logger.info("Job status set to processing | job_id=%s", str(job_id))
 
             context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
@@ -449,10 +429,6 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             job.course_id = created_course_id
             job.version_number = created_version_number
             await db.commit()
-            await maybe_update_course_job_status(
-                zoho_record_id=zoho_record_id,
-                status_value=_zoho_picklist_status("completed"),
-            )
             logger.info(
                 "Job completed | job_id=%s course_id=%s version=%s pdf_url=%s",
                 str(job_id),
@@ -470,10 +446,6 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 job.status = "failed"
                 job.error = str(e)[:4000]
                 await db.commit()
-                await maybe_update_course_job_status(
-                    zoho_record_id=zoho_record_id,
-                    status_value=_zoho_picklist_status("failed"),
-                )
                 await zoho_notify_course_outline_job_finished(
                     job,
                     created_version_number,
@@ -532,10 +504,6 @@ async def generate_course(
                 )
                 db.add(job)
             await db.refresh(job)
-        await maybe_update_course_job_status(
-            zoho_record_id=req.zoho_record_id,
-            status_value=_zoho_picklist_status("pending"),
-        )
         logger.info(
             "Course generation job created | job_id=%s zoho_record_id=%s",
             str(job.id),

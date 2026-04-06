@@ -19,12 +19,34 @@ def _gamma_configured() -> bool:
     return bool(getattr(settings, "GAMMA_API_KEY", "") and getattr(settings, "GAMMA_BASE_URL", ""))
 
 
-async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instructions: str = "") -> dict[str, Any]:
+def _build_sharing_options() -> dict[str, Any]:
+    workspace_access = str(getattr(settings, "GAMMA_WORKSPACE_ACCESS", "") or "").strip() or "edit"
+    external_access = str(getattr(settings, "GAMMA_EXTERNAL_ACCESS", "") or "").strip() or "edit"
+    sharing: dict[str, Any] = {
+        "workspaceAccess": workspace_access,
+        "externalAccess": external_access,
+    }
+    recipients = settings.get_gamma_email_edit_list()
+    if recipients:
+        # Gamma docs use emailOptions as an object with recipients + access.
+        sharing["emailOptions"] = {
+            "recipients": recipients,
+            "access": "edit",
+        }
+    return sharing
+
+
+async def generate_ppt(
+    slides_batch: list[dict[str, Any]],
+    *,
+    additional_instructions: str = "",
+    include_export_bytes: bool = True,
+) -> dict[str, Any]:
     """
     Uses Gamma Public API async workflow:
     - POST /v1.0/generations
     - poll GET /v1.0/generations/{id}
-    - download exportUrl (pptx)
+    - optionally download exportUrl (pptx)
     """
     if not _gamma_configured():
         raise GammaNotConfigured("Gamma API is not configured. Set GAMMA_API_KEY and GAMMA_BASE_URL.")
@@ -50,7 +72,10 @@ async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instruc
 
     input_text = "\n".join(lines).strip()
 
-    create_url = f"{base}/v1.0/generations"
+    use_template = bool(getattr(settings, "GAMMA_USE_TEMPLATE", False))
+    template_id = str(getattr(settings, "GAMMA_TEMPLATE_ID", "") or "").strip()
+    use_template = use_template and bool(template_id)
+    create_url = f"{base}/v1.0/generations/from-template" if use_template else f"{base}/v1.0/generations"
     headers = {"X-API-KEY": api_key, "Accept": "application/json"}
     desired_cards = max(1, len(slides_batch))
     strict_instructions = (
@@ -59,25 +84,50 @@ async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instruc
         "Do not merge sections. Do not skip sections. "
         "Do not summarize into fewer slides. Keep slide count very close to requested."
     )
-    merged_instructions = strict_instructions
+    # Visual consistency: standard deck layout (Gamma applies theme; these instructions bias uniformity).
+    visual_layout_instructions = (
+        "Visual and layout: Use a standard widescreen presentation aspect (16:9). "
+        "Keep every slide visually consistent: same margins/padding, aligned title area, "
+        "readable body text size, and balanced whitespace. "
+        "Avoid cramming too much text on one slide; split content rather than shrinking fonts. "
+        "Use a single coherent theme and color palette across all slides. "
+        "Keep bullet counts similar per slide where possible for a uniform rhythm."
+    )
+    merged_instructions = f"{strict_instructions} {visual_layout_instructions}"
     if (additional_instructions or "").strip():
-        merged_instructions = f"{strict_instructions} {(additional_instructions or '').strip()}"
+        merged_instructions = f"{merged_instructions} {(additional_instructions or '').strip()}"
 
-    payload = {
-        "inputText": input_text,
-        # Gamma defaults can condense aggressively; generate + numCards gives tighter count control.
-        "textMode": "generate",
-        "format": "presentation",
-        "numCards": desired_cards,
-        "exportAs": "pptx",
-        "additionalInstructions": merged_instructions[:5000],
-    }
+    payload: dict[str, Any]
+    sharing_options = _build_sharing_options()
+    if use_template:
+        prompt = f"{input_text}\n\nInstructions:\n{merged_instructions[:5000]}"
+        payload = {
+            "gammaId": template_id,
+            "prompt": prompt,
+            "exportAs": "pptx",
+            "sharingOptions": sharing_options,
+        }
+    else:
+        payload = {
+            "inputText": input_text,
+            # Gamma defaults can condense aggressively; generate + numCards gives tighter count control.
+            "textMode": "generate",
+            "format": "presentation",
+            "numCards": desired_cards,
+            "exportAs": "pptx",
+            "additionalInstructions": merged_instructions[:5000],
+            "sharingOptions": sharing_options,
+        }
 
+    gamma_endpoint = "from-template" if use_template else "generate"
     logger.info(
-        "Gamma createGeneration | slides=%s num_cards=%s input_chars=%s",
+        "Gamma createGeneration | slides=%s num_cards=%s input_chars=%s mode=%s url_suffix=%s template_set=%s",
         len(slides_batch),
         desired_cards,
         len(input_text),
+        gamma_endpoint,
+        "/v1.0/generations/from-template" if use_template else "/v1.0/generations",
+        bool(template_id),
     )
 
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -98,6 +148,7 @@ async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instruc
         status_url = f"{base}/v1.0/generations/{gen_id}"
         export_url: str | None = None
         gamma_url: str | None = None
+        editable_gamma_url: str | None = None
         for attempt in range(1, 121):
             st = await client.get(status_url, headers=headers)
             st.raise_for_status()
@@ -106,6 +157,16 @@ async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instruc
             if status == "completed":
                 export_url = st_data.get("exportUrl")
                 gamma_url = st_data.get("gammaUrl")
+                # Gamma API can vary naming across versions/tenants.
+                editable_gamma_url = (
+                    st_data.get("editableGammaUrl")
+                    or st_data.get("editUrl")
+                    or st_data.get("editorUrl")
+                    or st_data.get("workspaceUrl")
+                    or st_data.get("presentationUrl")
+                )
+                if not editable_gamma_url:
+                    editable_gamma_url = gamma_url
                 logger.info("Gamma generation completed | generationId=%s", gen_id)
                 break
             if status == "failed":
@@ -116,16 +177,30 @@ async def generate_ppt(slides_batch: list[dict[str, Any]], *, additional_instruc
                 logger.info("Gamma generation polling | generationId=%s attempt=%s status=%s", gen_id, attempt, status)
             await asyncio.sleep(2.0)
 
-        if not export_url or not isinstance(export_url, str):
-            raise RuntimeError("Gamma generation did not complete with exportUrl.")
-
-        logger.info("Gamma downloading export | generationId=%s", gen_id)
-        dl = await client.get(export_url, headers=headers, timeout=120.0)
-        dl.raise_for_status()
-        logger.info("Gamma export downloaded | generationId=%s bytes=%s", gen_id, len(dl.content))
-        return {
-            "ppt_bytes": dl.content,
+        out_base: dict[str, Any] = {
             "generation_id": gen_id,
             "gamma_url": gamma_url,
+            "editable_gamma_url": editable_gamma_url,
+            # Echoes the JSON body sent to Gamma (for DB/debugging; no API key in body).
+            "gamma_endpoint": gamma_endpoint,
+            "gamma_create_url": create_url,
+            "request_payload": dict(payload),
+        }
+        if include_export_bytes:
+            if not export_url or not isinstance(export_url, str):
+                raise RuntimeError("Gamma generation did not complete with exportUrl.")
+            logger.info("Gamma downloading export | generationId=%s", gen_id)
+            dl = await client.get(export_url, headers=headers, timeout=120.0)
+            dl.raise_for_status()
+            logger.info("Gamma export downloaded | generationId=%s bytes=%s", gen_id, len(dl.content))
+            return {
+                **out_base,
+                "ppt_bytes": dl.content,
+            }
+
+        logger.info("Gamma link-only mode | generationId=%s", gen_id)
+        return {
+            **out_base,
+            "ppt_bytes": b"",
         }
 

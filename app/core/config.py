@@ -46,9 +46,6 @@ class Settings(BaseSettings):
     ZOHO_CRM_SLIDES_MODULE_API_NAME: str = ""
     # Field API name in slides module to store module-wise Gamma links text.
     ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME: str = "Link_for_Courseware"
-    # Course generation status sync target (for Pre-Closure Tasks module).
-    ZOHO_CRM_COURSE_STATUS_MODULE_API_NAME: str = "Closure_Activities"
-    ZOHO_CRM_COURSE_STATUS_FIELD_API_NAME: str = "Status"
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 
@@ -96,8 +93,6 @@ class Settings(BaseSettings):
         "ZOHO_CRM_OUTLINE_MODULE_API_NAME",
         "ZOHO_CRM_SLIDES_MODULE_API_NAME",
         "ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME",
-        "ZOHO_CRM_COURSE_STATUS_MODULE_API_NAME",
-        "ZOHO_CRM_COURSE_STATUS_FIELD_API_NAME",
         "SLIDES_PLANNER_MODEL",
         "SLIDES_GENERATOR_MODEL",
         "SLIDES_VALIDATOR_MODEL",

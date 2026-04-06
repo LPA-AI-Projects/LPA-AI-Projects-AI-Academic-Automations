@@ -61,17 +61,6 @@ def get_slides_module_api_name() -> str:
     )
 
 
-def get_course_status_module_api_name() -> str:
-    """
-    Module API name used for course job status sync.
-    Defaults to Pre-Closure Tasks module API name: Closure_Activities.
-    """
-    return (
-        (settings.ZOHO_CRM_COURSE_STATUS_MODULE_API_NAME or "").strip()
-        or "Closure_Activities"
-    )
-
-
 async def get_access_token() -> str:
     """Exchange refresh token for access token; cache until ~5 min before expiry."""
     global _token_cache, _token_expires_at
@@ -238,68 +227,6 @@ async def maybe_attach_course_pdf(
         )
     except Exception:
         logger.exception("Zoho CRM: attach PDF link failed | record_id=%s", zoho_record_id)
-
-
-async def maybe_update_course_job_status(
-    *,
-    zoho_record_id: str,
-    status_value: str,
-) -> None:
-    """
-    Best-effort status sync for course job into Zoho CRM.
-    Writes picklist value to configured field on configured module.
-    """
-    rid = (zoho_record_id or "").strip()
-    sval = (status_value or "").strip()
-    if not rid or not sval:
-        return
-    if not _crm_configured():
-        logger.info(
-            "Zoho course status sync skipped: CRM OAuth not configured "
-            "(ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN)."
-        )
-        return
-
-    module_api = get_course_status_module_api_name().strip("/")
-    field_name = (settings.ZOHO_CRM_COURSE_STATUS_FIELD_API_NAME or "Status").strip()
-    token = await get_access_token()
-    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
-    url = f"{base}/crm/v8/{module_api}"
-    headers = {
-        "Authorization": f"Zoho-oauthtoken {token}",
-        "Content-Type": "application/json",
-    }
-    payload = {"data": [{"id": rid, field_name: sval}]}
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.put(url, headers=headers, json=payload)
-        if resp.status_code >= 400:
-            logger.warning(
-                "Zoho course status sync failed | module=%s record_id=%s field=%s status=%s http=%s body=%s",
-                module_api,
-                rid,
-                field_name,
-                sval,
-                resp.status_code,
-                (resp.text or "")[:2000],
-            )
-            return
-        logger.info(
-            "Zoho course status sync success | module=%s record_id=%s field=%s status=%s",
-            module_api,
-            rid,
-            field_name,
-            sval,
-        )
-    except Exception:
-        logger.exception(
-            "Zoho course status sync exception | module=%s record_id=%s field=%s status=%s",
-            module_api,
-            rid,
-            field_name,
-            sval,
-        )
 
 
 def _auth_header(token: str) -> dict[str, str]:

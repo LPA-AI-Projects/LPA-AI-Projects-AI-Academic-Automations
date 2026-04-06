@@ -6,7 +6,7 @@ services:
       - postgres
     volumes:
       - ./:/app
-      - generated_pdfs:/app/generated_pdfs
+      - course_ai_storage:/app/storage
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   postgres:
@@ -24,4 +24,4 @@ services:
 
 volumes:
   course_ai_pgdata:
-  generated_pdfs:
+  course_ai_storage:

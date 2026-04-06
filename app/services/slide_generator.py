@@ -49,6 +49,8 @@ async def generate_slide(
     *,
     slide: dict[str, Any],
     context: dict[str, Any],
+    model: str | None = None,
+    fix_instructions: str | None = None,
 ) -> dict[str, Any]:
     title = str(slide.get("title") or "").strip()
     slide_type = str(slide.get("type") or "content").strip().lower()
@@ -58,14 +60,20 @@ async def generate_slide(
         "SLIDE REQUEST:\n"
         f"- title: {title}\n"
         f"- type: {slide_type}\n\n"
+        "SOURCE PRIORITY:\n"
+        "- course_outline is mandatory primary source\n"
+        "- lesson_plan_and_activity_plan is secondary source\n"
+        "- instructor_ppt is supplement only\n\n"
         "GLOBAL CONTEXT:\n"
         f"{json.dumps(context, ensure_ascii=False)[:150000]}\n"
     )
-    raw = await ai._call_messages_api(  # type: ignore[attr-defined]
+    if (fix_instructions or "").strip():
+        user_prompt += f"\nVALIDATOR FIX INSTRUCTIONS:\n{str(fix_instructions).strip()}\n"
+    raw = await ai.generate_text_completion(
         system_prompt=SLIDE_GENERATION_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         timeout_s=120.0,
-        max_attempts=3,
+        model_override=model,
     )
     return _safe_slide_json(raw)
 

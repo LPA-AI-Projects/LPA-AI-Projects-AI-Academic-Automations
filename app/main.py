@@ -1,4 +1,3 @@
-import os
 import sys
 import asyncio
 from contextlib import asynccontextmanager
@@ -11,15 +10,16 @@ from sqlalchemy import text
 
 from app.api.routes import router
 from app.api.slides import router as slides_router
+from app.api.assessments import router as assessments_router
 from app.core.database import Base, engine
+from app.core.storage_paths import ensure_storage_dirs, pdfs_dir, ppts_dir
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-OUTPUT_DIR = "generated_pdfs"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-PPT_OUTPUT_DIR = "generated_ppts"
-os.makedirs(PPT_OUTPUT_DIR, exist_ok=True)
+ensure_storage_dirs()
+OUTPUT_DIR = pdfs_dir()
+PPT_OUTPUT_DIR = ppts_dir()
 
 # Playwright launches Chromium via subprocess; ensure an event loop policy
 # that supports subprocesses on Windows.
@@ -101,6 +101,7 @@ app.mount("/ppts", StaticFiles(directory=PPT_OUTPUT_DIR), name="ppts")
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(router)
 app.include_router(slides_router)
+app.include_router(assessments_router)
 
 
 @app.middleware("http")
