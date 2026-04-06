@@ -40,6 +40,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["courses"])
+REGIONS_SERVED_CONSTANT = "UAE, Saudi Arabia, Africa, MENA, and Europe"
 
 
 # ─── Auth dependency ──────────────────────────────────────────────────────────
@@ -62,6 +63,17 @@ auth = Depends(verify_api_key)
 def _input_data_dict_for_job(data: CourseInputData) -> dict:
     """Flatten outline job input for JSON context; drop unset optional CRM fields."""
     return data.model_dump(exclude_none=True, mode="json")
+
+
+def _enforce_regions_served_constant(payload) -> None:
+    """
+    Keep brochure region text fixed regardless of model variation.
+    """
+    try:
+        payload.course_details.regions_served = REGIONS_SERVED_CONSTANT
+    except Exception:
+        # Structured payload may be absent in fallback paths.
+        pass
 
 
 @router.get(
@@ -345,6 +357,7 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                     ai.build_roi_course_outline_json(context_text, learning_objectives),
                     timeout=310,
                 )
+                _enforce_regions_served_constant(outline_payload)
                 outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
             except RuntimeError:
                 outline = await wait_for(
@@ -603,6 +616,7 @@ async def refine_course(
                 ai.refine_course_outline_json(base_outline, req.feedback),
                 timeout=310,
             )
+            _enforce_regions_served_constant(refined_payload)
             updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
             logger.info("Refine AI structured mode completed | zoho_record_id=%s", rid)
         except RuntimeError:

@@ -16,6 +16,7 @@ from app.schemas.outline_payload import CourseOutlinePayload
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+REGIONS_SERVED_CONSTANT = "UAE, Saudi Arabia, Africa, MENA, and Europe"
 
 OUTPUT_DIR = pdfs_dir()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -1005,7 +1006,11 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
     updated = _replace_inner_html_by_id(updated, "pInsight", insight_html)
     det_summary = _details_page_summary_from_insight(payload.program_insight.paragraphs)
     updated = _replace_inner_html_by_id(updated, "pDetSummary", _render_bold_markdown_to_html(det_summary))
-    updated = _replace_inner_html_by_id(updated, "pRegions", escape(_brochure_strip_dashes(payload.course_details.regions_served or "Global")))
+    updated = _replace_inner_html_by_id(
+        updated,
+        "pRegions",
+        escape(_brochure_strip_dashes(REGIONS_SERVED_CONSTANT)),
+    )
     updated = _replace_inner_html_by_id(
         updated,
         "pDetDuration",
