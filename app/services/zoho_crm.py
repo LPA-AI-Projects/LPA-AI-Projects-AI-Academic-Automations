@@ -62,11 +62,8 @@ def get_slides_module_api_name() -> str:
 
 
 def get_course_status_module_api_name() -> str:
-    """Module API name for course outline job status updates (e.g. Pre-Closure Tasks)."""
-    return (
-        (settings.ZOHO_CRM_COURSE_STATUS_MODULE_API_NAME or "").strip()
-        or "Closure_Activities"
-    )
+    """Same module as PDF outline attach target (ZOHO_CRM_OUTLINE_MODULE_API_NAME / ZOHO_CRM_MODULE_API_NAME)."""
+    return get_outline_module_api_name()
 
 
 async def get_access_token() -> str:
