@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME: str = "Link_for_Courseware"
     # Course job status picklist field (module = same as outline: ZOHO_CRM_OUTLINE_MODULE_API_NAME / ZOHO_CRM_MODULE_API_NAME).
     ZOHO_CRM_COURSE_STATUS_FIELD_API_NAME: str = "Status"
+    # Set false if CRM returns CANNOT_PERFORM_ACTION until Zoho roles/scopes/sharing are fixed.
+    ZOHO_CRM_STATUS_SYNC_ENABLED: bool = True
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 
@@ -113,6 +115,19 @@ class Settings(BaseSettings):
     @classmethod
     def coerce_gamma_use_template(cls, value: object) -> bool:
         """Railway/.env often provide booleans as strings; accept common variants."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
+
+    @field_validator("ZOHO_CRM_STATUS_SYNC_ENABLED", mode="before")
+    @classmethod
+    def coerce_zoho_status_sync_enabled(cls, value: object) -> bool:
         if isinstance(value, bool):
             return value
         if isinstance(value, str):

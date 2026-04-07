@@ -247,6 +247,9 @@ async def maybe_update_course_job_status(
     sval = (status_value or "").strip()
     if not rid or not sval:
         return
+    if not getattr(settings, "ZOHO_CRM_STATUS_SYNC_ENABLED", True):
+        logger.info("Zoho course status sync skipped: ZOHO_CRM_STATUS_SYNC_ENABLED=false")
+        return
     if not _crm_configured():
         logger.info(
             "Zoho course status sync skipped: CRM OAuth not configured "
@@ -269,14 +272,35 @@ async def maybe_update_course_job_status(
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.put(url, headers=headers, json=payload)
         if resp.status_code >= 400:
+            body_preview = (resp.text or "")[:2000]
+            hint = ""
+            try:
+                err_json = resp.json()
+                rows = err_json.get("data") if isinstance(err_json, dict) else None
+                first = rows[0] if isinstance(rows, list) and rows else {}
+                if isinstance(first, dict) and first.get("code") == "CANNOT_PERFORM_ACTION":
+                    hint = (
+                        " This is a Zoho permission error (not a bad picklist value). Fix in Zoho: "
+                        "(1) Regenerate OAuth refresh token with scopes that allow updating this module "
+                        "(e.g. ZohoCRM.modules.ALL). "
+                        "(2) Ensure the CRM user tied to OAuth has a Role/Profile that can edit "
+                        f"{module_api} and field {field_name}. "
+                        "(3) Check sharing: this user must be allowed to edit record id={rid}. "
+                        "(4) Confirm zoho_record_id is a record in module {module_api} (same as "
+                        "ZOHO_CRM_OUTLINE_MODULE_API_NAME / ZOHO_CRM_MODULE_API_NAME). "
+                        "Blueprint/approval can also block edits."
+                    )
+            except Exception:
+                pass
             logger.warning(
-                "Zoho course status sync failed | module=%s record_id=%s field=%s value=%s http=%s body=%s",
+                "Zoho course status sync failed | module=%s record_id=%s field=%s value=%s http=%s body=%s%s",
                 module_api,
                 rid,
                 field_name,
                 sval,
                 resp.status_code,
-                (resp.text or "")[:2000],
+                body_preview,
+                hint,
             )
             return
         logger.info(
