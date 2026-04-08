@@ -447,7 +447,8 @@ def _build_cover_title_html(title: str) -> str:
     """
     Keep cover heading visually aligned for short and long titles.
     """
-    safe_title = escape((title or "COURSE OUTLINE").strip())
+    normalized = (title or "COURSE OUTLINE").strip()
+    safe_title = escape(normalized)
     length = len(safe_title)
     if length > 90:
         size_px = 30
@@ -457,11 +458,21 @@ def _build_cover_title_html(title: str) -> str:
         size_px = 38
     else:
         size_px = 44
+    words = normalized.split()
+    if len(words) >= 2:
+        lead = escape(" ".join(words[:-1]))
+        tail = escape(words[-1])
+        title_with_dot = (
+            f'{lead} <span style="white-space:nowrap;">{tail}<span class="dot"></span></span>'
+        )
+    else:
+        title_with_dot = f'{safe_title}<span class="dot"></span>'
+
     return (
         f'<span style="display:inline-block;font-size:{size_px}px;line-height:1.05;'
         'letter-spacing:-0.5px;white-space:normal;overflow-wrap:anywhere;">'
-        f"{safe_title}"
-        '</span><span class="dot"></span>'
+        f"{title_with_dot}"
+        "</span>"
     )
 
 
