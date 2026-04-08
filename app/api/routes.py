@@ -2,6 +2,7 @@ import uuid
 import os
 import json
 import re
+import csv
 from urllib.parse import parse_qs
 from typing import Optional, Any
 
@@ -120,6 +121,78 @@ def split_courses(text: str) -> list[str]:
         if cleaned:
             courses.append(cleaned)
     return courses
+
+
+def _is_product_section_duration(value: str | None) -> bool:
+    s = str(value or "").strip().lower()
+    if not s:
+        return False
+    return "refer to product section" in s
+
+
+def _looks_like_duration(value: str | None) -> bool:
+    s = str(value or "").strip().lower()
+    if not s:
+        return False
+    return any(tok in s for tok in ("day", "days", "week", "weeks", "hour", "hours", "hr", "hrs"))
+
+
+def _should_parse_product_rows(raw: str, duration_hint: str | None) -> bool:
+    if _is_product_section_duration(duration_hint):
+        return True
+    lines = [ln.strip() for ln in str(raw or "").splitlines() if ln.strip()]
+    if not lines:
+        return False
+    # Auto-detect when each line looks like: Product Name, No of Pax, Duration
+    matched = 0
+    for line in lines:
+        parts = [p.strip() for p in next(csv.reader([line]))]
+        if len(parts) < 3:
+            continue
+        pax = parts[1] if len(parts) >= 2 else ""
+        dur = parts[2] if len(parts) >= 3 else ""
+        if pax and re.search(r"\d", pax) and _looks_like_duration(dur):
+            matched += 1
+    return matched == len(lines)
+
+
+def parse_course_rows(course_text: str, duration_hint: str | None) -> list[dict[str, str]]:
+    """
+    Supports two formats:
+    1) Existing: "Course A, Course B" or newline list -> [{"course_name": "..."}]
+    2) Zoho product rows (when duration says 'Refer to Product Section'):
+       "Product Name, No of Pax, Duration" per line.
+    """
+    raw = str(course_text or "").strip()
+    if not raw:
+        return []
+
+    if _should_parse_product_rows(raw, duration_hint):
+        rows: list[dict[str, str]] = []
+        for line in [ln.strip() for ln in raw.splitlines() if ln.strip()]:
+            parsed = next(csv.reader([line]))
+            parts = [str(p or "").strip() for p in parsed]
+            if not any(parts):
+                continue
+            course_name = parts[0] if len(parts) >= 1 else ""
+            no_of_pax = parts[1] if len(parts) >= 2 else ""
+            duration = parts[2] if len(parts) >= 3 else ""
+            # If there are extra columns, merge into title to avoid silent loss.
+            if len(parts) > 3:
+                course_name = ", ".join([course_name, *parts[3:]]).strip(", ").strip()
+            if course_name:
+                rows.append(
+                    {
+                        "course_name": course_name,
+                        "no_of_pax": no_of_pax,
+                        "duration": duration,
+                    }
+                )
+        if rows:
+            return rows
+
+    # Default existing behavior (backward-compatible)
+    return [{"course_name": c} for c in split_courses(raw)]
 
 
 def parse_title(title: str) -> tuple[str, int | None]:
@@ -523,13 +596,16 @@ async def generate_course(
     ),
 ):
     req = await _parse_generate_request(request)
-    course_names = split_courses(str(req.input_data.course_name or ""))
-    if not course_names:
+    course_rows = parse_course_rows(
+        str(req.input_data.course_name or ""),
+        str(req.input_data.duration or ""),
+    )
+    if not course_rows:
         raise HTTPException(status_code=422, detail="input_data.course_name is required.")
-    if sync and len(course_names) > 1:
+    if sync and len(course_rows) > 1:
         logger.warning(
             "sync=true with multiple courses is not supported; queueing async jobs instead | count=%s zoho_record_id=%s",
-            len(course_names),
+            len(course_rows),
             req.zoho_record_id,
         )
         sync = False
@@ -544,7 +620,10 @@ async def generate_course(
     try:
         # Use one short-lived DB session per job row to avoid transaction overlap
         # during multi-course queueing.
-        for course_name in course_names:
+        for row in course_rows:
+            course_name = str(row.get("course_name") or "").strip()
+            if not course_name:
+                continue
             async with AsyncSessionLocal() as db:
                 async with db.begin():
                     job = CourseJob(
@@ -556,12 +635,20 @@ async def generate_course(
                 await db.refresh(job)
                 input_copy = req.input_data.model_copy()
                 input_copy.course_name = course_name
+                row_pax = str(row.get("no_of_pax") or "").strip()
+                row_duration = str(row.get("duration") or "").strip()
+                if row_pax:
+                    input_copy.no_of_pax = row_pax
+                if row_duration:
+                    input_copy.duration = row_duration
                 jobs_with_input.append((job.id, _input_data_dict_for_job(input_copy)))
                 logger.info(
-                    "Course generation job created | job_id=%s zoho_record_id=%s course_name=%s",
+                    "Course generation job created | job_id=%s zoho_record_id=%s course_name=%s no_of_pax=%s duration=%s",
                     str(job.id),
                     req.zoho_record_id,
                     course_name,
+                    row_pax,
+                    row_duration,
                 )
     except (SQLAlchemyError, OSError, Exception):
         logger.exception("Database error while creating job")
