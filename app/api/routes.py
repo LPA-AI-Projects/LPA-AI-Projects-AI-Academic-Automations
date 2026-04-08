@@ -3,7 +3,7 @@ import os
 import json
 import re
 from urllib.parse import parse_qs
-from typing import Optional
+from typing import Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
@@ -108,6 +108,38 @@ def _job_to_course_outline_response(job: CourseJob) -> CourseOutlineJobResponse:
 def _build_pdf_url(file_path: str) -> str:
     filename = os.path.basename(file_path)
     return f"{settings.BASE_URL}/pdfs/{filename}"
+
+
+def split_courses(text: str) -> list[str]:
+    if not text:
+        return []
+    parts = re.split(r"[\n,]+", text)
+    courses: list[str] = []
+    for part in parts:
+        cleaned = re.sub(r"^\s*\d+\s*[\.\-\)]\s*", "", str(part or "").strip())
+        if cleaned:
+            courses.append(cleaned)
+    return courses
+
+
+def parse_title(title: str) -> tuple[str, int | None]:
+    match = re.match(r"(.+)_v(\d+)$", str(title or "").strip(), re.IGNORECASE)
+    if match:
+        return match.group(1).strip(), int(match.group(2))
+    return str(title or "").strip(), None
+
+
+def _job_payload_course_name(job: CourseJob) -> str:
+    raw = str(job.payload_json or "").strip()
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return str(data.get("course_name") or "").strip()
+    except Exception:
+        return ""
+    return ""
 
 
 def _derive_course_name_from_outline(outline_text: str | None) -> str:
@@ -314,7 +346,11 @@ async def _parse_refine_request(request: Request) -> tuple[str, RefineCourseRequ
 
     refine_payload = {
         "feedback": payload.get("feedback"),
-        "course_name": payload.get("course_name"),
+        "course_name": (
+            payload.get("course_name")
+            or payload.get("title")
+            or payload.get("note_title")
+        ),
     }
     try:
         req = RefineCourseRequest.model_validate(refine_payload)
@@ -487,6 +523,16 @@ async def generate_course(
     ),
 ):
     req = await _parse_generate_request(request)
+    course_names = split_courses(str(req.input_data.course_name or ""))
+    if not course_names:
+        raise HTTPException(status_code=422, detail="input_data.course_name is required.")
+    if sync and len(course_names) > 1:
+        logger.warning(
+            "sync=true with multiple courses is not supported; queueing async jobs instead | count=%s zoho_record_id=%s",
+            len(course_names),
+            req.zoho_record_id,
+        )
+        sync = False
     logger.info("Queueing course generation | zoho_record_id=%s sync=%s", req.zoho_record_id, sync)
     # Debug visibility for Zoho webhook mappings: log full request payload and top-level input keys.
     logger.info("Incoming /courses payload: %s", json.dumps(req.model_dump(mode="json"), ensure_ascii=False))
@@ -494,58 +540,78 @@ async def generate_course(
         "Incoming input_data keys: %s",
         sorted(req.input_data.model_dump(exclude_none=False).keys()),
     )
+    jobs_with_input: list[tuple[uuid.UUID, dict]] = []
     try:
-        # Short-lived session only: do not hold DB across sync LLM/PDF work or background latency.
-        async with AsyncSessionLocal() as db:
-            async with db.begin():
-                job = CourseJob(
-                    zoho_record_id=req.zoho_record_id,
-                    status="pending",
+        # Use one short-lived DB session per job row to avoid transaction overlap
+        # during multi-course queueing.
+        for course_name in course_names:
+            async with AsyncSessionLocal() as db:
+                async with db.begin():
+                    job = CourseJob(
+                        zoho_record_id=req.zoho_record_id,
+                        status="pending",
+                        payload_json=json.dumps({"course_name": course_name}, ensure_ascii=False),
+                    )
+                    db.add(job)
+                await db.refresh(job)
+                input_copy = req.input_data.model_copy()
+                input_copy.course_name = course_name
+                jobs_with_input.append((job.id, _input_data_dict_for_job(input_copy)))
+                logger.info(
+                    "Course generation job created | job_id=%s zoho_record_id=%s course_name=%s",
+                    str(job.id),
+                    req.zoho_record_id,
+                    course_name,
                 )
-                db.add(job)
-            await db.refresh(job)
-        logger.info(
-            "Course generation job created | job_id=%s zoho_record_id=%s",
-            str(job.id),
-            req.zoho_record_id,
-        )
     except (SQLAlchemyError, OSError, Exception):
         logger.exception("Database error while creating job")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
     if sync:
-        await process_course_job(job.id, req.zoho_record_id, _input_data_dict_for_job(req.input_data))
+        job_id, job_input = jobs_with_input[0]
+        await process_course_job(job_id, req.zoho_record_id, job_input)
         async with AsyncSessionLocal() as db2:
-            result = await db2.execute(select(CourseJob).where(CourseJob.id == job.id))
+            result = await db2.execute(select(CourseJob).where(CourseJob.id == job_id))
             job_done = result.scalars().first()
         if job_done is None:
             raise HTTPException(status_code=500, detail="Job finished but could not be reloaded.")
-        logger.info("Sync course generation finished | job_id=%s status=%s", job.id, job_done.status)
+        logger.info("Sync course generation finished | job_id=%s status=%s", job_id, job_done.status)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content=_job_to_course_outline_response(job_done).model_dump(mode="json"),
         )
 
-    background_tasks.add_task(
-        process_course_job,
-        job.id,
-        req.zoho_record_id,
-        _input_data_dict_for_job(req.input_data),
-    )
-    logger.info("Background task scheduled | job_id=%s", str(job.id))
+    for job_id, job_input in jobs_with_input:
+        background_tasks.add_task(
+            process_course_job,
+            job_id,
+            req.zoho_record_id,
+            job_input,
+        )
+        logger.info("Background task scheduled | job_id=%s", str(job_id))
     rid = req.zoho_record_id
-    body = CourseOutlineQueuedResponse(
-        job_id=job.id,
-        zoho_record_id=rid,
-        status=job.status,
-        message="Course outline generation queued.",
-        polling={
-            "by_zoho_record_id": f"/api/v1/courses/{rid}/outline-job",
-        },
-    )
+    if len(jobs_with_input) == 1:
+        job_id = jobs_with_input[0][0]
+        body = CourseOutlineQueuedResponse(
+            job_id=job_id,
+            zoho_record_id=rid,
+            status="pending",
+            message="Course outline generation queued.",
+            polling={
+                "by_zoho_record_id": f"/api/v1/courses/{rid}/outline-job",
+            },
+        )
+        content = body.model_dump(mode="json")
+    else:
+        content = {
+            "message": "Multiple course outlines queued",
+            "zoho_record_id": rid,
+            "job_ids": [str(job_id) for job_id, _ in jobs_with_input],
+            "polling": {"by_zoho_record_id": f"/api/v1/courses/{rid}/outline-job"},
+        }
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
-        content=body.model_dump(mode="json"),
+        content=content,
     )
 
 
@@ -574,21 +640,64 @@ async def refine_course(
     if not rid:
         raise HTTPException(status_code=422, detail="zoho_record_id is required.")
 
-    logger.info("Refine requested | zoho_record_id=%s", rid)
+    requested_title = str((req.course_name or "")).strip()
+    requested_course_name, requested_version = parse_title(requested_title)
+    logger.info(
+        "Refine requested | zoho_record_id=%s title=%s parsed_course=%s requested_version=%s",
+        rid,
+        requested_title,
+        requested_course_name,
+        requested_version,
+    )
 
     async with AsyncSessionLocal() as db:
         try:
-            cres = await db.execute(select(Course).where(Course.zoho_record_id == rid))
-            course = cres.scalars().first()
+            jres = await db.execute(
+                select(CourseJob)
+                .where(
+                    CourseJob.zoho_record_id == rid,
+                    CourseJob.course_id.is_not(None),
+                    or_(
+                        CourseJob.job_type.is_(None),
+                        and_(CourseJob.job_type != "slides", CourseJob.job_type != "assessment"),
+                    ),
+                )
+                .order_by(CourseJob.created_at.desc())
+            )
+            jobs = jres.scalars().all()
         except (SQLAlchemyError, OSError, Exception):
-            logger.exception("Database error while reading course")
+            logger.exception("Database error while reading course jobs for refine")
             raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
-        if not course:
-            logger.warning("Refine failed: course not found | zoho_record_id=%s", rid)
+        if not jobs:
+            logger.warning("Refine failed: no completed course jobs | zoho_record_id=%s", rid)
             raise HTTPException(status_code=404, detail="Course not found for this zoho_record_id.")
 
-        course_uuid = course.id
+        target_course_id: uuid.UUID | None = None
+        # Prefer explicit title mapping against payload_json.course_name.
+        if requested_course_name:
+            for job in jobs:
+                jname = _job_payload_course_name(job)
+                if jname and jname.strip().lower() == requested_course_name.strip().lower():
+                    target_course_id = job.course_id
+                    break
+            if target_course_id is None:
+                logger.warning(
+                    "Refine failed: no matching course_name track found | zoho_record_id=%s requested=%s",
+                    rid,
+                    requested_course_name,
+                )
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No generated course track found for title '{requested_course_name}'.",
+                )
+        else:
+            # No title provided: use latest generated course track for this Zoho record.
+            target_course_id = jobs[0].course_id
+
+        course_uuid = target_course_id
+        if course_uuid is None:
+            raise HTTPException(status_code=404, detail="Course track not found.")
 
         try:
             result = await db.execute(
@@ -596,16 +705,26 @@ async def refine_course(
                 .where(CourseVersion.course_id == course_uuid)
                 .order_by(CourseVersion.version_number.desc())
             )
-            last_version = result.scalars().first()
+            versions = result.scalars().all()
         except (SQLAlchemyError, OSError, Exception):
-            logger.exception("Database error while reading last version")
+            logger.exception("Database error while reading versions for refine")
             raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
 
-        if not last_version:
+        if not versions:
             logger.warning("Refine failed: no versions | zoho_record_id=%s", rid)
             raise HTTPException(status_code=404, detail="No outline versions found for this course.")
 
-        base_outline = last_version.outline_text or ""
+        if requested_version is not None:
+            base_version = next((v for v in versions if int(v.version_number) == int(requested_version)), None)
+            if base_version is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Version v{requested_version} not found for this course track.",
+                )
+        else:
+            base_version = versions[0]
+
+        base_outline = base_version.outline_text or ""
 
     # Call AI (structured refine first, fallback to text refine) — no DB session held here
     try:
@@ -644,7 +763,7 @@ async def refine_course(
         logger.warning("AI refine failed for zoho_record_id=%s error=%s", rid, str(e))
         raise HTTPException(status_code=502, detail="AI service failed. Please retry.")
 
-    name_for_file = (req.course_name or "").strip() or _derive_course_name_from_outline(base_outline)
+    name_for_file = requested_course_name or _derive_course_name_from_outline(base_outline)
 
     # Generate PDF off the event loop
     pdf_path: str | None = None
@@ -903,17 +1022,38 @@ async def get_latest_course_outline_job(
             )
             .order_by(CourseJob.created_at.desc())
         )
-        job = result.scalars().first()
+        jobs = result.scalars().all()
     except Exception:
         logger.exception("Database error while reading latest course outline job")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
-    if not job:
+    if not jobs:
         raise HTTPException(
             status_code=404,
             detail="No course outline job found for this zoho_record_id.",
         )
+    job = jobs[0]
+
+    # Multi-course support: include all completed PDF links for this zoho_record_id.
+    all_pdf_urls = [
+        str(j.pdf_url).strip()
+        for j in jobs
+        if str(j.status or "").strip().lower() == "completed"
+        and isinstance(j.pdf_url, str)
+        and str(j.pdf_url).strip()
+    ]
+    # Keep order stable by created_at desc from query while removing duplicates.
+    dedup_pdf_urls: list[str] = []
+    for u in all_pdf_urls:
+        if u not in dedup_pdf_urls:
+            dedup_pdf_urls.append(u)
+
+    payload = _job_to_course_outline_response(job).model_dump(mode="json")
+    payload["pdf_urls"] = dedup_pdf_urls
+    payload["job_ids"] = [str(j.id) for j in jobs]
+    payload["total_jobs"] = len(jobs)
+    payload["completed_jobs"] = sum(1 for j in jobs if str(j.status or "").strip().lower() == "completed")
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content=_job_to_course_outline_response(job).model_dump(mode="json"),
+        content=payload,
     )
 

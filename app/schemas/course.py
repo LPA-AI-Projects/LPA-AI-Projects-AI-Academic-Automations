@@ -115,16 +115,22 @@ class RefineCourseRequest(BaseModel):
     feedback: str = Field(..., min_length=10, description="Feedback for refinement")
     course_name: Optional[str] = Field(
         None,
-        description="Optional display name for Drive file naming (defaults to a safe name if omitted).",
+        validation_alias=AliasChoices("course_name", "title", "note_title"),
+        description=(
+            "Which course track to refine when zoho_record_id has multiple outlines. "
+            "Must match the per-job payload course_name from generation. "
+            "Also accepted as JSON keys title or note_title (same as /courses/refine)."
+        ),
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "feedback": "Please add more practical exercises and reduce theory sections.",
                 "course_name": "My Course Title",
             }
-        }
+        },
     }
 
 

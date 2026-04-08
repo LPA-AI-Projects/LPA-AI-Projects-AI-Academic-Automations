@@ -519,6 +519,7 @@ VOICE
 COURSE TITLE (course_title)
 - Use one string for the full program name. Hyphens between parts of the name are normal (e.g. "Data Analytics - Power BI for HR."). The brochure cover shows this as a single main heading; hyphens are NOT treated as a split between title and subtitle.
 - If you want a separate cover tagline below the name, use exactly one colon after the full name: "Data Analytics - Power BI for HR: Drive Smarter Workforce Decisions with Advanced Power BI Insights". Text after the colon becomes the subtitle; text before stays the main title.
+- NEVER include the client/company/organization name anywhere in course_title (neither before nor after the colon). Do not use phrases like "at <Company>" or "for <Company>" in the cover title or tagline. Company context can appear inside program_insight or other sections, but the cover title/subtitle must be company-agnostic.
 
 PROGRAM INSIGHT (program_insight)
 Professional brochure like the reference: three paragraphs with optional **bold** key phrases, then six outcome lines. Total narrative across the three paragraphs: aim for roughly 120 to 175 words (not a short abstract, not a long essay).
@@ -543,18 +544,18 @@ LEARNING OBJECTIVES BLOCK (standard brochure page: intro paragraph, then a. thro
 Match the compact brochure reference, not a dense technical spec.
 
 learning_objectives_intro
-- ONE paragraph, EXACTLY FOUR sentences, roughly 70 to 100 words.
+- ONE paragraph, EXACTLY FOUR sentences, roughly 55 to 80 words (must fit on one PDF page with the 7 objectives and closing).
 - Flow: (1) what the program focuses on and tools, (2) how it builds on prior knowledge, (3) what participants will learn to do, (4) the overall objective for professionals and reporting impact.
 - Direct L&D tone. No em dash. No bullet characters.
 
 learning_objectives (EXACTLY 7 items; layout prints letter a. through g.)
 - title: Short brochure-style heading ONLY (Title Case). Target 4 to 8 words. Use "&" where natural (e.g. "Data Structuring & Transformation"). Do NOT end the title with a colon. Do NOT cram long technical lists, tool chains, or comma stacks into the title (avoid "HR Data Connection and Power Query Transformation" style long headings). One clear topic per row.
-- description: EXACTLY one sentence, 8 to 16 words, on its own line under the title in the PDF. Imperative or clear outcome. Ends with a period. No em dash. Do not repeat the title words. No second sentence.
+- description: EXACTLY one sentence, 8 to 14 words, on its own line under the title in the PDF. Imperative or clear outcome. Ends with a period. No em dash. Do not repeat the title words. No second sentence.
 
 learning_objectives_closing
 - EXACTLY two paragraphs separated by \\n\\n.
-- Paragraph 1: EXACTLY THREE sentences, roughly 55 to 95 words. End-of-program capability, hands-on use, real-world application. One phrase must use **double asterisks** for bold, e.g. **practical application and analytical confidence** (adapt wording to the course).
-- Paragraph 2: EXACTLY THREE sentences, roughly 55 to 95 words. Interpretation, presenting insights, organizational contribution. One **bold phrase** such as **job-ready skills and improved decision-making capability** (adapt to context).
+- Paragraph 1: EXACTLY THREE sentences, roughly 45 to 70 words. End-of-program capability, hands-on use, real-world application. One phrase must use **double asterisks** for bold, e.g. **practical application and analytical confidence** (adapt wording to the course).
+- Paragraph 2: EXACTLY THREE sentences, roughly 45 to 70 words. Interpretation, presenting insights, organizational contribution. One **bold phrase** such as **job-ready skills and improved decision-making capability** (adapt to context).
 - Do not repeat the intro or enumerate objectives a through g again.
 
 CAPABILITY IMPACT (slim brochure page: keep density similar to a compact Learning Objectives page, not a long white paper)
@@ -642,6 +643,7 @@ The modules array has one object per training module; include as many as the cou
 REFINE_OUTLINE_PROMPT = """
 You are refining an existing course outline JSON based on stakeholder feedback.
 Preserve: brochure tone; do NOT use em dashes or en dashes in any field; 3 program_insight paragraphs (~38-58 words each, max 2 sentences, **bold** phrases allowed) + exactly 6 bullets; first sentence of each insight paragraph forms Course Details summary;
+Never include the client/company/organization name in course_title (including anything after a colon tagline). Avoid "at <Company>" / "for <Company>" in the cover title/subtitle.
 exactly 7 learning objectives: compact brochure titles (no colon), 8-16 word descriptions; intro 4 sentences; closing 2 paragraphs of 3 sentences each with **bold** phrases;
 capability impact: intro 2 sentences; each of 6 rows one sentence only (18-28 words); closing ONE short paragraph (2-3 sentences), not multiple long closings;
 module count from context (duration, hours, scope): for **two-day** programs prefer **6–8** modules unless feedback says to keep five; module titles without "Module N:" prefix;
