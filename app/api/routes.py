@@ -2,7 +2,6 @@ import uuid
 import os
 import json
 import re
-import csv
 from urllib.parse import parse_qs
 from typing import Optional, Any
 
@@ -137,6 +136,21 @@ def _looks_like_duration(value: str | None) -> bool:
     return any(tok in s for tok in ("day", "days", "week", "weeks", "hour", "hours", "hr", "hrs"))
 
 
+def _parse_product_row_line(line: str) -> tuple[str, str, str] | None:
+    """
+    Parse one row formatted as:
+      Product Name, No of Pax, Duration
+    Product names may contain commas, so parse from the right-most two columns.
+    """
+    raw = str(line or "").strip()
+    if not raw:
+        return None
+    m = re.match(r"^\s*(.+?)\s*,\s*([^,]+?)\s*,\s*([^,]+?)\s*$", raw)
+    if not m:
+        return None
+    return m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+
+
 def _should_parse_product_rows(raw: str, duration_hint: str | None) -> bool:
     if _is_product_section_duration(duration_hint):
         return True
@@ -146,11 +160,10 @@ def _should_parse_product_rows(raw: str, duration_hint: str | None) -> bool:
     # Auto-detect when each line looks like: Product Name, No of Pax, Duration
     matched = 0
     for line in lines:
-        parts = [p.strip() for p in next(csv.reader([line]))]
-        if len(parts) < 3:
+        parsed = _parse_product_row_line(line)
+        if parsed is None:
             continue
-        pax = parts[1] if len(parts) >= 2 else ""
-        dur = parts[2] if len(parts) >= 3 else ""
+        _, pax, dur = parsed
         if pax and re.search(r"\d", pax) and _looks_like_duration(dur):
             matched += 1
     return matched == len(lines)
@@ -170,16 +183,10 @@ def parse_course_rows(course_text: str, duration_hint: str | None) -> list[dict[
     if _should_parse_product_rows(raw, duration_hint):
         rows: list[dict[str, str]] = []
         for line in [ln.strip() for ln in raw.splitlines() if ln.strip()]:
-            parsed = next(csv.reader([line]))
-            parts = [str(p or "").strip() for p in parsed]
-            if not any(parts):
+            parsed = _parse_product_row_line(line)
+            if parsed is None:
                 continue
-            course_name = parts[0] if len(parts) >= 1 else ""
-            no_of_pax = parts[1] if len(parts) >= 2 else ""
-            duration = parts[2] if len(parts) >= 3 else ""
-            # If there are extra columns, merge into title to avoid silent loss.
-            if len(parts) > 3:
-                course_name = ", ".join([course_name, *parts[3:]]).strip(", ").strip()
+            course_name, no_of_pax, duration = parsed
             if course_name:
                 rows.append(
                     {
