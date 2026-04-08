@@ -504,7 +504,7 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
     description=(
         "After a 202 response, poll GET /api/v1/courses/{zoho_record_id}/outline-job. "
         "When the job completes, optional Zoho integration runs if configured: "
-        "(1) ZOHO_CALLBACK_URL — HTTP POST to your URL with job_id, zoho_record_id, status, pdf_url, version_number; "
+        "(1) ZOHO_CALLBACK_URL — HTTP POST to your URL with job_id, zoho_record_id, status, pdf_urls, version_number; "
         "(2) ZOHO_ATTACH_PDF_LINK_TO_CRM=true — attaches PDF link to the CRM record via API. "
         "Neither runs automatically unless those env vars are set."
     ),
@@ -1048,6 +1048,7 @@ async def get_latest_course_outline_job(
             dedup_pdf_urls.append(u)
 
     payload = _job_to_course_outline_response(job).model_dump(mode="json")
+    payload.pop("pdf_url", None)
     payload["pdf_urls"] = dedup_pdf_urls
     payload["job_ids"] = [str(j.id) for j in jobs]
     payload["total_jobs"] = len(jobs)

@@ -57,7 +57,7 @@ async def post_zoho_completion_webhook(
     job_id: str | None,
     zoho_record_id: str,
     status: str,
-    pdf_url: str | None,
+    pdf_urls: list[str] | None,
     version_number: int | None,
     error: str | None,
 ) -> None:
@@ -75,7 +75,7 @@ async def post_zoho_completion_webhook(
         "job_id": job_id,
         "zoho_record_id": zoho_record_id,
         "status": status,
-        "pdf_url": pdf_url,
+        "pdf_urls": [u for u in (pdf_urls or []) if str(u).strip()],
         "version_number": version_number,
         "error": error,
     }
@@ -112,11 +112,14 @@ async def post_zoho_completion_webhook(
 
 async def post_zoho_completion_webhook_for_job(job: CourseJob, version_number: int | None) -> None:
     """Send webhook using fields from a persisted ``CourseJob`` row."""
+    urls: list[str] = []
+    if isinstance(job.pdf_url, str) and job.pdf_url.strip():
+        urls = [job.pdf_url.strip()]
     await post_zoho_completion_webhook(
         job_id=str(job.id),
         zoho_record_id=job.zoho_record_id,
         status=job.status,
-        pdf_url=job.pdf_url,
+        pdf_urls=urls,
         version_number=version_number,
         error=job.error,
     )
@@ -160,7 +163,7 @@ async def zoho_notify_refined_outline_version(
         job_id=None,
         zoho_record_id=zoho_record_id,
         status="completed",
-        pdf_url=pdf_url,
+        pdf_urls=[pdf_url] if isinstance(pdf_url, str) and pdf_url.strip() else [],
         version_number=version_number,
         error=None,
     )
