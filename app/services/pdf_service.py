@@ -253,11 +253,10 @@ def _cap_activity_after_label(line: str, max_words: int = 6) -> str:
     tail = tail.strip()
     if not tail:
         return f"{label.strip()}{sep} "
-    words = tail.rstrip(".").strip().split()
-    if not words:
-        return f"{label.strip()}{sep} "
-    capped = " ".join(words[:max_words]).rstrip(",;:")
-    return f"{label.strip()}{sep} {capped}."
+    cleaned_tail = tail.strip()
+    if cleaned_tail[-1] not in ".!?":
+        cleaned_tail = f"{cleaned_tail.rstrip(',;:')}."
+    return f"{label.strip()}{sep} {cleaned_tail}"
 
 
 def _collect_section_lines(lines: list[str], heading_keywords: Iterable[str]) -> list[str]:
