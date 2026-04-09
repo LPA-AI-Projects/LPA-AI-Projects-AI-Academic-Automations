@@ -631,24 +631,25 @@ async def generate_course(
             course_name = str(row.get("course_name") or "").strip()
             if not course_name:
                 continue
+            input_copy = req.input_data.model_copy()
+            input_copy.course_name = course_name
+            row_pax = str(row.get("no_of_pax") or "").strip()
+            row_duration = str(row.get("duration") or "").strip()
+            if row_pax:
+                input_copy.no_of_pax = row_pax
+            if row_duration:
+                input_copy.duration = row_duration
+            input_for_job = _input_data_dict_for_job(input_copy)
             async with AsyncSessionLocal() as db:
                 async with db.begin():
                     job = CourseJob(
                         zoho_record_id=req.zoho_record_id,
                         status="pending",
-                        payload_json=json.dumps({"course_name": course_name}, ensure_ascii=False),
+                        payload_json=json.dumps(input_for_job, ensure_ascii=False),
                     )
                     db.add(job)
                 await db.refresh(job)
-                input_copy = req.input_data.model_copy()
-                input_copy.course_name = course_name
-                row_pax = str(row.get("no_of_pax") or "").strip()
-                row_duration = str(row.get("duration") or "").strip()
-                if row_pax:
-                    input_copy.no_of_pax = row_pax
-                if row_duration:
-                    input_copy.duration = row_duration
-                jobs_with_input.append((job.id, _input_data_dict_for_job(input_copy)))
+                jobs_with_input.append((job.id, input_for_job))
                 logger.info(
                     "Course generation job created | job_id=%s zoho_record_id=%s course_name=%s no_of_pax=%s duration=%s",
                     str(job.id),
@@ -656,6 +657,14 @@ async def generate_course(
                     course_name,
                     row_pax,
                     row_duration,
+                )
+                logger.info(
+                    "Course generation context | job_id=%s department=%s designation=%s level_of_training=%s company_name=%s",
+                    str(job.id),
+                    str(input_for_job.get("department") or ""),
+                    str(input_for_job.get("designation") or ""),
+                    str(input_for_job.get("level_of_training") or ""),
+                    str(input_for_job.get("company_name") or ""),
                 )
     except (SQLAlchemyError, OSError, Exception):
         logger.exception("Database error while creating job")
