@@ -21,11 +21,11 @@ class CourseInputData(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    company_name: str = Field(..., min_length=1)
+    company_name: str = ""
     course_name: str = Field(..., min_length=1)
-    department: str = Field(..., min_length=1)
-    designation: str = Field(..., min_length=1)
-    level_of_training: str = Field(..., min_length=1)
+    department: str = ""
+    designation: str = ""
+    level_of_training: str = ""
 
     need_of_training: str = ""
     specific_questions: list[str] | str = Field(default_factory=list)
