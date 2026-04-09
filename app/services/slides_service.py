@@ -493,6 +493,12 @@ async def process_slides_job(job_id) -> None:
                     req_payload = gamma_result.get("request_payload")
                     if not isinstance(req_payload, dict):
                         req_payload = {}
+                    # Persist the exact JSON payload sent to Gamma for each module batch.
+                    gamma_payload_dump_path = os.path.join(
+                        cache_dir, f"module_{mi}_batch_{bi}_gamma_request.json"
+                    )
+                    with open(gamma_payload_dump_path, "w", encoding="utf-8") as f:
+                        json.dump(req_payload, f, ensure_ascii=False, indent=2)
                     gamma_request_log.append(
                         {
                             "module_index": mi,

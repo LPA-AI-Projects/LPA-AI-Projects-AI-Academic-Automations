@@ -90,14 +90,17 @@ def extract_pdf_module_rows(file_bytes: bytes) -> list[dict[str, str]]:
                 if not rows:
                     continue
 
-                start_idx = 0
+                start_idx = -1
                 for i, row in enumerate(rows):
                     if _is_header_row(row):
                         start_idx = i + 1
                         break
+                # Only parse table rows when a valid module-table header exists.
+                if start_idx < 0:
+                    continue
 
                 for row in rows[start_idx:]:
-                    if len(row) < 2:
+                    if len(row) < 3:
                         continue
                     sno = _norm(row[0])
                     if not sno:
@@ -110,6 +113,8 @@ def extract_pdf_module_rows(file_bytes: bytes) -> list[dict[str, str]]:
                     topics = _norm(row[2]) if len(row) > 2 else ""
                     exercises = _norm(row[3]) if len(row) > 3 else ""
                     if not module_name:
+                        continue
+                    if module_name.strip().lower() in {"module", "modules"}:
                         continue
                     module_text_parts = [
                         f"Module {module_num}: {module_name}",

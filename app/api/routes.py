@@ -545,23 +545,34 @@ async def generate_course(
         # Use one short-lived DB session per job row to avoid transaction overlap
         # during multi-course queueing.
         for course_name in course_names:
+            if not course_name:
+                continue
+            input_copy = req.input_data.model_copy()
+            input_copy.course_name = course_name
+            input_for_job = _input_data_dict_for_job(input_copy)
             async with AsyncSessionLocal() as db:
                 async with db.begin():
                     job = CourseJob(
                         zoho_record_id=req.zoho_record_id,
                         status="pending",
-                        payload_json=json.dumps({"course_name": course_name}, ensure_ascii=False),
+                        payload_json=json.dumps(input_for_job, ensure_ascii=False),
                     )
                     db.add(job)
                 await db.refresh(job)
-                input_copy = req.input_data.model_copy()
-                input_copy.course_name = course_name
-                jobs_with_input.append((job.id, _input_data_dict_for_job(input_copy)))
+                jobs_with_input.append((job.id, input_for_job))
                 logger.info(
                     "Course generation job created | job_id=%s zoho_record_id=%s course_name=%s",
                     str(job.id),
                     req.zoho_record_id,
                     course_name,
+                )
+                logger.info(
+                    "Course generation context | job_id=%s department=%s designation=%s level_of_training=%s company_name=%s",
+                    str(job.id),
+                    str(input_for_job.get("department") or ""),
+                    str(input_for_job.get("designation") or ""),
+                    str(input_for_job.get("level_of_training") or ""),
+                    str(input_for_job.get("company_name") or ""),
                 )
     except (SQLAlchemyError, OSError, Exception):
         logger.exception("Database error while creating job")
