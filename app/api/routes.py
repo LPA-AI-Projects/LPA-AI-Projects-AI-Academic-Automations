@@ -260,13 +260,7 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
     - application/x-www-form-urlencoded (common in Zoho webhooks)
     """
     content_type = (request.headers.get("content-type") or "").lower()
-    required_input_fields = [
-        "company_name",
-        "course_name",
-        "department",
-        "designation",
-        "level_of_training",
-    ]
+    required_input_fields = ["course_name"]
 
     payload: dict
     if "application/json" in content_type:
@@ -362,6 +356,16 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
     if not isinstance(input_data_payload, dict):
         logger.warning("Invalid /courses payload: input_data is not an object")
         raise HTTPException(status_code=422, detail="input_data must be an object.")
+
+    course_type = str(input_data_payload.get("course_type") or "").strip().lower()
+    if course_type not in {"public", "pub"}:
+        required_input_fields = [
+            "company_name",
+            "course_name",
+            "department",
+            "designation",
+            "level_of_training",
+        ]
 
     missing_required = [
         key for key in required_input_fields if not str(input_data_payload.get(key, "")).strip()
