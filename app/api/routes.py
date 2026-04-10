@@ -32,6 +32,7 @@ from app.models.job import CourseJob
 from app.services.claude import ClaudeService
 from app.services.pdf_service import generate_pdf_path_async
 from app.services.google_drive import GoogleDriveUploadError, upload_course_outline_pdf_to_drive
+from app.services.public_course_sheet import lookup_public_course_pdf_url
 from app.services.zoho_integration import (
     zoho_notify_course_outline_job_finished,
     zoho_notify_refined_outline_version,
@@ -309,6 +310,7 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
             or form_data.get("languages_preferred", ""),
             "additional_certifications": form_data.get("additional_certifications", ""),
             "additional_notes": form_data.get("additional_notes", ""),
+            "important_topics": form_data.get("important_topics", ""),
         }
 
         # If questions are provided as a plain text blob, split by lines.
@@ -467,38 +469,75 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             await db.commit()
             logger.info("Job status set to processing | job_id=%s", str(job_id))
 
-            context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
-            ai = ClaudeService()
-            # Legacy outline pipeline only (no LangGraph / multi-node graph).
-            logger.info("Outline generation started | job_id=%s", str(job_id))
-            learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
-            try:
-                outline_payload = await wait_for(
-                    ai.build_roi_course_outline_json(context_text, learning_objectives),
-                    timeout=310,
-                )
-                _enforce_regions_served_constant(outline_payload)
-                outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
-            except RuntimeError:
-                outline = await wait_for(
-                    ai.build_roi_course_outline(context_text, learning_objectives),
-                    timeout=310,
-                )
-                outline_payload = None
-            logger.info("Outline generation completed | job_id=%s", str(job_id))
-
-            pdf_path: str | None = None
-            pdf_url = None
             course_title = str((input_data or {}).get("course_name") or "").strip() or "course"
-            try:
-                logger.info("PDF generation started | job_id=%s", str(job_id))
-                pdf_path = await generate_pdf_path_async(outline_payload if outline_payload is not None else outline)
-                pdf_url = _build_pdf_url(pdf_path)
-                logger.info("PDF generation completed | job_id=%s pdf_url=%s", str(job_id), pdf_url)
-            except RuntimeError as e:
-                logger.warning("PDF generation failed in job | job_id=%s error=%s", str(job_id), str(e))
+            course_type = str((input_data or {}).get("course_type") or "").strip().lower()
 
-            if pdf_path and os.path.isfile(pdf_path):
+            outline: str = ""
+            outline_payload = None
+            pdf_path: str | None = None
+            pdf_url: str | None = None
+            used_public_sheet_pdf = False
+
+            if course_type in {"public", "pub"} and (settings.PUBLIC_COURSE_SHEET_CSV_URL or "").strip():
+                try:
+                    sheet_pdf = await lookup_public_course_pdf_url(course_title)
+                    if sheet_pdf and str(sheet_pdf).strip():
+                        used_public_sheet_pdf = True
+                        pdf_url = str(sheet_pdf).strip()
+                        outline = json.dumps(
+                            {
+                                "source": "public_course_sheet",
+                                "course_name": course_title,
+                                "pdf_url": pdf_url,
+                                "note": "Outline PDF is taken from PUBLIC_COURSE_SHEET_CSV_URL; no AI outline text is stored.",
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                        logger.info(
+                            "Public course sheet hit | job_id=%s course_name=%s pdf_url=%s",
+                            str(job_id),
+                            course_title,
+                            pdf_url,
+                        )
+                except Exception:
+                    logger.exception(
+                        "Public course sheet lookup failed; falling back to AI | job_id=%s",
+                        str(job_id),
+                    )
+
+            if not used_public_sheet_pdf:
+                context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
+                ai = ClaudeService()
+                # Legacy outline pipeline only (no LangGraph / multi-node graph).
+                logger.info("Outline generation started | job_id=%s", str(job_id))
+                learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
+                try:
+                    outline_payload = await wait_for(
+                        ai.build_roi_course_outline_json(context_text, learning_objectives),
+                        timeout=310,
+                    )
+                    _enforce_regions_served_constant(outline_payload)
+                    outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
+                except RuntimeError:
+                    outline = await wait_for(
+                        ai.build_roi_course_outline(context_text, learning_objectives),
+                        timeout=310,
+                    )
+                    outline_payload = None
+                logger.info("Outline generation completed | job_id=%s", str(job_id))
+
+                try:
+                    logger.info("PDF generation started | job_id=%s", str(job_id))
+                    pdf_path = await generate_pdf_path_async(
+                        outline_payload if outline_payload is not None else outline
+                    )
+                    pdf_url = _build_pdf_url(pdf_path)
+                    logger.info("PDF generation completed | job_id=%s pdf_url=%s", str(job_id), pdf_url)
+                except RuntimeError as e:
+                    logger.warning("PDF generation failed in job | job_id=%s error=%s", str(job_id), str(e))
+
+            if not used_public_sheet_pdf and pdf_path and os.path.isfile(pdf_path):
                 try:
                     drive_up = await asyncio.to_thread(
                         upload_course_outline_pdf_to_drive,

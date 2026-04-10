@@ -40,6 +40,7 @@ def get_course_outline_integration_status() -> dict[str, bool]:
     out["zoho_crm_attach_configured"] = bool(
         settings.ZOHO_ATTACH_PDF_LINK_TO_CRM and _crm_configured()
     )
+    out["public_course_sheet_configured"] = bool((settings.PUBLIC_COURSE_SHEET_CSV_URL or "").strip())
     return out
 
 

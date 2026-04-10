@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 import uuid
+import re
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -50,6 +51,13 @@ class CourseInputData(BaseModel):
         None,
         description="Optional: any other CRM notes for design (delivery, constraints, etc.).",
     )
+    important_topics: Optional[list[str] | str] = Field(
+        None,
+        description=(
+            "Optional: must-cover topics from CRM. If provided, these topics must appear "
+            "in the generated outline/modules."
+        ),
+    )
 
     @field_validator(
         "no_of_pax",
@@ -66,6 +74,23 @@ class CourseInputData(BaseModel):
             s = v.strip()
             return s if s else None
         return v
+
+    @field_validator("important_topics", mode="before")
+    @classmethod
+    def _coerce_important_topics(cls, v: Any) -> list[str] | None:
+        if v is None:
+            return None
+        if isinstance(v, list):
+            out = [str(x).strip() for x in v if str(x).strip()]
+            return out or None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            # Accept comma or newline separated values from CRM.
+            parts = [p.strip() for p in re.split(r"[\n,]+", s) if p.strip()]
+            return parts or None
+        return None
 
     @field_validator("specific_questions", mode="before")
     @classmethod

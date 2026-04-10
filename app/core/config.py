@@ -81,6 +81,14 @@ class Settings(BaseSettings):
     # If set, that folder is the parent (same hierarchy underneath).
     GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID: str = ""
 
+    # Public catalog: Google Sheet as CSV (export URL). Used when input_data.course_type is public/pub
+    # to reuse an existing outline PDF link instead of generating one.
+    PUBLIC_COURSE_SHEET_CSV_URL: str = ""
+    PUBLIC_COURSE_SHEET_LOOKUP_ENABLED: bool = True
+    # Optional: header names in row 1 (case-insensitive). Leave empty to auto-detect.
+    PUBLIC_COURSE_SHEET_COURSE_COLUMN: str = ""
+    PUBLIC_COURSE_SHEET_PDF_COLUMN: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator(
@@ -105,6 +113,19 @@ class Settings(BaseSettings):
     @classmethod
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
+
+    @field_validator("PUBLIC_COURSE_SHEET_LOOKUP_ENABLED", mode="before")
+    @classmethod
+    def coerce_public_sheet_lookup_enabled(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
 
     @field_validator("GAMMA_USE_TEMPLATE", mode="before")
     @classmethod
