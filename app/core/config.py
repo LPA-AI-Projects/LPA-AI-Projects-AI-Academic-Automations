@@ -10,8 +10,10 @@ class Settings(BaseSettings):
     # LLM routing: "anthropic" = Claude (ANTHROPIC_*), "openai" = OpenAI Chat (OPENAI_*)
     AI_PROVIDER: str = "anthropic"
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    # httpx read timeout for Anthropic (long generations + web_search often exceed 2 minutes).
+    ANTHROPIC_READ_TIMEOUT_S: float = 600.0
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com"
@@ -21,6 +23,8 @@ class Settings(BaseSettings):
 
     # App general
     BASE_URL: str = "http://localhost:8000"
+    # CodeSandbox SDK (VM / Devbox): https://codesandbox.io/t/api — required for deploy; legacy Define API not used.
+    CODESANDBOX_API_TOKEN: str = ""
     LOG_LEVEL: str = "INFO"
     ZOHO_CALLBACK_URL: str = ""
     # How to POST to ZOHO_CALLBACK_URL: "json" (application/json) or "form" (x-www-form-urlencoded).
@@ -67,6 +71,10 @@ class Settings(BaseSettings):
     SLIDES_MIN_PER_MODULE: int = 10
     SLIDES_MAX_PER_MODULE: int = 20
     SLIDES_MODULE_PARALLELISM: int = 3
+    # Optional sidecar assessment generation during slides flow.
+    SLIDES_ASSESSMENTS_ENABLED: bool = False
+    SLIDES_PRE_ASSESSMENT_QUESTIONS: int = 12
+    SLIDES_POST_ASSESSMENT_QUESTIONS: int = 18
 
     # Google Apps Script merge endpoint (optional, for single merged editable Slides link)
     GOOGLE_SCRIPT_URL: str = ""
@@ -78,6 +86,14 @@ class Settings(BaseSettings):
     # Optional. If empty, course outlines go under My Drive root: ai_automation/course_outline/...
     # If set, that folder is the parent (same hierarchy underneath).
     GOOGLE_DRIVE_COURSE_OUTLINES_PARENT_FOLDER_ID: str = ""
+
+    # Public catalog: Google Sheet as CSV (export URL). Used when input_data.course_type is public/pub
+    # to reuse an existing outline PDF link instead of generating one.
+    PUBLIC_COURSE_SHEET_CSV_URL: str = ""
+    PUBLIC_COURSE_SHEET_LOOKUP_ENABLED: bool = True
+    # Optional: header names in row 1 (case-insensitive). Leave empty to auto-detect.
+    PUBLIC_COURSE_SHEET_COURSE_COLUMN: str = ""
+    PUBLIC_COURSE_SHEET_PDF_COLUMN: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -103,6 +119,46 @@ class Settings(BaseSettings):
     @classmethod
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
+
+    @field_validator("PUBLIC_COURSE_SHEET_LOOKUP_ENABLED", mode="before")
+    @classmethod
+    def coerce_public_sheet_lookup_enabled(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
+
+    @field_validator("GAMMA_USE_TEMPLATE", mode="before")
+    @classmethod
+    def coerce_gamma_use_template(cls, value: object) -> bool:
+        """Railway/.env often provide booleans as strings; accept common variants."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
+
+    @field_validator("SLIDES_ASSESSMENTS_ENABLED", mode="before")
+    @classmethod
+    def coerce_slides_assessments_enabled(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
 
     @field_validator("AI_PROVIDER", mode="before")
     @classmethod

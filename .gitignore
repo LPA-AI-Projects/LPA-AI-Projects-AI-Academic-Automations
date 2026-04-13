@@ -25,6 +25,9 @@ generated_ppts/
 uploads/
 tmp/
 
+# Node (CodeSandbox SDK deploy helper)
+scripts/codesandbox_sdk/node_modules/
+
 # OS / Editor
 .vscode/
 .idea/

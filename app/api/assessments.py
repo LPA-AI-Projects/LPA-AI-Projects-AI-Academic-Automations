@@ -7,6 +7,9 @@ import json
 import os
 import shutil
 import uuid
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 import httpx
 from fastapi import (
@@ -39,12 +42,34 @@ from app.services.assessment_service import (
     normalize_difficulty,
     post_difficulty_from_pre,
     process_assessment_job,
+    generate_assessment_questions_from_text,
+)
+from app.services.assessment_app_service import (
+    build_lovable_assessment_prompt,
+    build_react_quiz_files,
+    create_codesandbox_from_files,
+    create_lovable_build_url,
+    flatten_validated_slides_to_text,
+    lovable_prompt_for_build_url,
 )
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["assessments"])
+
+
+class AssessmentAppFromCacheRequest(BaseModel):
+    cache_path: str = Field(..., description="Absolute path to validated_slides.json")
+    course_name: str = Field("Assessment Quiz")
+    difficulty: str = Field("intermediate")
+    num_questions: int = Field(15, ge=1, le=50)
+    seconds_per_question: int = Field(60, ge=10, le=300)
+    deploy_target: Literal["lovable", "codesandbox"] = Field(
+        "lovable",
+        description="lovable: Lovable Build-with-URL + full prompt (UI generated in Lovable). "
+        "codesandbox: ship the built-in React/Vite template to CodeSandbox.",
+    )
 
 
 def verify_api_key(
@@ -357,3 +382,89 @@ async def get_latest_assessment_status(
         raise HTTPException(status_code=404, detail="No assessment job found for this zoho_record_id.")
 
     return _to_status_response(job)
+
+
+@router.post(
+    "/assessments/app",
+    dependencies=[auth],
+    summary="Generate assessment app: Lovable (default) or CodeSandbox from slides cache",
+)
+async def generate_assessment_app_from_cache(req: AssessmentAppFromCacheRequest):
+    cache_path = str(req.cache_path or "").strip()
+    if not cache_path or not os.path.isfile(cache_path):
+        raise HTTPException(status_code=422, detail="cache_path not found on disk.")
+
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Failed to parse cache JSON.")
+
+    curriculum_text = flatten_validated_slides_to_text(cache_data)
+    if not curriculum_text:
+        raise HTTPException(status_code=422, detail="No modules/slides found in cache file.")
+
+    questions = await generate_assessment_questions_from_text(
+        phase="post",
+        difficulty=req.difficulty,
+        course_name=req.course_name,
+        curriculum_text=curriculum_text,
+        num_questions=req.num_questions,
+        pre_difficulty=None,
+    )
+    if not questions:
+        raise HTTPException(status_code=500, detail="Failed to generate questions from cache.")
+
+    if req.deploy_target == "lovable":
+        full_prompt = build_lovable_assessment_prompt(
+            course_name=req.course_name,
+            questions=questions,
+            seconds_per_question=req.seconds_per_question,
+        )
+        url_prompt, truncated = lovable_prompt_for_build_url(
+            full_prompt,
+            course_name=req.course_name,
+            seconds_per_question=req.seconds_per_question,
+        )
+        lovable_url = create_lovable_build_url(prompt=url_prompt)
+        return {
+            "status": "ok",
+            "cache_path": cache_path,
+            "questions_count": len(questions),
+            "deploy_provider": "lovable",
+            "lovable_build_url": lovable_url,
+            "lovable_prompt": full_prompt,
+            "lovable_prompt_in_url_truncated": truncated,
+            "questions": questions,
+            "message": (
+                "Open lovable_build_url to start Lovable. If the URL used a short bootstrap "
+                "(lovable_prompt_in_url_truncated=true), paste lovable_prompt into Lovable so it has the full question JSON."
+            ),
+        }
+
+    files = build_react_quiz_files(
+        title=req.course_name,
+        questions=questions,
+        seconds_per_question=req.seconds_per_question,
+    )
+    try:
+        sandbox_id, app_url, editor_url = await create_codesandbox_from_files(files)
+    except Exception as e:
+        logger.exception("CodeSandbox deploy failed")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to create CodeSandbox: {e!s}",
+        ) from e
+
+    out: dict = {
+        "status": "ok",
+        "cache_path": cache_path,
+        "questions_count": len(questions),
+        "deploy_provider": "codesandbox-sdk",
+        "codesandbox_id": sandbox_id,
+        "app_url": app_url,
+        "message": "Assessment app deployed to a CodeSandbox VM sandbox (Devbox). Open app_url for the running Vite preview.",
+    }
+    if editor_url:
+        out["codesandbox_editor_url"] = editor_url
+    return out
