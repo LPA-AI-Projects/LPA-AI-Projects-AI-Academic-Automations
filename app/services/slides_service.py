@@ -19,6 +19,10 @@ from app.services.document_extractor import (
     extract_pdf_text_async,
     extract_ppt_text_async,
 )
+from app.services.assessment_service import (
+    DEFAULT_NUM_QUESTIONS,
+    generate_assessment_questions_from_text,
+)
 from app.services.gamma_client import generate_ppt
 from app.services.slides_graph import run_module_slides_pipeline
 from app.services.zoho_crm import update_slides_links_field
@@ -223,6 +227,26 @@ def _batch_slides(slides: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return [slides[i : i + MAX_SLIDES_PER_BATCH] for i in range(0, len(slides), MAX_SLIDES_PER_BATCH)]
 
 
+def _build_post_curriculum_from_modules(module_entries: list[dict[str, Any]]) -> str:
+    """Flatten validated module slides into compact text for post-assessment generation."""
+    lines: list[str] = []
+    for module in module_entries:
+        module_name = str(module.get("module_name") or "Module").strip()
+        lines.append(f"## {module_name}")
+        slides = module.get("slides") if isinstance(module.get("slides"), list) else []
+        for s in slides:
+            title = str(s.get("title") or "").strip()
+            if title:
+                lines.append(f"Slide: {title}")
+            bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
+            for b in bullets:
+                bt = str(b).strip()
+                if bt:
+                    lines.append(f"- {bt}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 async def process_slides_job(job_id) -> None:
     """
     Pipeline:
@@ -256,6 +280,17 @@ async def process_slides_job(job_id) -> None:
             instructor_path = payload.get("instructor_ppt_path")
             course_name = _safe_course_name(payload.get("course_name"))
             program_name = str(payload.get("program_name") or "").strip() or None
+            assessments_enabled = bool(getattr(settings, "SLIDES_ASSESSMENTS_ENABLED", False))
+            pre_q_count = max(
+                1,
+                int(getattr(settings, "SLIDES_PRE_ASSESSMENT_QUESTIONS", DEFAULT_NUM_QUESTIONS) or DEFAULT_NUM_QUESTIONS),
+            )
+            post_q_count = max(
+                1,
+                int(getattr(settings, "SLIDES_POST_ASSESSMENT_QUESTIONS", DEFAULT_NUM_QUESTIONS) or DEFAULT_NUM_QUESTIONS),
+            )
+            pre_assessment_task: asyncio.Task | None = None
+            post_assessment_task: asyncio.Task | None = None
             cache_root = os.path.join(ppts_dir(), "cache", _safe_id(job.zoho_record_id))
             cache_dir = cache_root
             os.makedirs(cache_dir, exist_ok=True)
@@ -269,6 +304,21 @@ async def process_slides_job(job_id) -> None:
                 outline_bytes = f.read()
             table_modules = await extract_pdf_module_rows_async(outline_bytes)
             outline_text = await extract_pdf_text_async(outline_bytes)
+            if assessments_enabled and outline_text.strip():
+                pre_assessment_task = asyncio.create_task(
+                    generate_assessment_questions_from_text(
+                        phase="pre",
+                        difficulty="intermediate",
+                        course_name=course_name,
+                        curriculum_text=outline_text,
+                        num_questions=pre_q_count,
+                    )
+                )
+                logger.info(
+                    "Slides pre-assessment started in parallel | job_id=%s questions=%s",
+                    str(job.id),
+                    pre_q_count,
+                )
             logger.info(
                 "Slides extracted outline | job_id=%s chars=%s",
                 str(job.id),
@@ -315,6 +365,8 @@ async def process_slides_job(job_id) -> None:
             os.makedirs(cache_dir, exist_ok=True)
             validated_cache_path = os.path.join(cache_dir, "validated_slides.json")
             validated_text_path = os.path.join(cache_dir, "validated_slides.txt")
+            pre_assessment_cache_path = os.path.join(cache_dir, "pre_assessment.json")
+            post_assessment_cache_path = os.path.join(cache_dir, "post_assessment.json")
 
             module_entries: list[dict[str, Any]] = []
             planner_model = (settings.SLIDES_PLANNER_MODEL or "").strip() or None
@@ -448,6 +500,44 @@ async def process_slides_job(job_id) -> None:
                 len(module_entries),
             )
 
+            pre_assessment_questions: list[dict[str, Any]] = []
+            post_assessment_questions: list[dict[str, Any]] = []
+            if assessments_enabled:
+                if pre_assessment_task is not None:
+                    try:
+                        pre_assessment_questions = await pre_assessment_task
+                        with open(pre_assessment_cache_path, "w", encoding="utf-8") as f:
+                            json.dump(
+                                {
+                                    "phase": "pre",
+                                    "source": "outline_text",
+                                    "num_questions": len(pre_assessment_questions),
+                                    "questions": pre_assessment_questions,
+                                },
+                                f,
+                                ensure_ascii=False,
+                                indent=2,
+                            )
+                    except Exception:
+                        logger.exception("Slides pre-assessment generation failed | job_id=%s", str(job.id))
+                post_context = _build_post_curriculum_from_modules(module_entries)
+                if post_context:
+                    post_assessment_task = asyncio.create_task(
+                        generate_assessment_questions_from_text(
+                            phase="post",
+                            difficulty="advanced",
+                            course_name=course_name,
+                            curriculum_text=post_context,
+                            num_questions=post_q_count,
+                            pre_difficulty="intermediate",
+                        )
+                    )
+                    logger.info(
+                        "Slides post-assessment started in parallel | job_id=%s questions=%s",
+                        str(job.id),
+                        post_q_count,
+                    )
+
             await _set_status(db, job, "gamma_rendering")
             ppt_paths: list[str] = []
             gamma_batch_links: list[str] = []
@@ -574,6 +664,32 @@ async def process_slides_job(job_id) -> None:
                 "primary_link": primary_link,
                 "module_links": module_gamma_links,
             }
+            if assessments_enabled:
+                if post_assessment_task is not None:
+                    try:
+                        post_assessment_questions = await post_assessment_task
+                        with open(post_assessment_cache_path, "w", encoding="utf-8") as f:
+                            json.dump(
+                                {
+                                    "phase": "post",
+                                    "source": "validated_slides",
+                                    "num_questions": len(post_assessment_questions),
+                                    "questions": post_assessment_questions,
+                                },
+                                f,
+                                ensure_ascii=False,
+                                indent=2,
+                            )
+                    except Exception:
+                        logger.exception("Slides post-assessment generation failed | job_id=%s", str(job.id))
+                payload_state["pre_assessment"] = {
+                    "cache_path": pre_assessment_cache_path if os.path.exists(pre_assessment_cache_path) else None,
+                    "num_questions": len(pre_assessment_questions),
+                }
+                payload_state["post_assessment"] = {
+                    "cache_path": post_assessment_cache_path if os.path.exists(post_assessment_cache_path) else None,
+                    "num_questions": len(post_assessment_questions),
+                }
             job.payload_json = json.dumps(payload_state)
 
             job.ppt_url = primary_link

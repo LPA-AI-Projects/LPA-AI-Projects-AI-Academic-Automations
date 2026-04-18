@@ -224,12 +224,25 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
             "designation": form_data.get("designation", ""),
             "duration": form_data.get("duration", ""),
             "level_of_training": form_data.get("level_of_training", ""),
+            "mode_of_training": (
+                form_data.get("mode_of_training")
+                or form_data.get("delivery_mode")
+                or form_data.get("training_mode")
+                or ""
+            ),
             # Optional Zoho / CRM fields (also accept arbitrary extra keys below).
             "no_of_pax": form_data.get("no_of_pax", ""),
             "languages_prefered": form_data.get("languages_prefered")
             or form_data.get("languages_preferred", ""),
             "additional_certifications": form_data.get("additional_certifications", ""),
             "additional_notes": form_data.get("additional_notes", ""),
+            "topics_to_include": (
+                form_data.get("topics_to_include")
+                or form_data.get("topics_must_include")
+                or form_data.get("mandatory_topics")
+                or form_data.get("important_topics")
+                or ""
+            ),
         }
 
         # If questions are provided as a plain text blob, split by lines.
@@ -285,7 +298,6 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
             "course_name",
             "department",
             "designation",
-            "level_of_training",
         ]
 
     missing_required = [

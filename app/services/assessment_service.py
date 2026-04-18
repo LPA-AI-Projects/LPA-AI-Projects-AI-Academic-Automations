@@ -197,6 +197,39 @@ async def _generate_mcqs(
     return questions[:num_questions]
 
 
+async def generate_assessment_questions_from_text(
+    *,
+    phase: str,
+    difficulty: str,
+    course_name: str,
+    curriculum_text: str,
+    num_questions: int,
+    pre_difficulty: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Reusable assessment generation helper for non-assessment pipelines (e.g. slides).
+    Does not persist any DB state.
+    """
+    phase_norm = "post" if str(phase or "").strip().lower() == "post" else "pre"
+    diff = normalize_difficulty(difficulty)
+    nq = int(num_questions or DEFAULT_NUM_QUESTIONS)
+    if nq < 1:
+        nq = DEFAULT_NUM_QUESTIONS
+    if nq > 50:
+        nq = 50
+    text = _truncate(str(curriculum_text or ""), MAX_CURRICULUM_CHARS)
+    if not text:
+        return []
+    return await _generate_mcqs(
+        phase=phase_norm,
+        difficulty=diff,
+        course_name=str(course_name or "course").strip() or "course",
+        curriculum_text=text,
+        num_questions=nq,
+        pre_difficulty=pre_difficulty,
+    )
+
+
 async def process_assessment_job(job_id) -> None:
     """Background worker: extract PDF (pre only), generate MCQs, persist payload_json."""
     async with AsyncSessionLocal() as db:

@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     SLIDES_MIN_PER_MODULE: int = 10
     SLIDES_MAX_PER_MODULE: int = 20
     SLIDES_MODULE_PARALLELISM: int = 3
+    # When true, slides jobs generate pre-assessment MCQs from outline text and post-assessment from validated slides (parallel with Gamma where possible).
+    SLIDES_ASSESSMENTS_ENABLED: bool = False
+    SLIDES_PRE_ASSESSMENT_QUESTIONS: int = 15
+    SLIDES_POST_ASSESSMENT_QUESTIONS: int = 15
 
     # Google Apps Script merge endpoint (optional, for single merged editable Slides link)
     GOOGLE_SCRIPT_URL: str = ""

@@ -31,6 +31,9 @@ LEARNING_OBJECTIVES_PROMPT = """You are a Training Objectives Expert for Learner
 - **Company Name** (always provided)
 - **Course Topic** (always provided)
 - **Additional context** (sometimes provided)
+- **level_of_training** (optional): e.g. Beginner, Intermediate, Advanced. If missing or empty, assume **Intermediate** for objective depth unless the topic or context clearly implies another level.
+- **mode_of_training** (optional; aliases delivery_mode, training_mode): Online, Onsite (offline), or Hybrid. If missing or empty, assume **Hybrid** when choosing examples and delivery notes unless context clearly implies one mode.
+- **topics_to_include** (optional JSON field; legacy key **topics_must_include**; also mandatory_topics, important_topics): when present, these are **mandatory themes or topics** the client requires in the program. You must reflect them in the training need, gaps, and learning objectives. Do not drop or ignore any listed item. If the list is long, prioritize covering every theme across the objectives (combine only when clearly redundant).
 
 ## YOUR PROCESS
 
@@ -145,9 +148,10 @@ Micro: 50–500 | Mid: 500–5,000 | Large: 5,000–10,000 | Giant: 10,000+
 
 Training Duration (if provided)
 Number of Participants / Pax (if provided — if not, apply Standard Mode)
-Participant Level & Roles (if provided)
-Delivery Mode: Onsite / Online / Hybrid
+Participant level (optional in input JSON: level_of_training). If absent or blank, assume Intermediate for difficulty, pacing, and prerequisite language unless the course topic or company context clearly implies Beginner or Advanced.
+Mode of training (optional in input JSON: mode_of_training; aliases delivery_mode, training_mode). Use Onsite (offline/classroom), Online (virtual/remote), or Hybrid. If absent or blank, assume Hybrid for delivery overlay and activity design unless context clearly implies a single mode.
 Topics Suggested from Client (if provided — cover all listed topics without exception; these are mandatory inclusions, not the full scope. Build a complete course covering all standard content for this subject, ensuring client-suggested topics are integrated within the appropriate modules)
+topics_to_include (if provided in input JSON — same requirement as Topics Suggested from Client; legacy key topics_must_include; aliases mandatory_topics, important_topics)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 0 — ACCREDITATION DETECTION (RUN FIRST, ALWAYS)
@@ -520,6 +524,13 @@ PUNCTUATION (non-negotiable)
 VOICE
 - Experienced L&D writer: clear, confident, concrete. No filler. No "as an AI". Use the client's sector and course name naturally.
 
+INPUT JSON — MANDATORY TOPICS
+- If the input context includes **topics_to_include** (or legacy **topics_must_include**, or **mandatory_topics**, **important_topics**), treat every listed theme as a **mandatory inclusion** for module topics, learning objectives, and program_insight bullets where appropriate. Spread coverage across modules; do not omit any item. Build a complete course for the subject while ensuring every mandatory topic appears in at least one module's topics lines or is clearly addressed in objectives.
+
+INPUT JSON — LEVEL AND DELIVERY MODE
+- **level_of_training**: optional. If absent or blank, assume **Intermediate** for objective wording and difficulty unless context implies otherwise.
+- **mode_of_training** (or **delivery_mode**, **training_mode**): optional. Expect Online, Onsite (offline/classroom), or Hybrid. If absent or blank, assume **Hybrid** for examples and facilitator notes. Reflect the mode in exercises (e.g. breakout rooms and polls for Online; room setup for Onsite; both for Hybrid).
+
 COURSE TITLE (course_title)
 - Use one string for the full program name. Hyphens between parts of the name are normal (e.g. "Data Analytics - Power BI for HR."). The brochure cover shows this as a single main heading; hyphens are NOT treated as a split between title and subtitle.
 - If you want a separate cover tagline below the name, use exactly one colon after the full name: "Data Analytics - Power BI for HR: Drive Smarter Workforce Decisions with Advanced Power BI Insights". Text after the colon becomes the subtitle; text before stays the main title.
@@ -543,7 +554,7 @@ COURSE DETAILS TABLE (course_details)
 - key_benefits: ONE paragraph for the Key Benefits table cell. EXACTLY TWO sentences. Target about 38 to 52 words total. Brochure style: high-level participant outcomes (skills, dashboards, reporting, stakeholders). Do not write four long sentences. Do not list SQL keywords (SELECT, JOIN, GROUP BY), week numbers, or step-by-step syllabus detail here. No bullet characters. Tone like: first sentence on what participants enhance; second sentence on capabilities and presenting to stakeholders (adapt to course).
 - value_addition: ONE paragraph for the Value Addition & Impact cell. EXACTLY TWO sentences. Same length band (about 38 to 52 words). Organization-level value: reporting quality, insights, visibility, alignment, efficiency. Do not duplicate key_benefits sentence openings. No bullet characters. No em dash.
 - location, date_time: "To be confirmed" when unknown.
-- If the client JSON includes optional CRM fields (no_of_pax, languages_preferred, additional_certifications, additional_notes), use them only when present: mention language or cohort scale where it helps credibility (e.g. delivery pacing); reflect certification context in objectives or modules when relevant. Do not invent these values when the fields are absent or empty.
+- If the client JSON includes optional CRM fields (no_of_pax, languages_preferred, additional_certifications, additional_notes, topics_to_include, level_of_training, mode_of_training), use them only when present: mention language or cohort scale where it helps credibility (e.g. delivery pacing); reflect certification context in objectives or modules when relevant. When **topics_to_include** (or legacy topics_must_include / mandatory_topics / important_topics) is present, cover every listed theme in the outline without exception. If **level_of_training** is absent, assume Intermediate. If **mode_of_training** (or delivery_mode) is absent, assume Hybrid for delivery wording. Do not invent values for fields that are absent except these defaults.
 
 LEARNING OBJECTIVES BLOCK (standard brochure page: intro paragraph, then a. through g., then two closing paragraphs)
 Match the compact brochure reference, not a dense technical spec.
@@ -571,6 +582,7 @@ CAPABILITY IMPACT (slim brochure page: keep density similar to a compact Learnin
 - capability_impact_closing: EXACTLY ONE paragraph (no blank line, no second or third paragraph). Two or three sentences total, roughly 45 to 75 words. Summarize the shift or outcome at a high level. You may include one **bold phrase** for emphasis. Do not repeat the six rows or add extra essay-style paragraphs.
 
 MODULES (compact table: Sno., Modules, Topics, Exercises)
+- If **topics_to_include** (or legacy topics_must_include / mandatory_topics / important_topics) appears in input JSON, every listed theme must be reflected somewhere in module topics (or clearly in learning objectives). Do not skip any.
 - MODULE COUNT (must follow duration and total_learning_hours from input; never invent a fixed count of five for every course)
   - Read course_duration and total_learning_hours (or infer from phrases like "2 days", "16 hours"). When days and hours both appear, prefer splitting into enough modules to fill the real schedule.
   - Guide by contact time: 1 day (~6–8 h): 3–4 modules. **2 days (~12–16 h): 6–8 modules** (morning/afternoon blocks). 3 days: 7–10. Longer programs: scale up. A **two-day** program should **not** default to five modules unless the client explicitly requested a compact five-module agenda.
@@ -660,6 +672,7 @@ Return the same strict JSON schema as in STRICT_JSON_OUTPUT_RULES.
 
 CONTEXT_PROFILE_PROMPT = """You are a training-context profiler.
 From the input JSON, extract a compact context profile for downstream outline generation.
+Map mode_of_training (or delivery_mode, training_mode) into delivery_mode. Map level_of_training into training_level; if level_of_training is missing, use Intermediate.
 Return strict JSON only with keys:
 {
   "sector": "string",
@@ -670,7 +683,7 @@ Return strict JSON only with keys:
   "delivery_mode": "string",
   "roles": ["string"]
 }
-Use empty strings/lists when unknown.
+Use empty strings/lists when unknown. If delivery_mode cannot be inferred, prefer Hybrid.
 """
 
 RESEARCH_SUPPORT_PROMPT = """You are a training research assistant.

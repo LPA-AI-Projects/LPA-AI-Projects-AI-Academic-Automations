@@ -25,7 +25,14 @@ class CourseInputData(BaseModel):
     course_name: str = Field(..., min_length=1)
     department: str = ""
     designation: str = ""
-    level_of_training: str = ""
+    level_of_training: Optional[str] = Field(
+        None,
+        description="Optional: participant level (e.g. Beginner, Intermediate, Advanced). If omitted, prompts assume Intermediate unless context implies otherwise.",
+    )
+    mode_of_training: Optional[str] = Field(
+        None,
+        description="Delivery format: Online, Onsite (offline/classroom), or Hybrid.",
+    )
 
     need_of_training: str = ""
     specific_questions: list[str] | str = Field(default_factory=list)
@@ -50,12 +57,28 @@ class CourseInputData(BaseModel):
         None,
         description="Optional: any other CRM notes for design (delivery, constraints, etc.).",
     )
+    topics_to_include: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices(
+            "topics_to_include",
+            "topics_must_include",
+            "mandatory_topics",
+            "important_topics",
+        ),
+        description=(
+            "Topics or themes that must appear in the course design (mandatory inclusions). "
+            "Comma- or newline-separated lists are OK. Legacy key topics_must_include is accepted."
+        ),
+    )
 
     @field_validator(
         "no_of_pax",
         "languages_preferred",
         "additional_certifications",
         "additional_notes",
+        "topics_to_include",
+        "level_of_training",
+        "mode_of_training",
         mode="before",
     )
     @classmethod
@@ -99,12 +122,14 @@ class GenerateCourseRequest(BaseModel):
                     "department": "Information Technology (IT)",
                     "designation": "Delivery Education Manager",
                     "level_of_training": "Intermediate",
+                    "mode_of_training": "Hybrid",
                     "need_of_training": "End Customer --- IBM",
                     "size_of_company": "Above 10k",
                     "duration": "4 weeks",
                     "no_of_pax": "24",
                     "languages_prefered": "English",
                     "additional_certifications": "PMP alignment optional",
+                    "topics_to_include": "Agile estimation, risk register, stakeholder communication",
                 },
             }
         }
