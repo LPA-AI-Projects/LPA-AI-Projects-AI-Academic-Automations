@@ -111,7 +111,7 @@ See [OAuth overview](https://www.zoho.com/crm/developer/docs/api/v8/oauth-overvi
 
 4. Access tokens are refreshed automatically (cached; refresh uses your refresh token before the ~1 hour expiry).
 
-### Where to set Zoho / OAuth variables
+### Where to set Zoho / OAuth variable
 
 | Where | What |
 |--------|------|

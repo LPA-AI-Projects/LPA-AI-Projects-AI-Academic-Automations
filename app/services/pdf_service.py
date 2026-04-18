@@ -85,6 +85,18 @@ def _details_page_summary_from_insight(paragraphs: list[str]) -> str:
     return merged
 
 
+def _format_details_page_intro_for_pdf(raw: str) -> str:
+    """
+    Course Details intro: light cleanup only (markdown bold removal, whitespace).
+    Do not truncate sentences or words here; length is controlled by the outline prompt.
+    """
+    s = _brochure_strip_dashes((raw or "").strip())
+    if not s:
+        return ""
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _slim_insight_paragraph(text: str, max_sentences: int = 2, max_words: int = 62) -> str:
     """Program Insight body: max two sentences per paragraph, brochure density."""
     s = _brochure_strip_dashes(text.strip())
@@ -126,13 +138,20 @@ def _slim_capability_closing(text: str | None, max_sentences: int = 3, max_words
         return ""
     first_block = s.split("\n\n")[0].strip()
     parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", first_block) if p.strip()]
-    merged = " ".join(parts[:max_sentences]).strip()
+    chosen: list[str] = []
+    for sentence in parts[:max_sentences]:
+        candidate = (" ".join(chosen + [sentence])).strip()
+        if chosen and len(candidate.split()) > max_words:
+            break
+        chosen.append(sentence)
+
+    # If even the first sentence exceeds max_words, keep it anyway (prefer a complete sentence).
+    if not chosen and parts:
+        chosen = [parts[0]]
+
+    merged = " ".join(chosen).strip()
     if merged and merged[-1] not in ".!?":
         merged += "."
-    if len(merged.split()) > max_words:
-        merged = _compress_text(merged, max_words)
-        if merged and merged[-1] not in ".!?":
-            merged += "."
     return merged
 
 
@@ -141,7 +160,7 @@ def _clean_learning_objective_title(title: str | None) -> str:
     t = _brochure_strip_dashes((title or "").strip())
     while t.endswith(":"):
         t = t[:-1].strip()
-    return _compress_text(t, 12)
+    return t
 
 
 def _clean_module_title_for_table(title: str | None) -> str:
@@ -308,8 +327,6 @@ def _extract_overview(outline_text: str) -> str:
         if stripped.startswith("#"):
             continue
         body_lines.append(stripped)
-        if len(body_lines) >= 8:
-            break
     fallback = "\n".join(body_lines).strip()
     if fallback:
         return fallback
@@ -1014,8 +1031,14 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
     updated = _replace_inner_html_by_id(updated, "pSubtitle", escape(display_subtitle))
     updated = _replace_inner_html_by_id(updated, "pDuration", escape(_brochure_strip_dashes(payload.duration or "TBC")))
     updated = _replace_inner_html_by_id(updated, "pInsight", insight_html)
-    det_summary = _details_page_summary_from_insight(payload.program_insight.paragraphs)
-    updated = _replace_inner_html_by_id(updated, "pDetSummary", _render_bold_markdown_to_html(det_summary))
+    det_raw = (payload.course_details.details_page_intro or "").strip()
+    if det_raw:
+        det_summary = _format_details_page_intro_for_pdf(det_raw)
+        det_html = escape(det_summary)
+    else:
+        det_summary = _details_page_summary_from_insight(payload.program_insight.paragraphs)
+        det_html = _render_bold_markdown_to_html(det_summary)
+    updated = _replace_inner_html_by_id(updated, "pDetSummary", det_html)
     updated = _replace_inner_html_by_id(
         updated,
         "pRegions",

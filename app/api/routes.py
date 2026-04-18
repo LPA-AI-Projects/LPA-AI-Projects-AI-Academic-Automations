@@ -33,6 +33,7 @@ from app.services.claude import ClaudeService
 from app.services.pdf_service import generate_pdf_path_async
 from app.services.google_drive import GoogleDriveUploadError, upload_course_outline_pdf_to_drive
 from app.services.zoho_integration import (
+    get_course_outline_integration_status,
     zoho_notify_course_outline_job_finished,
     zoho_notify_refined_outline_version,
 )

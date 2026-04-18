@@ -12,6 +12,8 @@ class CourseDetails(BaseModel):
     regions_served: str = ""
     course_duration: str = ""
     total_learning_hours: str = ""
+    # Narrative above the Course Details table (distinct from program_insight; see brochure prompt).
+    details_page_intro: str = ""
     key_benefits: str = ""
     value_addition: str = ""
     location: str = ""
