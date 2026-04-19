@@ -678,11 +678,7 @@ async def process_slides_job(job_id) -> None:
                     gamma_request_log.append(
                         {
                             "module_index": mi,
-                            "batch_index": bi,
                             "module_name": module_name,
-                            "gamma_endpoint": gamma_result.get("gamma_endpoint"),
-                            "gamma_create_url": gamma_result.get("gamma_create_url"),
-                            "generation_id": gamma_result.get("generation_id"),
                             "request_payload": req_payload,
                         }
                     )

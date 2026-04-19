@@ -976,12 +976,12 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
         ),
         closing=lo_closing
         or (
-            "By the end of the program, participants will be equipped to apply methods independently in their roles. "
-            "They will gain hands-on experience in scenarios that mirror real workflows, ensuring immediate applicability. "
-            "The training emphasizes **practical application and analytical confidence**, moving beyond basic familiarity.\n\n"
-            "Participants will also strengthen how they interpret and present insights to stakeholders. "
-            "The program supports **job-ready skills and improved decision-making capability** for organizational goals. "
-            "Learners will be better prepared to use analytics as part of day-to-day responsibilities."
+            "By the end of the program, participants apply core methods in realistic scenarios. "
+            "Hands-on work mirrors day-to-day workflows so skills transfer quickly. "
+            "The focus is **practical application** and confidence with the tools.\n\n"
+            "Participants strengthen how they interpret results and present insights. "
+            "The program builds **job-ready skills** that support better decisions. "
+            "Learners leave ready to use analytics in regular responsibilities."
         ),
     )
     raw_ci = (payload.capability_impact_intro or "").strip()

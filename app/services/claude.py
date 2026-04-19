@@ -565,22 +565,22 @@ COURSE DETAILS TABLE (course_details)
 - If the client JSON includes optional CRM fields (no_of_pax, languages_preferred, additional_certifications, additional_notes, topics_to_include, level_of_training, mode_of_training), use them only when present: mention language or cohort scale where it helps credibility (e.g. delivery pacing); reflect certification context in objectives or modules when relevant. When **topics_to_include** (or legacy topics_must_include / mandatory_topics / important_topics) is present, cover every listed theme in the outline without exception. If **level_of_training** is absent, assume Intermediate. If **mode_of_training** (or delivery_mode) is absent, assume Hybrid for delivery wording. Do not invent values for fields that are absent except these defaults.
 
 LEARNING OBJECTIVES BLOCK (standard brochure page: intro paragraph, then a. through g., then two closing paragraphs)
-Match the compact brochure reference, not a dense technical spec.
+Match the compact brochure reference, not a dense technical spec. **This entire block must fit on ONE printed PDF page** (fixed template). Density failures are usually from long sentences or a single merged closing paragraph—avoid both.
 
 learning_objectives_intro
-- ONE paragraph, EXACTLY FOUR sentences, roughly 55 to 80 words (must fit on one PDF page with the 7 objectives and closing).
+- ONE paragraph, EXACTLY FOUR sentences. **Each sentence: at most 20 words** (count before you output; if over 20, split or shorten). Total for the intro: roughly 50 to 72 words.
 - Flow: (1) what the program focuses on and tools, (2) how it builds on prior knowledge, (3) what participants will learn to do, (4) the overall objective for professionals and reporting impact.
-- Direct L&D tone. No em dash. No bullet characters.
+- Prefer short, direct sentences over one long compound sentence. No em dash. No bullet characters.
 
 learning_objectives (EXACTLY 7 items; layout prints letter a. through g.)
 - title: Short brochure-style heading ONLY (Title Case). Target 4 to 8 words. Use "&" where natural (e.g. "Data Structuring & Transformation"). Do NOT end the title with a colon. Do NOT cram long technical lists, tool chains, or comma stacks into the title (avoid "HR Data Connection and Power Query Transformation" style long headings). One clear topic per row.
 - description: EXACTLY one sentence, 8 to 14 words, on its own line under the title in the PDF. Imperative or clear outcome. Ends with a period. No em dash. Do not repeat the title words. No second sentence.
 
 learning_objectives_closing
-- EXACTLY two paragraphs separated by \\n\\n.
-- Paragraph 1: EXACTLY THREE sentences, roughly 45 to 70 words. End-of-program capability, hands-on use, real-world application. One phrase must use **double asterisks** for bold, e.g. **practical application and analytical confidence** (adapt wording to the course).
-- Paragraph 2: EXACTLY THREE sentences, roughly 45 to 70 words. Interpretation, presenting insights, organizational contribution. One **bold phrase** such as **job-ready skills and improved decision-making capability** (adapt to context).
-- Do not repeat the intro or enumerate objectives a through g again.
+- **Must be EXACTLY two paragraphs** with **one blank line between them** in the string: use `\\n\\n` after the first paragraph. Do **not** merge into one paragraph; do **not** add a third paragraph.
+- Paragraph 1: EXACTLY **three** sentences. **Each sentence: at most 18 words.** Paragraph total roughly 36 to 50 words. End-of-program capability, hands-on use, real-world application. One phrase must use **double asterisks** for bold, e.g. **practical application and analytical confidence** (keep the bold phrase short).
+- Paragraph 2: EXACTLY **three** sentences. **Each sentence: at most 18 words.** Paragraph total roughly 36 to 50 words. Interpretation, presenting insights, organizational contribution. One **bold phrase** such as **job-ready skills** (adapt to context; keep bold span short).
+- Do not repeat the intro or enumerate objectives a through g again. Do not use semicolons to stack multiple ideas in one sentence—use a separate sentence instead.
 
 CAPABILITY IMPACT (slim brochure page: keep density similar to a compact Learning Objectives page, not a long white paper)
 - capability_impact_intro: EXACTLY TWO sentences, roughly 35 to 55 words total. Set context for why capability matters for this client or sector. No em dash. Do not use four long sentences.
@@ -621,6 +621,7 @@ STRICT_JSON_OUTPUT_RULES = """Return ONLY valid JSON (no markdown fences, no ext
 learning_objectives must contain exactly 7 objects; capability_impact must contain exactly 6 objects with the fixed titles.
 key_benefits and value_addition must each be exactly two sentences and roughly 38-52 words (compact brochure table cells, not long technical essays).
 program_insight.paragraphs: three strings; each at most two sentences, about 38-58 words; total ~120-175 words. Exactly six bullets (10-18 words each). course_details.details_page_intro: one paragraph, plain text no markdown, short crisp how-this-course-helps-participants copy, about six to eight lines when set above the table, distinct from program_insight (see brochure rules).
+learning_objectives_intro: four sentences; each sentence at most 20 words; total ~50-72 words. learning_objectives_closing: two paragraphs separated by \\n\\n; each paragraph exactly three sentences; each sentence at most 18 words; each paragraph ~36-50 words; never one long merged paragraph.
 modules: array length follows the brochure MODULE COUNT rules (e.g. **6–8** for a typical **two-day** course). Do not default to exactly five modules for two-day programs unless the input explicitly asks for five.
 capability_impact_intro: two sentences; each capability_impact[].description: one sentence 18-28 words; capability_impact_closing: one paragraph only, 2-3 sentences.
 The JSON must match this exact shape (all keys present; use "" or [] only where the brochure rules allow empty):
@@ -670,7 +671,7 @@ REFINE_OUTLINE_PROMPT = """
 You are refining an existing course outline JSON based on stakeholder feedback.
 Preserve: brochure tone; do NOT use em dashes or en dashes in any field; 3 program_insight paragraphs (~38-58 words each, max 2 sentences, **bold** phrases allowed) + exactly 6 bullets (original Program Insight rules); course_details.details_page_intro (one paragraph, plain text no **bold**, short crisp how-this-course-helps-participants, about six to eight lines above the table);
 Never include the client/company/organization name in course_title (including anything after a colon tagline). Avoid "at <Company>" / "for <Company>" in the cover title/subtitle.
-exactly 7 learning objectives: compact brochure titles (no colon), 8-16 word descriptions; intro 4 sentences; closing 2 paragraphs of 3 sentences each with **bold** phrases;
+exactly 7 learning objectives: compact brochure titles (no colon), 8-16 word descriptions; intro 4 sentences (each sentence max 20 words); closing **two paragraphs** with **\\n\\n** between them, each paragraph exactly 3 sentences (each sentence max 18 words), **bold** phrases kept short;
 capability impact: intro 2 sentences; each of 6 rows one sentence only (18-28 words); closing ONE short paragraph (2-3 sentences), not multiple long closings;
 module count from context (duration, hours, scope): for **two-day** programs prefer **6–8** modules unless feedback says to keep five; module titles without "Module N:" prefix;
 topics: 4 to 8 words per line; modules: three activity lines per module; at most 6 words after each activity label; progression: first module Exercise/Case study/Simulation only (no Hands-on, no Role-play), middle modules Hands-on and Simulation, Role-play in late modules when course length allows, last module business application;
