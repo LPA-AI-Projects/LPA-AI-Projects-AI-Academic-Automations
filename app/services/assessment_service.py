@@ -135,6 +135,7 @@ def build_user_prompt(
     curriculum_excerpt: str,
     num_questions: int,
     pre_difficulty: str | None = None,
+    nonce: str | None = None,
 ) -> str:
     phase = "post" if phase == "post" else "pre"
     extra = ""
@@ -145,13 +146,25 @@ def build_user_prompt(
             "Write questions that measure learning growth and deeper application — "
             "harder than a baseline pre-test and aligned to the elevated difficulty.\n"
         )
+    nonce_block = ""
+    if nonce:
+        # The nonce is a per-request salt that pushes the model to vary phrasing,
+        # answer ordering and topic emphasis between successive calls. It is NOT
+        # used to seed any deterministic randomness — its only job is to make
+        # otherwise identical prompts produce different question sets.
+        nonce_block = (
+            f"\nGeneration nonce (for variability — do NOT echo, do NOT include in output): {nonce}\n"
+            "Treat this as a fresh assessment authoring session. Vary question phrasing, "
+            "topic emphasis within the curriculum, distractor wording and option ordering "
+            "compared to any previous session you might imagine.\n"
+        )
     return f"""Course name: {course_name}
 
 Curriculum content (excerpt):
 ---
 {_truncate(curriculum_excerpt, MAX_CURRICULUM_CHARS)}
 ---
-{extra}
+{extra}{nonce_block}
 Produce JSON in this exact shape:
 {{
   "questions": [
@@ -175,6 +188,7 @@ async def _generate_mcqs(
     curriculum_text: str,
     num_questions: int,
     pre_difficulty: str | None,
+    nonce: str | None = None,
 ) -> list[dict[str, Any]]:
     ai = ClaudeService()
     sys_p = build_system_prompt(phase=phase, difficulty=difficulty, num_questions=num_questions)
@@ -185,6 +199,7 @@ async def _generate_mcqs(
         curriculum_excerpt=curriculum_text,
         num_questions=num_questions,
         pre_difficulty=pre_difficulty,
+        nonce=nonce,
     )
     raw = await ai.generate_text_completion(system_prompt=sys_p, user_prompt=usr_p, timeout_s=300.0)
     questions = _parse_questions_json(raw)
@@ -205,10 +220,15 @@ async def generate_assessment_questions_from_text(
     curriculum_text: str,
     num_questions: int,
     pre_difficulty: str | None = None,
+    nonce: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Reusable assessment generation helper for non-assessment pipelines (e.g. slides).
     Does not persist any DB state.
+
+    Pass a fresh ``nonce`` per call when you need successive invocations to
+    produce DIFFERENT question sets from the same curriculum (e.g. on-demand
+    generation behind a public learner URL).
     """
     phase_norm = "post" if str(phase or "").strip().lower() == "post" else "pre"
     diff = normalize_difficulty(difficulty)
@@ -227,6 +247,7 @@ async def generate_assessment_questions_from_text(
         curriculum_text=text,
         num_questions=nq,
         pre_difficulty=pre_difficulty,
+        nonce=nonce,
     )
 
 

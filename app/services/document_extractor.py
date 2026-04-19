@@ -35,19 +35,179 @@ def extract_pdf_text(file_bytes: bytes) -> str:
 def extract_ppt_text(file_bytes: bytes) -> str:
     """
     Extract text from PPTX bytes using python-pptx.
-    Synchronous; call via asyncio.to_thread for non-blocking usage.
+    Each slide is prefixed with ``--- Slide N ---`` so downstream code can split
+    or score slides per module. Synchronous; call via asyncio.to_thread.
     """
     from io import BytesIO
 
     from pptx import Presentation
 
     prs = Presentation(BytesIO(file_bytes))
-    chunks: list[str] = []
-    for slide in prs.slides:
+    parts: list[str] = []
+    for idx, slide in enumerate(prs.slides, start=1):
+        slide_chunks: list[str] = []
         for shape in slide.shapes:
             if hasattr(shape, "text") and shape.text:
-                chunks.append(str(shape.text))
-    return _join_nonempty(chunks)
+                slide_chunks.append(str(shape.text))
+        body = _join_nonempty(slide_chunks)
+        parts.append(f"--- Slide {idx} ---\n{body}" if body else f"--- Slide {idx} ---\n")
+    return "\n\n".join(parts).strip()
+
+
+_SLIDE_DELIM_RE = re.compile(r"(?m)^--- Slide (\d+) ---\s*$")
+
+# Minimal English stopwords for keyword overlap scoring (module vs PPT slide text).
+_PPT_SLICE_STOPWORDS = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "are",
+        "but",
+        "not",
+        "you",
+        "all",
+        "can",
+        "her",
+        "was",
+        "one",
+        "our",
+        "out",
+        "day",
+        "get",
+        "has",
+        "him",
+        "his",
+        "how",
+        "its",
+        "may",
+        "new",
+        "now",
+        "old",
+        "see",
+        "two",
+        "who",
+        "way",
+        "she",
+        "use",
+        "many",
+        "then",
+        "them",
+        "these",
+        "some",
+        "what",
+        "which",
+        "when",
+        "will",
+        "with",
+        "have",
+        "this",
+        "that",
+        "from",
+        "they",
+        "been",
+        "into",
+        "more",
+        "than",
+        "also",
+        "only",
+        "such",
+        "other",
+        "about",
+        "after",
+        "module",
+        "topic",
+        "topics",
+    }
+)
+
+
+def split_ppt_text_into_slide_blocks(ppt_text: str) -> list[tuple[int, str]]:
+    """
+    Parse text produced by extract_ppt_text into (slide_number, body) pairs in order.
+    If no slide markers are present, returns a single block (1, full_text).
+    """
+    text = (ppt_text or "").strip()
+    if not text:
+        return []
+    matches = list(_SLIDE_DELIM_RE.finditer(text))
+    if not matches:
+        return [(1, text)]
+    blocks: list[tuple[int, str]] = []
+    if matches[0].start() > 0:
+        preamble = text[: matches[0].start()].strip()
+    else:
+        preamble = ""
+    for i, m in enumerate(matches):
+        num = int(m.group(1))
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        if i == 0 and preamble:
+            body = (preamble + "\n\n" + body).strip()
+        blocks.append((num, body))
+    return blocks
+
+
+def _keywords_for_module_slice(module_name: str, module_text: str, *, max_chars: int = 6000) -> set[str]:
+    blob = f"{module_name}\n{(module_text or '')[:max_chars]}".lower()
+    words = re.findall(r"[a-z][a-z\-]{2,}", blob)
+    return {w for w in words if w not in _PPT_SLICE_STOPWORDS}
+
+
+def slice_instructor_ppt_for_module(
+    instructor_text: str | None,
+    module_name: str,
+    module_text: str,
+    *,
+    max_chars: int = 150_000,
+) -> str | None:
+    """
+    Return PPT text most relevant to one outline module using keyword overlap per slide.
+    Falls back to the full (truncated) deck when markers are missing or no slide scores.
+    """
+    raw = (instructor_text or "").strip()
+    if not raw:
+        return None
+    blocks = split_ppt_text_into_slide_blocks(raw)
+    if len(blocks) <= 1 and "--- Slide " not in raw:
+        return raw[:max_chars]
+
+    keys = _keywords_for_module_slice(module_name, module_text)
+    if not keys:
+        return raw[:max_chars]
+
+    scores: list[tuple[int, int, str]] = []
+    for num, body in blocks:
+        low = body.lower()
+        score = sum(low.count(k) for k in keys)
+        scores.append((score, num, body))
+
+    max_score = max((s[0] for s in scores), default=0)
+    if max_score == 0:
+        return raw[:max_chars]
+
+    # Include neighboring slides around any slide with a positive score.
+    want: set[int] = set()
+    for score, num, _ in scores:
+        if score <= 0:
+            continue
+        want.update({num - 1, num, num + 1})
+    by_num = {num: body for num, body in blocks}
+    ordered_nums = sorted(n for n in want if n in by_num)
+    if not ordered_nums:
+        return raw[:max_chars]
+
+    out_parts: list[str] = []
+    total = 0
+    for n in ordered_nums:
+        chunk = f"--- Slide {n} ---\n{by_num[n]}".strip()
+        if total + len(chunk) + 2 > max_chars:
+            break
+        out_parts.append(chunk)
+        total += len(chunk) + 2
+    joined = "\n\n".join(out_parts).strip()
+    return joined if joined else raw[:max_chars]
 
 
 async def extract_pdf_text_async(file_bytes: bytes) -> str:

@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app.api.routes import router
 from app.api.slides import router as slides_router
 from app.api.assessments import router as assessments_router
+from app.api.courseware_assessments import router as courseware_assessments_router
 from app.core.database import Base, engine
 from app.core.storage_paths import ensure_storage_dirs, pdfs_dir, ppts_dir
 from app.utils.logger import get_logger
@@ -102,6 +103,7 @@ app.mount("/ppts", StaticFiles(directory=PPT_OUTPUT_DIR), name="ppts")
 app.include_router(router)
 app.include_router(slides_router)
 app.include_router(assessments_router)
+app.include_router(courseware_assessments_router)
 
 
 @app.middleware("http")

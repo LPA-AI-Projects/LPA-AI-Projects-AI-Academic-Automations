@@ -17,6 +17,7 @@ class ModulePipelineState(TypedDict):
     module_text: str
     lesson_text: str | None
     instructor_text: str | None
+    instructor_ppt_priority: str
     planner_model: str | None
     generator_model: str | None
     validator_model: str | None
@@ -79,6 +80,7 @@ async def _planner_node(state: ModulePipelineState) -> ModulePipelineState:
         lesson=state["lesson_text"],
         activity=None,
         instructor=state["instructor_text"],
+        instructor_ppt_priority=state["instructor_ppt_priority"],
         model=state["planner_model"],
     )
     raw_slides = plan.get("slides") if isinstance(plan, dict) else []
@@ -115,6 +117,7 @@ async def _generator_node(state: ModulePipelineState) -> ModulePipelineState:
             await generate_slide(
                 slide=slide,
                 context=context,
+                instructor_ppt_priority=state["instructor_ppt_priority"],
                 model=state["generator_model"],
                 fix_instructions=state.get("fix_instructions") or "",
             )
@@ -206,12 +209,16 @@ async def run_module_slides_pipeline(
     min_slides: int,
     max_slides: int,
     max_loops: int,
+    instructor_ppt_priority: str = "supplement",
 ) -> list[dict[str, Any]]:
     initial: ModulePipelineState = {
         "module_name": module_name,
         "module_text": module_text,
         "lesson_text": lesson_text,
         "instructor_text": instructor_text,
+        "instructor_ppt_priority": instructor_ppt_priority
+        if instructor_ppt_priority in ("primary", "supplement")
+        else "supplement",
         "planner_model": planner_model,
         "generator_model": generator_model,
         "validator_model": validator_model,

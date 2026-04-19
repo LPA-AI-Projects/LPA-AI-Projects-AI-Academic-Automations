@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 
 class Settings(BaseSettings):
@@ -69,10 +69,44 @@ class Settings(BaseSettings):
     SLIDES_MIN_PER_MODULE: int = 10
     SLIDES_MAX_PER_MODULE: int = 20
     SLIDES_MODULE_PARALLELISM: int = 3
+    # How strongly instructor PPT text influences planning/generation: "supplement" (default) or "primary".
+    SLIDES_INSTRUCTOR_PPT_PRIORITY: str = "supplement"
     # When true, slides jobs generate pre-assessment MCQs from outline text and post-assessment from validated slides (parallel with Gamma where possible).
     SLIDES_ASSESSMENTS_ENABLED: bool = False
     SLIDES_PRE_ASSESSMENT_QUESTIONS: int = 15
     SLIDES_POST_ASSESSMENT_QUESTIONS: int = 15
+    # Default difficulty applied to on-demand courseware assessments when a per-request value is missing.
+    COURSEWARE_ASSESSMENT_DEFAULT_DIFFICULTY: str = "intermediate"
+    COURSEWARE_ASSESSMENT_DEFAULT_NUM_QUESTIONS: int = 15
+
+    # Vercel frontend URL where /assessment/{zoho_record_id}/pre|post lives.
+    # Example: https://learn.example.com (no trailing slash required).
+    FRONTEND_BASE_URL: str = ""
+    # HMAC secret used to mint short signed tokens (?t=...) on the public assessment URLs.
+    # When empty, links are issued without a token (less secure if zoho_record_id is guessable).
+    ASSESSMENT_LINK_SECRET: str = ""
+    # When true, the courseware-assessments endpoints require a valid t= token; otherwise the
+    # token is optional (X-API-Key alone is enough for trusted Vercel server-side proxy).
+    ASSESSMENT_LINK_REQUIRE_TOKEN: bool = False
+    # Per-IP and per-record-id rate limit (requests / minute) on public assessment generation.
+    ASSESSMENT_RATE_LIMIT_PER_MIN: int = 12
+    # Zoho CRM field API name used to store pre/post assessment URLs (separate from Gamma links).
+    ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME: str = "Assessment_Links"
+    # When true, on slides job completion store a copy of validated_slides.json content into the
+    # CourseJob.payload_json (under "validated_slides_blob") so multi-replica deploys can serve
+    # post-assessment generation without sharing the on-disk cache.
+    COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD: bool = True
+
+    # Published Google Sheet CSV (see app/services/public_course_sheet.py). Public outline jobs only.
+    PUBLIC_COURSE_SHEET_CSV_URL: str = ""
+    PUBLIC_COURSE_SHEET_LOOKUP_ENABLED: bool = True
+    # Optional explicit header names (normalized: spaces → underscores). Empty = fuzzy detect.
+    PUBLIC_COURSE_SHEET_COURSE_COLUMN: str = ""
+    PUBLIC_COURSE_SHEET_PDF_COLUMN: str = ""
+    # Deprecated: if PUBLIC_COURSE_SHEET_CSV_URL is empty, this value is used instead.
+    PUBLIC_COURSE_CATALOG_CSV_URL: str = ""
+    # Zoho CRM field API name on the outline module for the Final Formatted Curriculum link (public jobs).
+    ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME: str = ""
 
     # Google Apps Script merge endpoint (optional, for single merged editable Slides link)
     GOOGLE_SCRIPT_URL: str = ""
@@ -87,6 +121,14 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    @model_validator(mode="after")
+    def _public_sheet_csv_url_from_legacy(self) -> "Settings":
+        if not (self.PUBLIC_COURSE_SHEET_CSV_URL or "").strip():
+            legacy = (self.PUBLIC_COURSE_CATALOG_CSV_URL or "").strip()
+            if legacy:
+                self.PUBLIC_COURSE_SHEET_CSV_URL = legacy
+        return self
+
     @field_validator(
         "ZOHO_CLIENT_ID",
         "ZOHO_CLIENT_SECRET",
@@ -97,6 +139,14 @@ class Settings(BaseSettings):
         "ZOHO_CRM_OUTLINE_MODULE_API_NAME",
         "ZOHO_CRM_SLIDES_MODULE_API_NAME",
         "ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME",
+        "ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME",
+        "ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME",
+        "PUBLIC_COURSE_SHEET_CSV_URL",
+        "PUBLIC_COURSE_CATALOG_CSV_URL",
+        "PUBLIC_COURSE_SHEET_COURSE_COLUMN",
+        "PUBLIC_COURSE_SHEET_PDF_COLUMN",
+        "FRONTEND_BASE_URL",
+        "ASSESSMENT_LINK_SECRET",
         "SLIDES_PLANNER_MODEL",
         "SLIDES_GENERATOR_MODEL",
         "SLIDES_VALIDATOR_MODEL",
@@ -109,6 +159,35 @@ class Settings(BaseSettings):
     @classmethod
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
+
+    @field_validator("ASSESSMENT_LINK_REQUIRE_TOKEN", "COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD", mode="before")
+    @classmethod
+    def coerce_bool_flags(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
+
+    @field_validator("FRONTEND_BASE_URL", mode="before")
+    @classmethod
+    def normalize_frontend_base_url(cls, value: object) -> str:
+        s = str(value or "").strip()
+        return s.rstrip("/")
+
+    @field_validator("COURSEWARE_ASSESSMENT_DEFAULT_DIFFICULTY", mode="before")
+    @classmethod
+    def normalize_default_difficulty(cls, value: object) -> str:
+        s = str(value or "intermediate").strip().lower()
+        if s in ("basic", "beginner", "fundamental", "entry"):
+            return "basic"
+        if s in ("advanced", "expert"):
+            return "advanced"
+        return "intermediate"
 
     @field_validator("GAMMA_USE_TEMPLATE", mode="before")
     @classmethod
@@ -157,6 +236,14 @@ class Settings(BaseSettings):
         if u.endswith("/v1"):
             u = u[:-3].rstrip("/")
         return u
+
+    @field_validator("SLIDES_INSTRUCTOR_PPT_PRIORITY", mode="before")
+    @classmethod
+    def normalize_slides_instructor_ppt_priority(cls, value: object) -> str:
+        s = str(value or "supplement").strip().lower()
+        if s == "primary":
+            return "primary"
+        return "supplement"
 
     @field_validator("OPENAI_BASE_URL")
     @classmethod

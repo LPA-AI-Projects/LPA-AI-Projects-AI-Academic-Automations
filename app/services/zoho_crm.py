@@ -61,6 +61,62 @@ def get_slides_module_api_name() -> str:
     )
 
 
+async def update_outline_module_record_fields(
+    *,
+    zoho_record_id: str,
+    fields: dict[str, str],
+) -> None:
+    """
+    Update one or more fields on the course-outline CRM record (same module as PDF attach).
+
+    Used for course_type=public to write the Final Formatted Curriculum URL from the sheet.
+    Non-critical: callers may catch exceptions and continue.
+    """
+    if not _crm_configured():
+        logger.info(
+            "Zoho outline record update skipped: CRM OAuth not configured."
+        )
+        return
+
+    rid = (zoho_record_id or "").strip()
+    if not rid:
+        return
+    cleaned: dict[str, str] = {
+        str(k).strip(): str(v).strip()
+        for k, v in (fields or {}).items()
+        if str(k).strip() and str(v).strip()
+    }
+    if not cleaned:
+        logger.info("Zoho outline record update skipped: no fields | record_id=%s", rid)
+        return
+
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    module_api = get_outline_module_api_name().strip("/")
+    url = f"{base}/crm/v8/{module_api}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"data": [{"id": rid, **cleaned}]}
+    logger.info(
+        "Zoho outline record fields update | module=%s record_id=%s keys=%s",
+        module_api,
+        rid,
+        sorted(cleaned.keys()),
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.put(url, headers=headers, json=payload)
+    if resp.status_code >= 400:
+        logger.warning(
+            "Zoho outline record fields update failed | status=%s body=%s",
+            resp.status_code,
+            (resp.text or "")[:2000],
+        )
+        resp.raise_for_status()
+    logger.info("Zoho outline record fields update success | record_id=%s", rid)
+
+
 async def get_access_token() -> str:
     """Exchange refresh token for access token; cache until ~5 min before expiry."""
     global _token_cache, _token_expires_at
@@ -464,3 +520,77 @@ async def update_slides_links_field(
         )
         resp.raise_for_status()
     logger.info("Zoho slides links update success | record_id=%s field=%s", rid, field_name)
+
+
+async def update_assessment_links_field(
+    *,
+    zoho_record_id: str,
+    pre_assessment_url: str | None,
+    post_assessment_url: str | None,
+    field_api_name: str | None = None,
+) -> None:
+    """
+    Write the pre/post courseware assessment URLs to a dedicated CRM field
+    (separate from the Gamma links field). Non-critical: caller swallows errors.
+
+    The field is written as a small multi-line block, e.g.:
+
+        Pre-assessment: https://learn.example.com/assessment/123/pre?t=...
+        Post-assessment: https://learn.example.com/assessment/123/post?t=...
+    """
+    if not _crm_configured():
+        logger.info(
+            "Zoho assessment links update skipped: CRM OAuth not configured."
+        )
+        return
+
+    rid = (zoho_record_id or "").strip()
+    if not rid:
+        return
+
+    lines: list[str] = []
+    if pre_assessment_url:
+        lines.append(f"Pre-assessment: {pre_assessment_url.strip()}")
+    if post_assessment_url:
+        lines.append(f"Post-assessment: {post_assessment_url.strip()}")
+    if not lines:
+        logger.info(
+            "Zoho assessment links update skipped: no URLs to write | record_id=%s", rid
+        )
+        return
+    text_value = "\n".join(lines)
+
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    module_api = get_slides_module_api_name().strip("/")
+    field_name = (
+        field_api_name
+        or settings.ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME
+        or "Assessment_Links"
+    ).strip()
+    url = f"{base}/crm/v8/{module_api}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"data": [{"id": rid, field_name: text_value}]}
+    logger.info(
+        "Zoho assessment links update started | module=%s record_id=%s field=%s",
+        module_api,
+        rid,
+        field_name,
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.put(url, headers=headers, json=payload)
+    if resp.status_code >= 400:
+        logger.warning(
+            "Zoho assessment links update failed | status=%s body=%s",
+            resp.status_code,
+            (resp.text or "")[:2000],
+        )
+        resp.raise_for_status()
+    logger.info(
+        "Zoho assessment links update success | record_id=%s field=%s",
+        rid,
+        field_name,
+    )

@@ -45,25 +45,40 @@ def _safe_slide_json(text: str) -> dict[str, Any]:
     return data
 
 
+def _generator_source_priority_block(instructor_ppt_priority: str) -> str:
+    if instructor_ppt_priority == "primary":
+        return (
+            "SOURCE PRIORITY:\n"
+            "- course_outline defines module scope and sequencing (mandatory)\n"
+            "- instructor_ppt is the primary source for facts, examples, and phrasing when relevant\n"
+            "- lesson_plan_and_activity_plan is secondary\n\n"
+        )
+    return (
+        "SOURCE PRIORITY:\n"
+        "- course_outline is mandatory primary source\n"
+        "- lesson_plan_and_activity_plan is secondary source\n"
+        "- instructor_ppt is supplement only\n\n"
+    )
+
+
 async def generate_slide(
     *,
     slide: dict[str, Any],
     context: dict[str, Any],
+    instructor_ppt_priority: str = "supplement",
     model: str | None = None,
     fix_instructions: str | None = None,
 ) -> dict[str, Any]:
     title = str(slide.get("title") or "").strip()
     slide_type = str(slide.get("type") or "content").strip().lower()
+    priority = instructor_ppt_priority if instructor_ppt_priority in ("primary", "supplement") else "supplement"
 
     ai = ClaudeService()
     user_prompt = (
         "SLIDE REQUEST:\n"
         f"- title: {title}\n"
         f"- type: {slide_type}\n\n"
-        "SOURCE PRIORITY:\n"
-        "- course_outline is mandatory primary source\n"
-        "- lesson_plan_and_activity_plan is secondary source\n"
-        "- instructor_ppt is supplement only\n\n"
+        f"{_generator_source_priority_block(priority)}"
         "GLOBAL CONTEXT:\n"
         f"{json.dumps(context, ensure_ascii=False)[:150000]}\n"
     )

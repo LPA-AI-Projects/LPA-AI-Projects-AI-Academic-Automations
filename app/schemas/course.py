@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import uuid
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
@@ -70,6 +70,19 @@ class CourseInputData(BaseModel):
             "Comma- or newline-separated lists are OK. Legacy key topics_must_include is accepted."
         ),
     )
+    referral_course_links: Optional[Union[str, list[str]]] = Field(
+        None,
+        validation_alias=AliasChoices(
+            "referral_course_links",
+            "referral_course_link",
+            "referral_links",
+        ),
+        description=(
+            "Optional reference page URLs (comma-, semicolon-, or newline-separated, or a JSON array). "
+            "The outline generator uses web research to read these pages and align modules and topics "
+            "with their content where appropriate, in addition to the client's brief."
+        ),
+    )
 
     @field_validator(
         "no_of_pax",
@@ -85,6 +98,19 @@ class CourseInputData(BaseModel):
     def _optional_str_strip(cls, v: Any) -> Any:
         if v is None:
             return None
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return v
+
+    @field_validator("referral_course_links", mode="before")
+    @classmethod
+    def _coerce_referral_course_links(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, list):
+            parts = [str(x).strip() for x in v if str(x).strip()]
+            return "\n".join(parts) if parts else None
         if isinstance(v, str):
             s = v.strip()
             return s if s else None
@@ -130,6 +156,7 @@ class GenerateCourseRequest(BaseModel):
                     "languages_prefered": "English",
                     "additional_certifications": "PMP alignment optional",
                     "topics_to_include": "Agile estimation, risk register, stakeholder communication",
+                    "referral_course_links": "https://example.com/reference-course-overview",
                 },
             }
         }

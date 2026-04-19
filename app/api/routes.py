@@ -17,6 +17,8 @@ from sqlalchemy import text
 
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings
+from app.services.public_course_sheet import lookup_public_course_pdf_url
+from app.services.zoho_crm import update_outline_module_record_fields
 from app.schemas.course import (
     CourseInputData,
     GenerateCourseRequest,
@@ -292,7 +294,9 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
         raise HTTPException(status_code=422, detail="input_data must be an object.")
 
     course_type = str(input_data_payload.get("course_type") or "").strip().lower()
-    if course_type not in {"public", "pub"}:
+    if course_type in {"public", "pub"}:
+        required_input_fields = ["course_name"]
+    else:
         required_input_fields = [
             "company_name",
             "course_name",
@@ -399,6 +403,76 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             job.error = None
             await db.commit()
             logger.info("Job status set to processing | job_id=%s", str(job_id))
+
+            course_type = str((input_data or {}).get("course_type") or "").strip().lower()
+            if course_type in ("public", "pub"):
+                # Public: Google Sheet CSV lookup only — no Claude, no brochure PDF generation.
+                cn = str((input_data or {}).get("course_name") or "").strip()
+                pdf_url = await lookup_public_course_pdf_url(cn)
+                if not pdf_url:
+                    raise RuntimeError(
+                        "Public course sheet lookup failed: set PUBLIC_COURSE_SHEET_CSV_URL "
+                        "(or legacy PUBLIC_COURSE_CATALOG_CSV_URL), ensure "
+                        "PUBLIC_COURSE_SHEET_LOOKUP_ENABLED=true, and that the CSV has a row "
+                        "matching course_name with an http(s) URL in the curriculum/PDF column."
+                    )
+                outline = json.dumps(
+                    {
+                        "source": "public_sheet",
+                        "final_curriculum_url": pdf_url,
+                        "course_name": cn,
+                    },
+                    ensure_ascii=False,
+                )
+                course_title = cn or "course"
+
+                async with db.begin():
+                    logger.info(
+                        "Persisting public sheet course + version | job_id=%s",
+                        str(job_id),
+                    )
+                    course = Course(zoho_record_id=zoho_record_id)
+                    db.add(course)
+                    await db.flush()
+                    version = CourseVersion(
+                        course_id=course.id,
+                        version_number=1,
+                        outline_text=outline,
+                        pdf_url=pdf_url,
+                    )
+                    db.add(version)
+                    created_course_id = course.id
+                    created_version_number = 1
+
+                field_name = (settings.ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME or "").strip()
+                if field_name:
+                    try:
+                        await update_outline_module_record_fields(
+                            zoho_record_id=zoho_record_id,
+                            fields={field_name: match.final_curriculum_url},
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Zoho Final Formatted Curriculum field update failed | job_id=%s",
+                            str(job_id),
+                        )
+
+                job.status = "completed"
+                job.pdf_url = pdf_url
+                job.course_id = created_course_id
+                job.version_number = created_version_number
+                await db.commit()
+                logger.info(
+                    "Public sheet job completed | job_id=%s pdf_url=%s",
+                    str(job_id),
+                    pdf_url,
+                )
+                await zoho_notify_course_outline_job_finished(
+                    job,
+                    created_version_number,
+                    attach_course_title=f"{course_title} — outline",
+                )
+                return
 
             context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
             ai = ClaudeService()

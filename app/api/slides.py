@@ -48,6 +48,20 @@ def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+def _normalize_assessment_difficulty(raw: str | None) -> str | None:
+    """Map form input to basic | intermediate | advanced, or None if unset/invalid."""
+    s = (raw or "").strip().lower()
+    if s in ("beginner", "fundamental", "entry"):
+        s = "basic"
+    elif s in ("intermed", "medium"):
+        s = "intermediate"
+    elif s in ("expert",):
+        s = "advanced"
+    if s not in ("basic", "intermediate", "advanced"):
+        return None
+    return s
+
+
 def _job_to_dict(job: CourseJob) -> dict:
     created_at = getattr(job, "created_at", None)
     if isinstance(created_at, datetime):
@@ -60,6 +74,13 @@ def _job_to_dict(job: CourseJob) -> dict:
     module_gamma_links: dict[str, str] = {}
     zoho_attachment_payload: dict | None = None
     gamma_request_log: list[dict[str, Any]] | None = None
+    pre_assessment_url: str | None = None
+    post_assessment_url: str | None = None
+    courseware_assessment_links: dict[str, Any] | None = None
+    pre_assessment_difficulty: str | None = None
+    post_assessment_difficulty: str | None = None
+    pre_assessment_num_questions: int | None = None
+    post_assessment_num_questions: int | None = None
     try:
         payload = json.loads(getattr(job, "payload_json", "") or "{}")
         if isinstance(payload, dict):
@@ -97,6 +118,45 @@ def _job_to_dict(job: CourseJob) -> dict:
             raw_grl = payload.get("gamma_request_log")
             if isinstance(raw_grl, list):
                 gamma_request_log = [x for x in raw_grl if isinstance(x, dict)]
+            raw_pre = payload.get("pre_assessment_url")
+            if isinstance(raw_pre, str) and raw_pre.strip():
+                pre_assessment_url = raw_pre.strip()
+            raw_post = payload.get("post_assessment_url")
+            if isinstance(raw_post, str) and raw_post.strip():
+                post_assessment_url = raw_post.strip()
+            raw_links_obj = payload.get("courseware_assessment_links")
+            if isinstance(raw_links_obj, dict):
+                courseware_assessment_links = {
+                    k: v
+                    for k, v in raw_links_obj.items()
+                    # Don't leak inline content / sensitive fields if any.
+                    if k
+                    in (
+                        "pre_assessment_url",
+                        "post_assessment_url",
+                        "pre_token",
+                        "post_token",
+                        "content_hash",
+                        "issued_at",
+                        "zoho_pushed_at",
+                    )
+                }
+            raw_pad = payload.get("pre_assessment_difficulty")
+            if isinstance(raw_pad, str) and raw_pad.strip():
+                pre_assessment_difficulty = raw_pad.strip()
+            raw_post_diff = payload.get("post_assessment_difficulty")
+            if isinstance(raw_post_diff, str) and raw_post_diff.strip():
+                post_assessment_difficulty = raw_post_diff.strip()
+            pnq = payload.get("pre_assessment_num_questions")
+            if isinstance(pnq, int) and not isinstance(pnq, bool):
+                pre_assessment_num_questions = max(1, min(50, pnq))
+            elif isinstance(pnq, str) and pnq.strip().isdigit():
+                pre_assessment_num_questions = max(1, min(50, int(pnq.strip())))
+            poq = payload.get("post_assessment_num_questions")
+            if isinstance(poq, int) and not isinstance(poq, bool):
+                post_assessment_num_questions = max(1, min(50, poq))
+            elif isinstance(poq, str) and poq.strip().isdigit():
+                post_assessment_num_questions = max(1, min(50, int(poq.strip())))
     except Exception:
         google_file_id = None
         google_batch_links = []
@@ -106,6 +166,13 @@ def _job_to_dict(job: CourseJob) -> dict:
         module_gamma_links = {}
         zoho_attachment_payload = None
         gamma_request_log = None
+        pre_assessment_url = None
+        post_assessment_url = None
+        courseware_assessment_links = None
+        pre_assessment_difficulty = None
+        post_assessment_difficulty = None
+        pre_assessment_num_questions = None
+        post_assessment_num_questions = None
     return {
         "zoho_record_id": job.zoho_record_id,
         "job_type": getattr(job, "job_type", None),
@@ -113,6 +180,13 @@ def _job_to_dict(job: CourseJob) -> dict:
         "modules": modules,
         "module_gamma_links": module_gamma_links,
         "gamma_request_log": gamma_request_log,
+        "pre_assessment_url": pre_assessment_url,
+        "post_assessment_url": post_assessment_url,
+        "courseware_assessment_links": courseware_assessment_links,
+        "pre_assessment_difficulty": pre_assessment_difficulty,
+        "post_assessment_difficulty": post_assessment_difficulty,
+        "pre_assessment_num_questions": pre_assessment_num_questions,
+        "post_assessment_num_questions": post_assessment_num_questions,
         "error": getattr(job, "error", None),
         "created_at": created_at,
     }
@@ -150,6 +224,45 @@ async def generate_slides(
     lesson_plan_and_activity_plan_pdf_url: str | None = Form(None),
     instructor_ppt: UploadFile | None = File(None),
     instructor_ppt_url: str | None = Form(None),
+    instructor_ppt_priority: str | None = Form(
+        None,
+        description='Optional override: "supplement" (default) or "primary" (PPT drives factual slide detail).',
+    ),
+    pre_assessment_difficulty: str | None = Form(
+        None,
+        description=(
+            'Optional default difficulty for the on-demand pre-assessment link '
+            '("basic" | "intermediate" | "advanced"). Used when the learner URL '
+            'does not pass ?difficulty=.'
+        ),
+    ),
+    post_assessment_difficulty: str | None = Form(
+        None,
+        description=(
+            'Optional default difficulty for the on-demand post-assessment link '
+            '("basic" | "intermediate" | "advanced"). Used when the learner URL '
+            'does not pass ?difficulty=. If omitted, post difficulty is derived '
+            'from pre_assessment_difficulty (one level higher) or the global default.'
+        ),
+    ),
+    pre_assessment_num_questions: int | None = Form(
+        None,
+        ge=1,
+        le=50,
+        description=(
+            "Optional default number of MCQs for on-demand pre-assessment when the "
+            "request does not pass ?num_questions=."
+        ),
+    ),
+    post_assessment_num_questions: int | None = Form(
+        None,
+        ge=1,
+        le=50,
+        description=(
+            "Optional default number of MCQs for on-demand post-assessment when the "
+            "request does not pass ?num_questions=."
+        ),
+    ),
 ):
     """
     Creates a new job of type 'slides' and processes it in the background.
@@ -317,12 +430,20 @@ async def generate_slides(
     )
     instructor_path = await _resolve_input_path(instructor_ppt, instructor_ppt_url, "instructor.pptx", False)
 
+    ipp = (instructor_ppt_priority or "").strip().lower()
+    pad = _normalize_assessment_difficulty(pre_assessment_difficulty)
+    post_pad = _normalize_assessment_difficulty(post_assessment_difficulty)
     payload = {
         "outline_pdf_path": outline_path,
         "lesson_plan_and_activity_plan_pdf_path": lesson_path,
         "instructor_ppt_path": instructor_path,
         "course_name": (course_name or "").strip() or "course",
         "program_name": (program_name or "").strip() or None,
+        "instructor_ppt_priority": ipp if ipp in ("primary", "supplement") else None,
+        "pre_assessment_difficulty": pad,
+        "post_assessment_difficulty": post_pad,
+        "pre_assessment_num_questions": pre_assessment_num_questions,
+        "post_assessment_num_questions": post_assessment_num_questions,
     }
     logger.info(
         "Slides job payload prepared | job_id=%s has_lesson=%s has_instructor_ppt=%s",

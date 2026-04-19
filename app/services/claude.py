@@ -34,6 +34,7 @@ LEARNING_OBJECTIVES_PROMPT = """You are a Training Objectives Expert for Learner
 - **level_of_training** (optional): e.g. Beginner, Intermediate, Advanced. If missing or empty, assume **Intermediate** for objective depth unless the topic or context clearly implies another level.
 - **mode_of_training** (optional; aliases delivery_mode, training_mode): Online, Onsite (offline), or Hybrid. If missing or empty, assume **Hybrid** when choosing examples and delivery notes unless context clearly implies one mode.
 - **topics_to_include** (optional JSON field; legacy key **topics_must_include**; also mandatory_topics, important_topics): when present, these are **mandatory themes or topics** the client requires in the program. You must reflect them in the training need, gaps, and learning objectives. Do not drop or ignore any listed item. If the list is long, prioritize covering every theme across the objectives (combine only when clearly redundant).
+- **referral_course_links** (optional; aliases referral_course_link, referral_links): one or more URLs (string or list) pointing to reference course pages, syllabi, or program descriptions. When present, use **web search** to open and read these pages. Extract themes, skills, and outcomes implied there and reflect them in the training need, gaps, and learning objectives alongside the client's stated brief. If a URL is unreachable, proceed from the rest of the input and note uncertainty only in your internal reasoning, not as a disclaimer in the output.
 
 ## YOUR PROCESS
 
@@ -152,6 +153,10 @@ Participant level (optional in input JSON: level_of_training). If absent or blan
 Mode of training (optional in input JSON: mode_of_training; aliases delivery_mode, training_mode). Use Onsite (offline/classroom), Online (virtual/remote), or Hybrid. If absent or blank, assume Hybrid for delivery overlay and activity design unless context clearly implies a single mode.
 Topics Suggested from Client (if provided — cover all listed topics without exception; these are mandatory inclusions, not the full scope. Build a complete course covering all standard content for this subject, ensuring client-suggested topics are integrated within the appropriate modules)
 topics_to_include (if provided in input JSON — same requirement as Topics Suggested from Client; legacy key topics_must_include; aliases mandatory_topics, important_topics)
+
+referral_course_links (optional in input JSON; aliases referral_course_link, referral_links)
+- When provided: one or more http(s) URLs to **reference** course pages, competitor brochures, official syllabi, or program descriptions the client wants you to align with.
+- **Use web search immediately** to retrieve and read content from these URLs (and closely related official pages if needed). Incorporate their structure, major themes, module-like sections, and stated outcomes into your outline: modules, topics, and learning flow should **consider** this material together with the client's learning objectives and mandatory topics. Do not copy text verbatim; adapt into Learners Point Academy style. If a link cannot be fetched, continue with other sources and the client brief; do not invent content specific to a page you could not access.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 0 — ACCREDITATION DETECTION (RUN FIRST, ALWAYS)
@@ -527,6 +532,9 @@ VOICE
 INPUT JSON — MANDATORY TOPICS
 - If the input context includes **topics_to_include** (or legacy **topics_must_include**, or **mandatory_topics**, **important_topics**), treat every listed theme as a **mandatory inclusion** for module topics, learning objectives, and program_insight bullets where appropriate. Spread coverage across modules; do not omit any item. Build a complete course for the subject while ensuring every mandatory topic appears in at least one module's topics lines or is clearly addressed in objectives.
 
+INPUT JSON — REFERRAL COURSE LINKS
+- If **referral_course_links** (or **referral_course_link**, **referral_links**) is present in the input JSON, it contains one or more URLs. Use **web search** to read those pages and treat them as **reference programs**: align module titles, topic lines, and progression with the substance of those pages where it fits the client's course name and objectives. Balance referral content with **topics_to_include** and the rest of the brief. Do not paste long quotes; synthesize into brochure-ready JSON.
+
 INPUT JSON — LEVEL AND DELIVERY MODE
 - **level_of_training**: optional. If absent or blank, assume **Intermediate** for objective wording and difficulty unless context implies otherwise.
 - **mode_of_training** (or **delivery_mode**, **training_mode**): optional. Expect Online, Onsite (offline/classroom), or Hybrid. If absent or blank, assume **Hybrid** for examples and facilitator notes. Reflect the mode in exercises (e.g. breakout rooms and polls for Online; room setup for Onsite; both for Hybrid).
@@ -688,6 +696,7 @@ Use empty strings/lists when unknown. If delivery_mode cannot be inferred, prefe
 
 RESEARCH_SUPPORT_PROMPT = """You are a training research assistant.
 Use web search when needed and produce practical support notes for course design.
+If the input includes **referral_course_links** (or referral_course_link / referral_links), search and summarize relevant themes from those URLs first; use them to inform duration_guidance, exercise_patterns, and industry_roi_points where applicable.
 Return strict JSON only with keys:
 {
   "duration_guidance": ["string"],
@@ -717,6 +726,7 @@ Rules:
 - Each module must include overview, topics, exercises, case studies, and simulations.
 - Exercises must be concrete and realistic, not generic placeholders.
 - Program insight should be narrative paragraphs first, then concise bullets.
+- If the input context includes **referral_course_links**, use web search to read those URLs and let their structure and themes inform module names and topic depth (alongside objectives and research notes).
 """
 
 

@@ -18,6 +18,7 @@ from app.services.document_extractor import (
     extract_pdf_module_rows_async,
     extract_pdf_text_async,
     extract_ppt_text_async,
+    slice_instructor_ppt_for_module,
 )
 from app.services.assessment_service import (
     DEFAULT_NUM_QUESTIONS,
@@ -25,13 +26,13 @@ from app.services.assessment_service import (
 )
 from app.services.gamma_client import generate_ppt
 from app.services.slides_graph import run_module_slides_pipeline
-from app.services.zoho_crm import update_slides_links_field
+from app.services.zoho_crm import update_assessment_links_field, update_slides_links_field
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 MAX_SLIDES_PER_BATCH = 60
-CACHE_VERSION = "slides_cache_v2"
+CACHE_VERSION = "slides_cache_v3"
 
 
 def _safe_course_name(name: str | None) -> str:
@@ -59,6 +60,19 @@ def _normalize_for_hash(text: str | None) -> str:
 def _hash_text(text: str | None) -> str:
     normalized = _normalize_for_hash(text)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _normalize_instructor_ppt_priority(raw: str | None) -> str:
+    """Per-job override or ``settings.SLIDES_INSTRUCTOR_PPT_PRIORITY`` (default: supplement)."""
+    s = (raw or "").strip().lower()
+    if s == "primary":
+        return "primary"
+    if s == "supplement":
+        return "supplement"
+    env = (getattr(settings, "SLIDES_INSTRUCTOR_PPT_PRIORITY", None) or "").strip().lower()
+    if env == "primary":
+        return "primary"
+    return "supplement"
 
 
 def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
@@ -227,6 +241,48 @@ def _batch_slides(slides: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return [slides[i : i + MAX_SLIDES_PER_BATCH] for i in range(0, len(slides), MAX_SLIDES_PER_BATCH)]
 
 
+def _build_assessment_urls(zoho_record_id: str) -> dict[str, str | None]:
+    """
+    Build absolute Vercel-frontend URLs for pre/post assessment links.
+
+    Returns ``{"pre_assessment_url": str|None, "post_assessment_url": str|None,
+    "pre_token": str|None, "post_token": str|None}``.
+
+    Returns ``None`` URLs when ``FRONTEND_BASE_URL`` is not configured.
+
+    Tokens are appended (``?t=...``) only when ``ASSESSMENT_LINK_SECRET`` (or
+    fallback ``API_SECRET_KEY``) is available; this binds each URL to its
+    (record_id, phase) pair so leaks can't unlock the other phase.
+    """
+    # Local imports keep the resolver helper out of the import cycle for
+    # background-task workers that don't need it.
+    from app.services.courseware_assessment_resolver import mint_assessment_link_token
+
+    base = (settings.FRONTEND_BASE_URL or "").rstrip("/")
+    rid = (zoho_record_id or "").strip()
+    if not base or not rid:
+        return {
+            "pre_assessment_url": None,
+            "post_assessment_url": None,
+            "pre_token": None,
+            "post_token": None,
+        }
+    pre_t = mint_assessment_link_token(rid, "pre")
+    post_t = mint_assessment_link_token(rid, "post")
+    pre_url = f"{base}/assessment/{rid}/pre"
+    post_url = f"{base}/assessment/{rid}/post"
+    if pre_t:
+        pre_url = f"{pre_url}?t={pre_t}"
+    if post_t:
+        post_url = f"{post_url}?t={post_t}"
+    return {
+        "pre_assessment_url": pre_url,
+        "post_assessment_url": post_url,
+        "pre_token": pre_t,
+        "post_token": post_t,
+    }
+
+
 def _build_post_curriculum_from_modules(module_entries: list[dict[str, Any]]) -> str:
     """Flatten validated module slides into compact text for post-assessment generation."""
     lines: list[str] = []
@@ -278,8 +334,30 @@ async def process_slides_job(job_id) -> None:
             outline_path = payload.get("outline_pdf_path")
             lesson_path = payload.get("lesson_plan_and_activity_plan_pdf_path")
             instructor_path = payload.get("instructor_ppt_path")
+            instructor_ppt_priority = _normalize_instructor_ppt_priority(payload.get("instructor_ppt_priority"))
             course_name = _safe_course_name(payload.get("course_name"))
             program_name = str(payload.get("program_name") or "").strip() or None
+            # Optional default difficulties from the slides creation form — surfaced
+            # to on-demand /pre and /post when the learner URL omits ?difficulty=.
+            pre_assessment_difficulty = (
+                str(payload.get("pre_assessment_difficulty") or "").strip().lower() or None
+            )
+            post_assessment_difficulty = (
+                str(payload.get("post_assessment_difficulty") or "").strip().lower() or None
+            )
+
+            def _payload_nq(key: str) -> int | None:
+                v = payload.get(key)
+                if v is None:
+                    return None
+                try:
+                    n = int(v)
+                except (TypeError, ValueError):
+                    return None
+                return max(1, min(50, n))
+
+            pre_assessment_num_questions = _payload_nq("pre_assessment_num_questions")
+            post_assessment_num_questions = _payload_nq("post_assessment_num_questions")
             assessments_enabled = bool(getattr(settings, "SLIDES_ASSESSMENTS_ENABLED", False))
             pre_q_count = max(
                 1,
@@ -359,7 +437,7 @@ async def process_slides_job(job_id) -> None:
             lesson_hash = _hash_text(lesson_text)
             instructor_hash = _hash_text(instructor_text)
             content_hash = hashlib.sha256(
-                f"{outline_hash}|{lesson_hash}|{instructor_hash}".encode("utf-8")
+                f"{outline_hash}|{lesson_hash}|{instructor_hash}|{instructor_ppt_priority}".encode("utf-8")
             ).hexdigest()
             cache_dir = os.path.join(cache_root, f"{CACHE_VERSION}_{content_hash[:16]}")
             os.makedirs(cache_dir, exist_ok=True)
@@ -423,19 +501,27 @@ async def process_slides_job(job_id) -> None:
                 async def _run_single_module(mi: int, mod: dict[str, str]) -> tuple[int, str, list[dict[str, Any]]]:
                     module_name = str(mod.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
                     module_text = str(mod.get("module_text") or "").strip()
+                    mod_instructor = (
+                        slice_instructor_ppt_for_module(
+                            instructor_text, module_name, module_text, max_chars=150_000
+                        )
+                        if instructor_text
+                        else None
+                    )
                     t0 = time.time()
                     async with semaphore:
                         validated_module = await run_module_slides_pipeline(
                             module_name=module_name,
                             module_text=module_text,
                             lesson_text=lesson_text,
-                            instructor_text=instructor_text,
+                            instructor_text=mod_instructor,
                             planner_model=planner_model,
                             generator_model=generator_model,
                             validator_model=validator_model,
                             min_slides=min_per_module,
                             max_slides=max_per_module,
                             max_loops=max_loops,
+                            instructor_ppt_priority=instructor_ppt_priority,
                         )
                     logger.info(
                         "Module pipeline completed | job_id=%s module=%s slides=%s seconds=%.2f",
@@ -664,6 +750,86 @@ async def process_slides_job(job_id) -> None:
                 "primary_link": primary_link,
                 "module_links": module_gamma_links,
             }
+
+            # Resolver-friendly metadata: lets the courseware-assessments
+            # endpoints find this job's content artifacts without rederiving
+            # cache directory naming. content_hash binds the resolver to the
+            # exact slides version the learner is being assessed on.
+            payload_state["course_name"] = course_name
+            payload_state["program_name"] = program_name
+            payload_state["pre_assessment_difficulty"] = pre_assessment_difficulty
+            payload_state["post_assessment_difficulty"] = post_assessment_difficulty
+            payload_state["pre_assessment_num_questions"] = pre_assessment_num_questions
+            payload_state["post_assessment_num_questions"] = post_assessment_num_questions
+            payload_state["content_hash"] = content_hash
+            payload_state["cache_dir"] = cache_dir
+            payload_state["validated_slides_path"] = validated_cache_path
+            payload_state["outline_pdf_path"] = outline_path
+            # Stored excerpt avoids re-extracting the source PDF on every
+            # /pre request; truncated to keep payload_json bounded.
+            try:
+                payload_state["outline_text_excerpt"] = (outline_text or "")[:200_000]
+            except Exception:
+                payload_state["outline_text_excerpt"] = ""
+            # Optionally inline the validated slides into payload_json so
+            # multi-replica deployments (where the cache dir is local-only)
+            # can serve post-assessment generation from any container.
+            try:
+                if bool(getattr(settings, "COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD", True)):
+                    payload_state["validated_slides_blob"] = {
+                        "cache_version": CACHE_VERSION,
+                        "content_hash": content_hash,
+                        "modules_detected": len(modules),
+                        "modules": module_entries,
+                    }
+            except Exception:
+                logger.exception(
+                    "Failed to inline validated_slides into payload_json | job_id=%s",
+                    str(job.id),
+                )
+
+            # Build pre/post assessment URLs (idempotent: only refresh when
+            # content_hash changes between runs of the same record).
+            previous_links = payload_state.get("courseware_assessment_links")
+            previous_hash = (
+                previous_links.get("content_hash") if isinstance(previous_links, dict) else None
+            )
+            if (
+                isinstance(previous_links, dict)
+                and previous_hash == content_hash
+                and previous_links.get("pre_assessment_url")
+                and previous_links.get("post_assessment_url")
+            ):
+                # Same content version — keep the previously-issued URLs to
+                # avoid CRM churn (no Zoho re-write below either).
+                links = previous_links
+                links["refreshed_at"] = links.get("issued_at")
+                logger.info(
+                    "Courseware assessment links reused (content unchanged) | job_id=%s record=%s",
+                    str(job.id),
+                    job.zoho_record_id,
+                )
+            else:
+                built = _build_assessment_urls(job.zoho_record_id)
+                links = {
+                    "pre_assessment_url": built["pre_assessment_url"],
+                    "post_assessment_url": built["post_assessment_url"],
+                    "pre_token": built["pre_token"],
+                    "post_token": built["post_token"],
+                    "content_hash": content_hash,
+                    "issued_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+                logger.info(
+                    "Courseware assessment links minted | job_id=%s record=%s pre=%s post=%s",
+                    str(job.id),
+                    job.zoho_record_id,
+                    links.get("pre_assessment_url") or "-",
+                    links.get("post_assessment_url") or "-",
+                )
+            payload_state["courseware_assessment_links"] = links
+            payload_state["pre_assessment_url"] = links.get("pre_assessment_url")
+            payload_state["post_assessment_url"] = links.get("post_assessment_url")
+
             if assessments_enabled:
                 if post_assessment_task is not None:
                     try:
@@ -719,6 +885,47 @@ async def process_slides_job(job_id) -> None:
             except Exception:
                 logger.exception(
                     "Zoho slides links write-back skipped due to error | job_id=%s zoho_record_id=%s",
+                    str(job.id),
+                    job.zoho_record_id,
+                )
+
+            # Idempotent: only push assessment URLs to Zoho when the content
+            # hash changed (or hasn't been pushed yet for this hash). Keeps
+            # the CRM field stable across slides re-runs that don't actually
+            # produce different content.
+            try:
+                links_state = payload_state.get("courseware_assessment_links") or {}
+                pushed_hash = str(links_state.get("zoho_pushed_content_hash") or "").strip()
+                pre_url = links_state.get("pre_assessment_url")
+                post_url = links_state.get("post_assessment_url")
+                should_push = (
+                    bool(pre_url or post_url)
+                    and (pushed_hash != content_hash)
+                )
+                if should_push:
+                    await update_assessment_links_field(
+                        zoho_record_id=job.zoho_record_id,
+                        pre_assessment_url=pre_url,
+                        post_assessment_url=post_url,
+                    )
+                    links_state["zoho_pushed_content_hash"] = content_hash
+                    links_state["zoho_pushed_at"] = time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                    )
+                    payload_state["courseware_assessment_links"] = links_state
+                    job.payload_json = json.dumps(payload_state)
+                    await db.commit()
+                else:
+                    logger.info(
+                        "Zoho assessment links push skipped (idempotent) | job_id=%s "
+                        "content_hash=%s pushed_hash=%s",
+                        str(job.id),
+                        content_hash[:16],
+                        pushed_hash[:16] or "-",
+                    )
+            except Exception:
+                logger.exception(
+                    "Zoho assessment links write-back skipped due to error | job_id=%s zoho_record_id=%s",
                     str(job.id),
                     job.zoho_record_id,
                 )
