@@ -128,6 +128,9 @@ async def generate_ppt(
         image_opts = _build_image_options_for_template()
         if image_opts:
             payload["imageOptions"] = image_opts
+        theme_id = str(getattr(settings, "GAMMA_THEME_ID", "") or "").strip()
+        if theme_id:
+            payload["themeId"] = theme_id
     else:
         payload = {
             "inputText": input_text,

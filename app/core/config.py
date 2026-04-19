@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # Optional Gamma template flow (POST /v1.0/generations/from-template)
     GAMMA_USE_TEMPLATE: bool = False
     GAMMA_TEMPLATE_ID: str = ""
+    # Optional output theme for from-template (themeId). Empty = workspace default theme.
+    # List themes: GET /v1.0/themes — see https://developers.gamma.app/guides/create-from-template-api-parameters-explained
+    GAMMA_THEME_ID: str = ""
     # Optional sharing/access controls for generated Gamma docs
     # See https://developers.gamma.app/guides/create-from-template-api-parameters-explained
     GAMMA_WORKSPACE_ACCESS: str = "edit"
@@ -158,6 +161,7 @@ class Settings(BaseSettings):
         "SLIDES_GENERATOR_MODEL",
         "SLIDES_VALIDATOR_MODEL",
         "GAMMA_TEMPLATE_ID",
+        "GAMMA_THEME_ID",
         "GAMMA_WORKSPACE_ACCESS",
         "GAMMA_EXTERNAL_ACCESS",
         "GAMMA_EMAIL_EDIT_LIST",
