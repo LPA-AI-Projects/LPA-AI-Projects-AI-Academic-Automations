@@ -50,10 +50,11 @@ class CourseOutlinePayload(BaseModel):
     # Narrative before lettered objectives (Learning Objective page).
     learning_objectives_intro: str = ""
     learning_objectives: list[Objective] = Field(default_factory=list)
-    # One or more paragraphs after lettered objectives (use \\n\\n between paragraphs).
+    # After lettered objectives: two paragraphs separated by \\n\\n (see brochure prompt for line targets).
     learning_objectives_closing: str = ""
     # Capability Impact page: intro before the 6 points, closing after (optional).
     capability_impact_intro: str = ""
     capability_impact: list[CapabilityImpact] = Field(default_factory=list)
+    # After the six rows: typically three paragraphs separated by \\n\\n (three sentences each).
     capability_impact_closing: str = ""
     modules: list[ModuleItem] = Field(default_factory=list)

@@ -39,6 +39,31 @@ def _brochure_strip_dashes(text: str | None) -> str:
     return s.strip()
 
 
+def _brochure_strip_dashes_preserve_paragraphs(text: str | None) -> str:
+    """
+    Same dash/whitespace cleanup as _brochure_strip_dashes per paragraph, but keeps blank-line breaks
+    (\\n\\n) so _build_objective_html / _build_impact_html can emit multiple <p> tags.
+    """
+    if text is None:
+        return ""
+    raw = str(text).strip()
+    if not raw:
+        return ""
+    blocks = re.split(r"(?:\r\n|\n)\s*(?:\r\n|\n)+", raw)
+    out: list[str] = []
+    for block in blocks:
+        b = block.strip()
+        if not b:
+            continue
+        for ch in _DASH_CHARS:
+            b = b.replace(ch, ", ")
+        b = re.sub(r",\s*,+", ", ", b)
+        b = re.sub(r"\s+", " ", b).strip()
+        if b:
+            out.append(b)
+    return "\n\n".join(out)
+
+
 def _brochure_details_table_blurb(text: str | None, *, max_sentences: int = 2, max_words: int = 58) -> str:
     """
     Key Benefits / Value Addition cells: match compact brochure samples (two short sentences, ~40-50 words).
@@ -131,28 +156,12 @@ def _slim_capability_row_description(text: str | None, max_words: int = 28) -> s
     return _compress_text(first, max_words)
 
 
-def _slim_capability_closing(text: str | None, max_sentences: int = 3, max_words: int = 88) -> str:
-    """Single closing paragraph: ignore extra paragraphs; cap sentences and words."""
-    s = _brochure_strip_dashes((text or "").strip())
-    if not s:
-        return ""
-    first_block = s.split("\n\n")[0].strip()
-    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", first_block) if p.strip()]
-    chosen: list[str] = []
-    for sentence in parts[:max_sentences]:
-        candidate = (" ".join(chosen + [sentence])).strip()
-        if chosen and len(candidate.split()) > max_words:
-            break
-        chosen.append(sentence)
-
-    # If even the first sentence exceeds max_words, keep it anyway (prefer a complete sentence).
-    if not chosen and parts:
-        chosen = [parts[0]]
-
-    merged = " ".join(chosen).strip()
-    if merged and merged[-1] not in ".!?":
-        merged += "."
-    return merged
+def _format_capability_impact_closing(text: str | None) -> str:
+    """
+    Preserve brochure copy as generated: multiple paragraphs separated by \\n\\n, no sentence/word caps.
+    Must use _brochure_strip_dashes_preserve_paragraphs — plain _brochure_strip_dashes collapses newlines.
+    """
+    return _brochure_strip_dashes_preserve_paragraphs(text)
 
 
 def _clean_learning_objective_title(title: str | None) -> str:
@@ -957,7 +966,7 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
     insight_html = "".join(insight_html_parts) or '<p class="insight-para">Content pending.</p>'
 
     lo_intro = _brochure_strip_dashes((payload.learning_objectives_intro or "").strip())
-    lo_closing = _brochure_strip_dashes((payload.learning_objectives_closing or "").strip())
+    lo_closing = _brochure_strip_dashes_preserve_paragraphs((payload.learning_objectives_closing or "").strip())
     objective_rows: list[tuple[str, str]] = []
     for o in payload.learning_objectives:
         t = _clean_learning_objective_title(o.title)
@@ -987,7 +996,7 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
     raw_ci = (payload.capability_impact_intro or "").strip()
     ci_intro = _brochure_details_table_blurb(raw_ci, max_sentences=2, max_words=58) if raw_ci else ""
     raw_cc = (payload.capability_impact_closing or "").strip()
-    ci_closing = _slim_capability_closing(raw_cc) if raw_cc else ""
+    ci_closing = _format_capability_impact_closing(raw_cc) if raw_cc else ""
     impact_rows: list[tuple[str, str]] = []
     for i in payload.capability_impact:
         impact_rows.append(
