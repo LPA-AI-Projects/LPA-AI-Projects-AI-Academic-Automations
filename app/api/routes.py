@@ -125,6 +125,17 @@ def split_courses(text: str) -> list[str]:
     return courses
 
 
+def _is_public_course_type(course_type: str | None) -> bool:
+    """
+    Public catalog / sheet lookup flow (no AI brochure PDF).
+
+    Accepts Zoho CRM picklist values such as **Public Batch**, plus legacy **public** / **pub**.
+    **Private Batch** and any other value use the private AI outline pipeline.
+    """
+    ct = str(course_type or "").strip().lower()
+    return ct in {"public", "pub", "public batch"}
+
+
 def parse_title(title: str) -> tuple[str, int | None]:
     match = re.match(r"(.+)_v(\d+)$", str(title or "").strip(), re.IGNORECASE)
     if match:
@@ -293,8 +304,7 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
         logger.warning("Invalid /courses payload: input_data is not an object")
         raise HTTPException(status_code=422, detail="input_data must be an object.")
 
-    course_type = str(input_data_payload.get("course_type") or "").strip().lower()
-    if course_type in {"public", "pub"}:
+    if _is_public_course_type(input_data_payload.get("course_type")):
         required_input_fields = ["course_name"]
     else:
         required_input_fields = [
@@ -404,8 +414,7 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             await db.commit()
             logger.info("Job status set to processing | job_id=%s", str(job_id))
 
-            course_type = str((input_data or {}).get("course_type") or "").strip().lower()
-            if course_type in ("public", "pub"):
+            if _is_public_course_type((input_data or {}).get("course_type")):
                 # Public: Google Sheet CSV lookup only — no Claude, no brochure PDF generation.
                 cn = str((input_data or {}).get("course_name") or "").strip()
                 pdf_url = await lookup_public_course_pdf_url(cn)
