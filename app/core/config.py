@@ -56,10 +56,17 @@ class Settings(BaseSettings):
     GAMMA_USE_TEMPLATE: bool = False
     GAMMA_TEMPLATE_ID: str = ""
     # Optional sharing/access controls for generated Gamma docs
+    # See https://developers.gamma.app/guides/create-from-template-api-parameters-explained
     GAMMA_WORKSPACE_ACCESS: str = "edit"
     GAMMA_EXTERNAL_ACCESS: str = "edit"
-    # Comma-separated emails to grant edit access, e.g. "a@x.com,b@y.com"
+    # Comma-separated emails to grant access, e.g. "a@x.com,b@y.com"
     GAMMA_EMAIL_EDIT_LIST: str = ""
+    # Access level for emailOptions.recipients (view|comment|edit|fullAccess). Empty = "edit".
+    GAMMA_EMAIL_OPTIONS_ACCESS: str = ""
+    # Optional imageOptions for POST /v1.0/generations/from-template only. All empty = omit (Gamma defaults).
+    GAMMA_IMAGE_SOURCE: str = ""
+    GAMMA_IMAGE_MODEL: str = ""
+    GAMMA_IMAGE_STYLE: str = ""
 
     # Slides multi-bot pipeline configuration
     SLIDES_PLANNER_MODEL: str = ""
@@ -154,6 +161,10 @@ class Settings(BaseSettings):
         "GAMMA_WORKSPACE_ACCESS",
         "GAMMA_EXTERNAL_ACCESS",
         "GAMMA_EMAIL_EDIT_LIST",
+        "GAMMA_EMAIL_OPTIONS_ACCESS",
+        "GAMMA_IMAGE_SOURCE",
+        "GAMMA_IMAGE_MODEL",
+        "GAMMA_IMAGE_STYLE",
         mode="before",
     )
     @classmethod

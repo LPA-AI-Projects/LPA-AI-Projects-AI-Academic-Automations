@@ -28,12 +28,30 @@ def _build_sharing_options() -> dict[str, Any]:
     }
     recipients = settings.get_gamma_email_edit_list()
     if recipients:
-        # Gamma docs use emailOptions as an object with recipients + access.
+        email_access = str(getattr(settings, "GAMMA_EMAIL_OPTIONS_ACCESS", "") or "").strip() or "edit"
         sharing["emailOptions"] = {
             "recipients": recipients,
-            "access": "edit",
+            "access": email_access,
         }
     return sharing
+
+
+def _build_image_options_for_template() -> dict[str, Any] | None:
+    """
+    Optional imageOptions for from-template only (see Gamma template API guide).
+    If GAMMA_IMAGE_SOURCE is unset, returns None and the request omits imageOptions.
+    """
+    source = str(getattr(settings, "GAMMA_IMAGE_SOURCE", "") or "").strip()
+    if not source:
+        return None
+    out: dict[str, Any] = {"source": source}
+    model = str(getattr(settings, "GAMMA_IMAGE_MODEL", "") or "").strip()
+    if model:
+        out["model"] = model
+    style = str(getattr(settings, "GAMMA_IMAGE_STYLE", "") or "").strip()
+    if style:
+        out["style"] = style
+    return out
 
 
 async def generate_ppt(
@@ -107,6 +125,9 @@ async def generate_ppt(
             "exportAs": "pptx",
             "sharingOptions": sharing_options,
         }
+        image_opts = _build_image_options_for_template()
+        if image_opts:
+            payload["imageOptions"] = image_opts
     else:
         payload = {
             "inputText": input_text,
