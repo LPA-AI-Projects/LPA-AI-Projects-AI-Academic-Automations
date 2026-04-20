@@ -289,24 +289,22 @@ def _auth_header(token: str) -> dict[str, str]:
     return {"Authorization": f"Zoho-oauthtoken {token}"}
 
 
-def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
-    """
-    Normalize Zoho File Upload field value into a small dict.
-    Handles list/dict/string formats seen across tenants/DCs.
-    """
-    item: Any = value
-    if isinstance(value, list):
-        item = value[0] if value else {}
+def _normalize_single_file_upload_item(item: Any) -> dict[str, Any]:
+    """Normalize one Zoho file-upload entry (dict or string id)."""
     if isinstance(item, str):
         return {
             "file_id": item.strip() or None,
             "file_token": None,
             "download_url": None,
             "file_name": None,
-            "raw": value,
         }
     if not isinstance(item, dict):
-        return {"file_id": None, "file_token": None, "download_url": None, "file_name": None, "raw": value}
+        return {
+            "file_id": None,
+            "file_token": None,
+            "download_url": None,
+            "file_name": None,
+        }
 
     file_id = (
         item.get("id")
@@ -315,8 +313,6 @@ def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
         or item.get("attachment_id")
         or item.get("$file_id")
     )
-    # Zoho File Upload fields commonly include an opaque file token in File_Id__s.
-    # This is often the correct identifier for /crm/v8/files endpoints.
     file_token = item.get("File_Id__s") or item.get("file_id__s")
     download_url = (
         item.get("download_url")
@@ -337,6 +333,41 @@ def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
         "file_token": str(file_token).strip() if file_token else None,
         "download_url": str(download_url).strip() if download_url else None,
         "file_name": str(file_name).strip() if file_name else None,
+    }
+
+
+def normalize_zoho_file_upload_value(value: Any) -> list[dict[str, Any]]:
+    """
+    All downloadable entries in a Zoho File Upload field (single or multi-file).
+    """
+    if value is None:
+        return []
+    if isinstance(value, list):
+        out: list[dict[str, Any]] = []
+        for it in value:
+            d = _normalize_single_file_upload_item(it)
+            if d.get("file_id") or d.get("file_token") or d.get("download_url"):
+                out.append(d)
+        return out
+    d = _normalize_single_file_upload_item(value)
+    if d.get("file_id") or d.get("file_token") or d.get("download_url"):
+        return [d]
+    return []
+
+
+def _extract_file_upload_candidate(value: Any) -> dict[str, Any]:
+    """
+    Normalize Zoho File Upload field value into a small dict (first file if multi).
+    Handles list/dict/string formats seen across tenants/DCs.
+    """
+    items = normalize_zoho_file_upload_value(value)
+    if items:
+        return {**items[0], "raw": value}
+    return {
+        "file_id": None,
+        "file_token": None,
+        "download_url": None,
+        "file_name": None,
         "raw": value,
     }
 
@@ -390,6 +421,53 @@ async def get_record_file_upload_field(
         str(raw_value)[:1200],
     )
     return normalized
+
+
+async def get_record_file_upload_files(
+    *,
+    module_api_name: str,
+    crm_record_id: str,
+    field_api_name: str,
+) -> list[dict[str, Any]]:
+    """
+    Same GET as ``get_record_file_upload_field``, but returns every file entry when the field is multi-file.
+    """
+    rid = (crm_record_id or "").strip()
+    mod = (module_api_name or "").strip("/")
+    field = (field_api_name or "").strip()
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    url = f"{base}/crm/v8/{mod}/{quote(rid, safe='')}?fields={quote(field, safe=',_')}"
+
+    logger.info(
+        "Zoho CRM fetch file field (multi) | module=%s record_id=%s field=%s",
+        mod,
+        rid,
+        field,
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url, headers=_auth_header(token))
+    if response.status_code >= 400:
+        logger.warning(
+            "Zoho CRM fetch file field failed | status=%s body=%s",
+            response.status_code,
+            (response.text or "")[:2000],
+        )
+        response.raise_for_status()
+
+    payload = response.json() if response.content else {}
+    records = payload.get("data") if isinstance(payload, dict) else None
+    record = records[0] if isinstance(records, list) and records else {}
+    raw_value = record.get(field) if isinstance(record, dict) else None
+    items = normalize_zoho_file_upload_value(raw_value)
+    logger.info(
+        "Zoho CRM file field (multi) | record_id=%s field=%s count=%s raw=%s",
+        rid,
+        field,
+        len(items),
+        str(raw_value)[:1200],
+    )
+    return items
 
 
 async def download_file_upload_content(

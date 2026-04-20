@@ -20,6 +20,7 @@ from app.services.slides_service import process_slides_job
 from app.services.zoho_crm import (
     download_file_upload_content,
     get_record_file_upload_field,
+    get_record_file_upload_files,
     get_slides_module_api_name,
 )
 from app.utils.logger import get_logger
@@ -46,6 +47,107 @@ auth = Depends(verify_api_key)
 
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
+
+
+def _lesson_saved_suffix(file_name: str | None, file_bytes: bytes) -> str:
+    fn = (file_name or "").lower()
+    for ext in (".pdf", ".docx", ".doc", ".pptx"):
+        if fn.endswith(ext):
+            return ext
+    if file_bytes.startswith(b"%PDF"):
+        return ".pdf"
+    if len(file_bytes) >= 2 and file_bytes[:2] == b"PK":
+        return ".docx"
+    return ".bin"
+
+
+async def _fetch_lp_ap_files_from_zoho(upload_dir: str, job_id: uuid.UUID, rid: str) -> list[str]:
+    """Download all files from Zoho LP/AP field (e.g. LP_AP_PDF_DOC) when form upload/URL omitted."""
+    field = "LP_AP_PDF_DOC"
+    metas = await get_record_file_upload_files(
+        module_api_name=get_slides_module_api_name(),
+        crm_record_id=rid,
+        field_api_name=field,
+    )
+    if not metas:
+        logger.info(
+            "Slides LP/AP Zoho field has no files | job_id=%s field=%s",
+            str(job_id),
+            field,
+        )
+        return []
+    out: list[str] = []
+    for i, meta in enumerate(metas):
+        file_bytes = await download_file_upload_content(
+            file_id=meta.get("file_id"),
+            file_token=meta.get("file_token"),
+            download_url=meta.get("download_url"),
+        )
+        ext = _lesson_saved_suffix(meta.get("file_name"), file_bytes)
+        fname = f"lesson_activity_{i}{ext}"
+        path = os.path.join(upload_dir, fname)
+        with open(path, "wb") as f:
+            f.write(file_bytes)
+        out.append(path)
+        logger.info(
+            "Slides LP/AP Zoho file saved | job_id=%s index=%s path=%s bytes=%s",
+            str(job_id),
+            i,
+            fname,
+            len(file_bytes),
+        )
+    return out
+
+
+def _instructor_saved_suffix(file_name: str | None, file_bytes: bytes) -> str:
+    """Prefer .pptx for Office ZIP packages (instructor decks); PDF if magic matches."""
+    fn = (file_name or "").lower()
+    for ext in (".pptx", ".ppt", ".pdf"):
+        if fn.endswith(ext):
+            return ext
+    if file_bytes.startswith(b"%PDF"):
+        return ".pdf"
+    if len(file_bytes) >= 2 and file_bytes[:2] == b"PK":
+        return ".pptx"
+    return ".pptx"
+
+
+async def _fetch_instructor_ppt_files_from_zoho(upload_dir: str, job_id: uuid.UUID, rid: str) -> list[str]:
+    """Download file(s) from Zoho Instructor_PPT when form upload/URL omitted."""
+    field = "Instructor_PPT"
+    metas = await get_record_file_upload_files(
+        module_api_name=get_slides_module_api_name(),
+        crm_record_id=rid,
+        field_api_name=field,
+    )
+    if not metas:
+        logger.info(
+            "Slides Instructor_PPT Zoho field has no files | job_id=%s field=%s",
+            str(job_id),
+            field,
+        )
+        return []
+    out: list[str] = []
+    for i, meta in enumerate(metas):
+        file_bytes = await download_file_upload_content(
+            file_id=meta.get("file_id"),
+            file_token=meta.get("file_token"),
+            download_url=meta.get("download_url"),
+        )
+        ext = _instructor_saved_suffix(meta.get("file_name"), file_bytes)
+        fname = f"instructor_{i}{ext}"
+        path = os.path.join(upload_dir, fname)
+        with open(path, "wb") as f:
+            f.write(file_bytes)
+        out.append(path)
+        logger.info(
+            "Slides Instructor_PPT Zoho file saved | job_id=%s index=%s path=%s bytes=%s",
+            str(job_id),
+            i,
+            fname,
+            len(file_bytes),
+        )
+    return out
 
 
 def _normalize_assessment_difficulty(raw: str | None) -> str | None:
@@ -428,15 +530,37 @@ async def generate_slides(
         "lesson_activity.pdf",
         False,
     )
+    lesson_paths: list[str] = [lesson_path] if lesson_path else []
+    if not lesson_paths:
+        try:
+            lesson_paths = await _fetch_lp_ap_files_from_zoho(upload_dir, job_id, rid)
+        except Exception:
+            logger.exception(
+                "Slides LP/AP fetch from Zoho failed (optional) | job_id=%s zoho_record_id=%s",
+                str(job_id),
+                rid,
+            )
     instructor_path = await _resolve_input_path(instructor_ppt, instructor_ppt_url, "instructor.pptx", False)
+    instructor_paths: list[str] = [instructor_path] if instructor_path else []
+    if not instructor_paths:
+        try:
+            instructor_paths = await _fetch_instructor_ppt_files_from_zoho(upload_dir, job_id, rid)
+        except Exception:
+            logger.exception(
+                "Slides Instructor_PPT fetch from Zoho failed (optional) | job_id=%s zoho_record_id=%s",
+                str(job_id),
+                rid,
+            )
 
     ipp = (instructor_ppt_priority or "").strip().lower()
     pad = _normalize_assessment_difficulty(pre_assessment_difficulty)
     post_pad = _normalize_assessment_difficulty(post_assessment_difficulty)
     payload = {
         "outline_pdf_path": outline_path,
-        "lesson_plan_and_activity_plan_pdf_path": lesson_path,
-        "instructor_ppt_path": instructor_path,
+        "lesson_plan_and_activity_plan_pdf_path": lesson_paths[0] if lesson_paths else None,
+        "lesson_plan_and_activity_plan_pdf_paths": lesson_paths,
+        "instructor_ppt_path": instructor_paths[0] if instructor_paths else None,
+        "instructor_ppt_paths": instructor_paths,
         "course_name": (course_name or "").strip() or "course",
         "program_name": (program_name or "").strip() or None,
         "instructor_ppt_priority": ipp if ipp in ("primary", "supplement") else None,
@@ -446,10 +570,11 @@ async def generate_slides(
         "post_assessment_num_questions": post_assessment_num_questions,
     }
     logger.info(
-        "Slides job payload prepared | job_id=%s has_lesson=%s has_instructor_ppt=%s",
+        "Slides job payload prepared | job_id=%s has_lesson=%s lesson_files=%s has_instructor_ppt=%s",
         str(job_id),
-        bool(lesson_path),
-        bool(instructor_path),
+        bool(lesson_paths),
+        len(lesson_paths),
+        bool(instructor_paths),
     )
 
     try:

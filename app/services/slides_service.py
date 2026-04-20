@@ -15,6 +15,7 @@ from app.core.storage_paths import ppts_dir
 from app.core.database import AsyncSessionLocal
 from app.models.job import CourseJob
 from app.services.document_extractor import (
+    extract_lesson_document_text_async,
     extract_pdf_module_rows_async,
     extract_pdf_text_async,
     extract_ppt_text_async,
@@ -30,6 +31,24 @@ from app.services.zoho_crm import update_assessment_links_field, update_slides_l
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+async def _extract_instructor_file_text_async(blob: bytes, basename: str) -> str:
+    """PPTX/PPT via python-pptx; fallback to PDF/DOCX-style extraction."""
+    lower = basename.lower()
+    likely_pptx = lower.endswith((".pptx", ".ppt")) or (
+        len(blob) >= 2 and blob[:2] == b"PK" and not lower.endswith(".pdf")
+    )
+    if likely_pptx:
+        try:
+            return await extract_ppt_text_async(blob)
+        except Exception:
+            logger.warning(
+                "instructor deck not valid as PPTX; trying generic extract | basename=%s",
+                basename,
+            )
+    return await extract_lesson_document_text_async(blob, basename)
+
 
 MAX_SLIDES_PER_BATCH = 60
 CACHE_VERSION = "slides_cache_v3"
@@ -332,8 +351,22 @@ async def process_slides_job(job_id) -> None:
                 payload = {}
 
             outline_path = payload.get("outline_pdf_path")
-            lesson_path = payload.get("lesson_plan_and_activity_plan_pdf_path")
-            instructor_path = payload.get("instructor_ppt_path")
+            raw_lp_paths = payload.get("lesson_plan_and_activity_plan_pdf_paths")
+            lesson_paths: list[str] = []
+            if isinstance(raw_lp_paths, list):
+                lesson_paths = [str(p).strip() for p in raw_lp_paths if str(p).strip()]
+            if not lesson_paths:
+                lp_one = payload.get("lesson_plan_and_activity_plan_pdf_path")
+                if lp_one and str(lp_one).strip():
+                    lesson_paths = [str(lp_one).strip()]
+            raw_inst_paths = payload.get("instructor_ppt_paths")
+            instructor_paths: list[str] = []
+            if isinstance(raw_inst_paths, list):
+                instructor_paths = [str(p).strip() for p in raw_inst_paths if str(p).strip()]
+            if not instructor_paths:
+                ip_one = payload.get("instructor_ppt_path")
+                if ip_one and str(ip_one).strip():
+                    instructor_paths = [str(ip_one).strip()]
             instructor_ppt_priority = _normalize_instructor_ppt_priority(payload.get("instructor_ppt_priority"))
             course_name = _safe_course_name(payload.get("course_name"))
             program_name = str(payload.get("program_name") or "").strip() or None
@@ -404,22 +437,46 @@ async def process_slides_job(job_id) -> None:
             )
 
             lesson_text = None
-            if lesson_path and os.path.exists(lesson_path):
-                with open(lesson_path, "rb") as f:
-                    lesson_text = await extract_pdf_text_async(f.read())
+            if lesson_paths:
+                parts: list[str] = []
+                for idx, lp in enumerate(lesson_paths):
+                    if not lp or not os.path.exists(lp):
+                        continue
+                    with open(lp, "rb") as f:
+                        blob = f.read()
+                    chunk = await extract_lesson_document_text_async(blob, os.path.basename(lp))
+                    if chunk and chunk.strip():
+                        parts.append(
+                            f"--- LP/AP document {idx + 1}: {os.path.basename(lp)} ---\n{chunk.strip()}"
+                        )
+                if parts:
+                    lesson_text = "\n\n".join(parts)
                 logger.info(
-                    "Slides extracted lesson/activity | job_id=%s chars=%s",
+                    "Slides extracted lesson/activity | job_id=%s files=%s chars=%s",
                     str(job.id),
+                    len(parts),
                     len(lesson_text or ""),
                 )
 
             instructor_text = None
-            if instructor_path and os.path.exists(instructor_path):
-                with open(instructor_path, "rb") as f:
-                    instructor_text = await extract_ppt_text_async(f.read())
+            if instructor_paths:
+                inst_parts: list[str] = []
+                for idx, ip in enumerate(instructor_paths):
+                    if not ip or not os.path.exists(ip):
+                        continue
+                    with open(ip, "rb") as f:
+                        blob = f.read()
+                    chunk = await _extract_instructor_file_text_async(blob, os.path.basename(ip))
+                    if chunk and chunk.strip():
+                        inst_parts.append(
+                            f"--- Instructor deck {idx + 1}: {os.path.basename(ip)} ---\n{chunk.strip()}"
+                        )
+                if inst_parts:
+                    instructor_text = "\n\n".join(inst_parts)
                 logger.info(
-                    "Slides extracted instructor ppt text | job_id=%s chars=%s",
+                    "Slides extracted instructor ppt text | job_id=%s files=%s chars=%s",
                     str(job.id),
+                    len(inst_parts),
                     len(instructor_text or ""),
                 )
 

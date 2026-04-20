@@ -218,6 +218,53 @@ async def extract_ppt_text_async(file_bytes: bytes) -> str:
     return await asyncio.to_thread(extract_ppt_text, file_bytes)
 
 
+def extract_docx_text(file_bytes: bytes) -> str:
+    """Plain text from a Word .docx (paragraphs only)."""
+    from docx import Document
+
+    doc = Document(BytesIO(file_bytes))
+    parts = [p.text.strip() for p in doc.paragraphs if p.text and p.text.strip()]
+    return _join_nonempty(parts)
+
+
+async def extract_docx_text_async(file_bytes: bytes) -> str:
+    return await asyncio.to_thread(extract_docx_text, file_bytes)
+
+
+def _lesson_suffix_lower(name: str | None) -> str:
+    n = (name or "").strip().lower()
+    if "." in n:
+        return n.rsplit(".", 1)[-1]
+    return ""
+
+
+async def extract_lesson_document_text_async(file_bytes: bytes, filename_hint: str | None = None) -> str:
+    """
+    Lesson / activity documents from Zoho may be PDF or DOCX (or mis-labeled bytes).
+    """
+    fn = _lesson_suffix_lower(filename_hint)
+
+    if fn == "pdf" or file_bytes.startswith(b"%PDF"):
+        return await extract_pdf_text_async(file_bytes)
+    if fn == "docx":
+        return await extract_docx_text_async(file_bytes)
+    if fn == "pptx":
+        return await extract_ppt_text_async(file_bytes)
+    if len(file_bytes) >= 2 and file_bytes[:2] == b"PK":
+        try:
+            return await extract_docx_text_async(file_bytes)
+        except Exception:
+            try:
+                return await extract_ppt_text_async(file_bytes)
+            except Exception:
+                pass
+    try:
+        return await extract_pdf_text_async(file_bytes)
+    except Exception:
+        logger.warning("lesson_document: unsupported or corrupt file | hint=%s", filename_hint)
+        return ""
+
+
 def extract_pdf_module_rows(file_bytes: bytes) -> list[dict[str, str]]:
     """
     Extract module rows from table-like course outlines (Sno | Modules | Topics | Exercises).
