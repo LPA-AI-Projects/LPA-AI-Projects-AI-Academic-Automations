@@ -484,14 +484,44 @@ async def generate_slides(
                     crm_record_id=rid,
                     field_api_name="outline",
                 )
+                _has_download_url = bool(outline_meta.get("download_url"))
+                _has_file_id = bool(outline_meta.get("file_id"))
+                _has_file_token = bool(outline_meta.get("file_token"))
                 logger.info(
                     "Slides Zoho outline metadata | job_id=%s file_id=%s file_token=%s has_download_url=%s file_name=%s",
                     str(job_id),
                     outline_meta.get("file_id"),
                     outline_meta.get("file_token"),
-                    bool(outline_meta.get("download_url")),
+                    _has_download_url,
                     outline_meta.get("file_name"),
                 )
+                if not _has_download_url and not _has_file_id and not _has_file_token:
+                    logger.error(
+                        "Slides Zoho outline has no download URL and no file identifier; cannot download | "
+                        "job_id=%s zoho_record_id=%s file_name=%s",
+                        str(job_id),
+                        rid,
+                        outline_meta.get("file_name"),
+                    )
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"The outline file '{outline_meta.get('file_name') or 'unknown'}' in Zoho CRM "
+                            "does not have a download URL or a file identifier (file_id/file_token). "
+                            "The file may not have finished uploading, may have been deleted, or Zoho has "
+                            "not yet generated a download URL for it. Please re-upload the file in Zoho CRM "
+                            "and try again."
+                        ),
+                    )
+                if not _has_download_url:
+                    logger.info(
+                        "Slides Zoho outline has no download_url; will attempt token/ID-based download | "
+                        "job_id=%s file_id=%s file_token=%s file_name=%s",
+                        str(job_id),
+                        outline_meta.get("file_id"),
+                        outline_meta.get("file_token"),
+                        outline_meta.get("file_name"),
+                    )
                 file_bytes = await download_file_upload_content(
                     file_id=outline_meta.get("file_id"),
                     file_token=outline_meta.get("file_token"),
@@ -506,6 +536,8 @@ async def generate_slides(
                     len(file_bytes),
                 )
                 return os.path.join(upload_dir, filename)
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.exception(
                     "Slides failed to fetch outline from Zoho CRM | job_id=%s zoho_record_id=%s",
