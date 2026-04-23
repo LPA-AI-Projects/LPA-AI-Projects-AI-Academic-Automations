@@ -113,16 +113,9 @@ def _build_pdf_url(file_path: str) -> str:
     return f"{settings.BASE_URL}/pdfs/{filename}"
 
 
-def split_courses(text: str) -> list[str]:
-    if not text:
-        return []
-    parts = re.split(r"[\n,]+", text)
-    courses: list[str] = []
-    for part in parts:
-        cleaned = re.sub(r"^\s*\d+\s*[\.\-\)]\s*", "", str(part or "").strip())
-        if cleaned:
-            courses.append(cleaned)
-    return courses
+def _normalize_single_course_name(text: str | None) -> str:
+    """Single-course mode: treat the raw field as one course title."""
+    return str(text or "").strip()
 
 
 def _is_public_course_type(course_type: str | None) -> bool:
@@ -134,86 +127,6 @@ def _is_public_course_type(course_type: str | None) -> bool:
     """
     ct = str(course_type or "").strip().lower()
     return ct in {"public", "pub", "public batch"}
-
-
-def _is_product_section_duration(value: str | None) -> bool:
-    s = str(value or "").strip().lower()
-    if not s:
-        return False
-    return "refer to product section" in s
-
-
-def _looks_like_duration(value: str | None) -> bool:
-    s = str(value or "").strip().lower()
-    if not s:
-        return False
-    return any(tok in s for tok in ("day", "days", "week", "weeks", "hour", "hours", "hr", "hrs"))
-
-
-def _parse_product_row_line(line: str) -> tuple[str, str, str] | None:
-    """
-    Parse one row formatted as:
-      Product Name, No of Pax, Duration
-    Product names may contain commas, so parse from the right-most two columns.
-    """
-    raw = str(line or "").strip()
-    if not raw:
-        return None
-    m = re.match(r"^\s*(.+?)\s*,\s*([^,]+?)\s*,\s*([^,]+?)\s*$", raw)
-    if not m:
-        return None
-    return m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
-
-
-def _should_parse_product_rows(raw: str, duration_hint: str | None) -> bool:
-    if _is_product_section_duration(duration_hint):
-        return True
-    lines = [ln.strip() for ln in str(raw or "").splitlines() if ln.strip()]
-    if not lines:
-        return False
-    # Auto-detect when each line looks like: Product Name, No of Pax, Duration
-    matched = 0
-    for line in lines:
-        parsed = _parse_product_row_line(line)
-        if parsed is None:
-            continue
-        _, pax, dur = parsed
-        if pax and re.search(r"\d", pax) and _looks_like_duration(dur):
-            matched += 1
-    return matched == len(lines)
-
-
-def parse_course_rows(course_text: str, duration_hint: str | None) -> list[dict[str, str]]:
-    """
-    Supports two formats:
-    1) Existing: "Course A, Course B" or newline list -> [{"course_name": "..."}]
-    2) Zoho product rows (when duration says 'Refer to Product Section'):
-       "Product Name, No of Pax, Duration" per line.
-    """
-    raw = str(course_text or "").strip()
-    if not raw:
-        return []
-
-    if _should_parse_product_rows(raw, duration_hint):
-        rows: list[dict[str, str]] = []
-        for line in [ln.strip() for ln in raw.splitlines() if ln.strip()]:
-            parsed = _parse_product_row_line(line)
-            if parsed is None:
-                continue
-            course_name, no_of_pax, duration = parsed
-            if course_name:
-                rows.append(
-                    {
-                        "course_name": course_name,
-                        "no_of_pax": no_of_pax,
-                        "duration": duration,
-                    }
-                )
-        if rows:
-            return rows
-
-    # Default existing behavior (backward-compatible)
-    return [{"course_name": c} for c in split_courses(raw)]
 
 
 def parse_title(title: str) -> tuple[str, int | None]:
@@ -746,19 +659,9 @@ async def generate_course(
     ),
 ):
     req = await _parse_generate_request(request)
-    course_rows = parse_course_rows(
-        str(req.input_data.course_name or ""),
-        str(req.input_data.duration or ""),
-    )
-    if not course_rows:
+    course_name = _normalize_single_course_name(req.input_data.course_name)
+    if not course_name:
         raise HTTPException(status_code=422, detail="input_data.course_name is required.")
-    if sync and len(course_rows) > 1:
-        logger.warning(
-            "sync=true with multiple courses is not supported; queueing async jobs instead | count=%s zoho_record_id=%s",
-            len(course_rows),
-            req.zoho_record_id,
-        )
-        sync = False
     logger.info("Queueing course generation | zoho_record_id=%s sync=%s", req.zoho_record_id, sync)
     # Debug visibility for Zoho webhook mappings: log full request payload and top-level input keys.
     logger.info("Incoming /courses payload: %s", json.dumps(req.model_dump(mode="json"), ensure_ascii=False))
@@ -768,55 +671,33 @@ async def generate_course(
     )
     jobs_with_input: list[tuple[uuid.UUID, dict]] = []
     try:
-        # Use one short-lived DB session per job row to avoid transaction overlap
-        # during multi-course queueing.
-        for row in course_rows:
-            course_name = str(row.get("course_name") or "").strip()
-            if not course_name:
-                continue
-            input_copy = req.input_data.model_copy()
-            input_copy.course_name = course_name
-            row_pax = str(row.get("no_of_pax") or "").strip()
-            row_duration = str(row.get("duration") or "").strip()
-            if row_pax:
-                input_copy.no_of_pax = row_pax
-            if row_duration:
-                input_copy.duration = row_duration
-            input_for_job = _input_data_dict_for_job(input_copy)
-            async with AsyncSessionLocal() as db:
-                async with db.begin():
-                    job = CourseJob(
-                        zoho_record_id=req.zoho_record_id,
-                        status="pending",
-                        payload_json=json.dumps(input_for_job, ensure_ascii=False),
-                    )
-                    db.add(job)
-                await db.refresh(job)
-                jobs_with_input.append((job.id, input_for_job))
-                logger.info(
-                    "Course generation job created | job_id=%s zoho_record_id=%s course_name=%s no_of_pax=%s duration=%s",
-                    str(job.id),
-                    req.zoho_record_id,
-                    course_name,
-                    row_pax,
-                    row_duration,
+        input_copy = req.input_data.model_copy()
+        input_copy.course_name = course_name
+        input_for_job = _input_data_dict_for_job(input_copy)
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                job = CourseJob(
+                    zoho_record_id=req.zoho_record_id,
+                    status="pending",
+                    payload_json=json.dumps(input_for_job, ensure_ascii=False),
                 )
-                logger.info(
-                    "Course generation context | job_id=%s department=%s designation=%s level_of_training=%s company_name=%s",
-                    str(job.id),
-                    str(input_for_job.get("department") or ""),
-                    str(input_for_job.get("designation") or ""),
-                    str(input_for_job.get("level_of_training") or ""),
-                    str(input_for_job.get("company_name") or ""),
-                )
-                logger.info(
-                    "Course generation context | job_id=%s department=%s designation=%s level_of_training=%s company_name=%s",
-                    str(job.id),
-                    str(input_for_job.get("department") or ""),
-                    str(input_for_job.get("designation") or ""),
-                    str(input_for_job.get("level_of_training") or ""),
-                    str(input_for_job.get("company_name") or ""),
-                )
+                db.add(job)
+            await db.refresh(job)
+            jobs_with_input.append((job.id, input_for_job))
+            logger.info(
+                "Course generation job created | job_id=%s zoho_record_id=%s course_name=%s",
+                str(job.id),
+                req.zoho_record_id,
+                course_name,
+            )
+            logger.info(
+                "Course generation context | job_id=%s department=%s designation=%s level_of_training=%s company_name=%s",
+                str(job.id),
+                str(input_for_job.get("department") or ""),
+                str(input_for_job.get("designation") or ""),
+                str(input_for_job.get("level_of_training") or ""),
+                str(input_for_job.get("company_name") or ""),
+            )
     except (SQLAlchemyError, OSError, Exception):
         logger.exception("Database error while creating job")
         raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
@@ -844,25 +725,17 @@ async def generate_course(
         )
         logger.info("Background task scheduled | job_id=%s", str(job_id))
     rid = req.zoho_record_id
-    if len(jobs_with_input) == 1:
-        job_id = jobs_with_input[0][0]
-        body = CourseOutlineQueuedResponse(
-            job_id=job_id,
-            zoho_record_id=rid,
-            status="pending",
-            message="Course outline generation queued.",
-            polling={
-                "by_zoho_record_id": f"/api/v1/courses/{rid}/outline-job",
-            },
-        )
-        content = body.model_dump(mode="json")
-    else:
-        content = {
-            "message": "Multiple course outlines queued",
-            "zoho_record_id": rid,
-            "job_ids": [str(job_id) for job_id, _ in jobs_with_input],
-            "polling": {"by_zoho_record_id": f"/api/v1/courses/{rid}/outline-job"},
-        }
+    job_id = jobs_with_input[0][0]
+    body = CourseOutlineQueuedResponse(
+        job_id=job_id,
+        zoho_record_id=rid,
+        status="pending",
+        message="Course outline generation queued.",
+        polling={
+            "by_zoho_record_id": f"/api/v1/courses/{rid}/outline-job",
+        },
+    )
+    content = body.model_dump(mode="json")
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content=content,

@@ -260,6 +260,132 @@ def _batch_slides(slides: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return [slides[i : i + MAX_SLIDES_PER_BATCH] for i in range(0, len(slides), MAX_SLIDES_PER_BATCH)]
 
 
+async def _merge_coursejob_gamma_progress_payload(
+    job_id,
+    *,
+    module_gamma_links: list[dict[str, str | None]],
+    gamma_batch_links: list[str],
+    gamma_generation_ids: list[str],
+    gamma_request_log: list[dict[str, Any]],
+) -> None:
+    """Persist Gamma link progress using a fresh DB session (safe from parallel module tasks)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(CourseJob).where(CourseJob.id == job_id))
+        row = result.scalars().first()
+        if row is None:
+            return
+        base: dict[str, Any] = {}
+        try:
+            parsed = json.loads(row.payload_json or "{}")
+            if isinstance(parsed, dict):
+                base = parsed
+        except Exception:
+            base = {}
+        base["module_gamma_links"] = list(module_gamma_links)
+        base["gamma_batch_links"] = list(gamma_batch_links)
+        base["gamma_generation_ids"] = list(gamma_generation_ids)
+        base["gamma_request_log"] = list(gamma_request_log)
+        row.payload_json = json.dumps(base)
+        await session.commit()
+
+
+async def _gamma_render_and_record_module_batches(
+    *,
+    job_id,
+    cache_dir: str,
+    module_index: int,
+    module_name: str,
+    module_slides: list[dict[str, Any]],
+    gamma_batch_links: list[str],
+    gamma_generation_ids: list[str],
+    gamma_request_log: list[dict[str, Any]],
+    module_gamma_links: list[dict[str, str | None]],
+    lock: asyncio.Lock,
+    job_log_id: str,
+) -> None:
+    """
+    Call Gamma for all batches of one module, then append results and commit payload
+    (under ``lock``). Network I/O runs outside the lock where possible.
+    """
+    if not module_slides:
+        return
+    module_slides_for_gamma = [_build_module_cover_slide(module_name), *module_slides]
+    module_batches = _batch_slides(module_slides_for_gamma)
+    logger.info(
+        "Gamma rendering module | job_id=%s module=%s module_index=%s slides=%s batches=%s",
+        job_log_id,
+        module_name,
+        module_index,
+        len(module_slides_for_gamma),
+        len(module_batches),
+    )
+
+    batch_out: list[tuple[int, list[dict[str, Any]], dict[str, Any]]] = []
+    for bi, slides_batch in enumerate(module_batches, start=1):
+        batch_input_path = os.path.join(cache_dir, f"module_{module_index}_batch_{bi}_input.txt")
+        with open(batch_input_path, "w", encoding="utf-8") as f:
+            f.write(_gamma_input_from_batch(slides_batch))
+
+        logger.info(
+            "Gamma rendering batch | job_id=%s module_index=%s batch_index=%s slides=%s",
+            job_log_id,
+            module_index,
+            bi,
+            len(slides_batch),
+        )
+        gamma_result = await generate_ppt(slides_batch, include_export_bytes=False)
+        batch_out.append((bi, slides_batch, gamma_result))
+
+    async with lock:
+        for bi, _slides_batch, gamma_result in batch_out:
+            req_payload = gamma_result.get("request_payload")
+            if not isinstance(req_payload, dict):
+                req_payload = {}
+            gamma_payload_dump_path = os.path.join(
+                cache_dir, f"module_{module_index}_batch_{bi}_gamma_request.json"
+            )
+            with open(gamma_payload_dump_path, "w", encoding="utf-8") as f:
+                json.dump(req_payload, f, ensure_ascii=False, indent=2)
+            gamma_request_log.append(
+                {
+                    "module_index": module_index,
+                    "module_name": module_name,
+                    "request_payload": req_payload,
+                }
+            )
+            gamma_url = str(gamma_result.get("gamma_url") or "").strip()
+            editable_gamma_url = str(gamma_result.get("editable_gamma_url") or "").strip()
+            generation_id = str(gamma_result.get("generation_id") or "").strip()
+            if gamma_url:
+                gamma_batch_links.append(gamma_url)
+            if generation_id:
+                gamma_generation_ids.append(generation_id)
+
+            drive_link: str | None = None
+            drive_file_id: str | None = None
+            suffix = f" Batch {bi}" if len(module_batches) > 1 else ""
+            module_gamma_links.append(
+                {
+                    "module_index": str(module_index),
+                    "link_name": f"Module {module_index}{suffix}",
+                    "module_name": module_name,
+                    "gamma_link": gamma_url or None,
+                    "editable_gamma_link": editable_gamma_url or gamma_url or None,
+                    "drive_link": drive_link,
+                    "file_id": drive_file_id,
+                }
+            )
+
+        await _merge_coursejob_gamma_progress_payload(
+            job_id,
+            module_gamma_links=module_gamma_links,
+            gamma_batch_links=gamma_batch_links,
+            gamma_generation_ids=gamma_generation_ids,
+            gamma_request_log=gamma_request_log,
+        )
+        await asyncio.sleep(0)
+
+
 def _build_assessment_urls(zoho_record_id: str) -> dict[str, str | None]:
     """
     Build absolute Vercel-frontend URLs for pre/post assessment links.
@@ -511,6 +637,12 @@ async def process_slides_job(job_id) -> None:
             max_per_module = max(min_per_module, int(getattr(settings, "SLIDES_MAX_PER_MODULE", 20) or 20))
             max_loops = max(1, int(getattr(settings, "SLIDES_VALIDATION_MAX_LOOPS", 2) or 2))
             module_parallelism = max(1, int(getattr(settings, "SLIDES_MODULE_PARALLELISM", 3) or 3))
+            gamma_batch_links: list[str] = []
+            gamma_generation_ids: list[str] = []
+            gamma_request_log: list[dict[str, Any]] = []
+            module_gamma_links: list[dict[str, str | None]] = []
+            gamma_lock = asyncio.Lock()
+            gamma_completed_with_pipeline = False
             if os.path.exists(validated_cache_path):
                 with open(validated_cache_path, "r", encoding="utf-8") as f:
                     cached = json.load(f)
@@ -543,9 +675,11 @@ async def process_slides_job(job_id) -> None:
                     len(module_entries),
                 )
             else:
+                gamma_completed_with_pipeline = True
                 await _set_status(db, job, "planning")
                 await _set_status(db, job, "generating_slides")
                 await _set_status(db, job, "validating")
+                await _set_status(db, job, "gamma_rendering")
 
                 logger.info(
                     "Module pipeline parallel start | job_id=%s modules=%s parallelism=%s",
@@ -554,6 +688,8 @@ async def process_slides_job(job_id) -> None:
                     module_parallelism,
                 )
                 semaphore = asyncio.Semaphore(module_parallelism)
+                job_pk = job.id
+                job_log = str(job.id)
 
                 async def _run_single_module(mi: int, mod: dict[str, str]) -> tuple[int, str, list[dict[str, Any]]]:
                     module_name = str(mod.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
@@ -582,30 +718,55 @@ async def process_slides_job(job_id) -> None:
                         )
                     logger.info(
                         "Module pipeline completed | job_id=%s module=%s slides=%s seconds=%.2f",
-                        str(job.id),
+                        job_log,
                         module_name,
                         len(validated_module),
                         time.time() - t0,
                     )
+                    await _gamma_render_and_record_module_batches(
+                        job_id=job_pk,
+                        cache_dir=cache_dir,
+                        module_index=mi,
+                        module_name=module_name,
+                        module_slides=validated_module,
+                        gamma_batch_links=gamma_batch_links,
+                        gamma_generation_ids=gamma_generation_ids,
+                        gamma_request_log=gamma_request_log,
+                        module_gamma_links=module_gamma_links,
+                        lock=gamma_lock,
+                        job_log_id=job_log,
+                    )
                     return mi, module_name, validated_module
 
-                module_tasks = [
-                    asyncio.create_task(_run_single_module(mi, mod))
-                    for mi, mod in enumerate(modules, start=1)
-                ]
-                module_results = await asyncio.gather(*module_tasks)
+                task_handles: list[asyncio.Task[tuple[int, str, list[dict[str, Any]]]]] = []
+                try:
+                    async with asyncio.TaskGroup() as tg:
+                        for mi, mod in enumerate(modules, start=1):
+                            task_handles.append(tg.create_task(_run_single_module(mi, mod)))
+                except* BaseException as eg:
+                    logger.error(
+                        "Module pipeline task failed | job_id=%s errors=%s",
+                        job_log,
+                        [type(e).__name__ for e in eg.exceptions],
+                    )
+                    raise eg.exceptions[0] from eg
+                module_results = sorted((h.result() for h in task_handles), key=lambda r: r[0])
 
                 for _, module_name, validated_module in module_results:
                     module_entries.append({"module_name": module_name, "slides": validated_module})
-                    job.payload_json = json.dumps(
-                        {
-                            "progress": {
-                                "module": module_name,
-                                "generated": len(validated_module),
-                                "total": len(validated_module),
-                            }
-                        }
-                    )
+                    await db.refresh(job)
+                    try:
+                        base_prog = json.loads(job.payload_json or "{}")
+                        if not isinstance(base_prog, dict):
+                            base_prog = {}
+                    except Exception:
+                        base_prog = {}
+                    base_prog["progress"] = {
+                        "module": module_name,
+                        "generated": len(validated_module),
+                        "total": len(validated_module),
+                    }
+                    job.payload_json = json.dumps(base_prog)
                     await db.commit()
 
                 if not module_entries:
@@ -681,100 +842,34 @@ async def process_slides_job(job_id) -> None:
                         post_q_count,
                     )
 
-            await _set_status(db, job, "gamma_rendering")
+            if not gamma_completed_with_pipeline:
+                await _set_status(db, job, "gamma_rendering")
             ppt_paths: list[str] = []
-            gamma_batch_links: list[str] = []
-            gamma_generation_ids: list[str] = []
-            gamma_request_log: list[dict[str, Any]] = []
             google_batch_links: list[str] = []
             google_batch_file_ids: list[str] = []
-            module_gamma_links: list[dict[str, str | None]] = []
             # In this branch, Drive upload is intentionally disabled.
             drive_folder_id: str | None = None
             drive_folder_link: str | None = None
 
-            for mi, module in enumerate(module_entries, start=1):
-                module_name = str(module.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
-                module_slides = module.get("slides") if isinstance(module.get("slides"), list) else []
-                if not module_slides:
-                    continue
-                # Ensure each module presentation starts with a clear module heading slide.
-                module_slides_for_gamma = [_build_module_cover_slide(module_name), *module_slides]
-                module_batches = _batch_slides(module_slides_for_gamma)
-                logger.info(
-                    "Gamma rendering module | job_id=%s module=%s module_index=%s slides=%s batches=%s",
-                    str(job.id),
-                    module_name,
-                    mi,
-                    len(module_slides_for_gamma),
-                    len(module_batches),
-                )
+            if not gamma_completed_with_pipeline:
+                for mi, module in enumerate(module_entries, start=1):
+                    module_name = str(module.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
+                    module_slides = module.get("slides") if isinstance(module.get("slides"), list) else []
+                    await _gamma_render_and_record_module_batches(
+                        job_id=job.id,
+                        cache_dir=cache_dir,
+                        module_index=mi,
+                        module_name=module_name,
+                        module_slides=module_slides,
+                        gamma_batch_links=gamma_batch_links,
+                        gamma_generation_ids=gamma_generation_ids,
+                        gamma_request_log=gamma_request_log,
+                        module_gamma_links=module_gamma_links,
+                        lock=gamma_lock,
+                        job_log_id=str(job.id),
+                    )
 
-                for bi, slides_batch in enumerate(module_batches, start=1):
-                    batch_input_path = os.path.join(cache_dir, f"module_{mi}_batch_{bi}_input.txt")
-                    with open(batch_input_path, "w", encoding="utf-8") as f:
-                        f.write(_gamma_input_from_batch(slides_batch))
-
-                    logger.info(
-                        "Gamma rendering batch | job_id=%s module_index=%s batch_index=%s slides=%s",
-                        str(job.id),
-                        mi,
-                        bi,
-                        len(slides_batch),
-                    )
-                    gamma_result = await generate_ppt(slides_batch, include_export_bytes=False)
-                    req_payload = gamma_result.get("request_payload")
-                    if not isinstance(req_payload, dict):
-                        req_payload = {}
-                    # Persist the exact JSON payload sent to Gamma for each module batch.
-                    gamma_payload_dump_path = os.path.join(
-                        cache_dir, f"module_{mi}_batch_{bi}_gamma_request.json"
-                    )
-                    with open(gamma_payload_dump_path, "w", encoding="utf-8") as f:
-                        json.dump(req_payload, f, ensure_ascii=False, indent=2)
-                    gamma_request_log.append(
-                        {
-                            "module_index": mi,
-                            "module_name": module_name,
-                            "request_payload": req_payload,
-                        }
-                    )
-                    gamma_url = str(gamma_result.get("gamma_url") or "").strip()
-                    editable_gamma_url = str(gamma_result.get("editable_gamma_url") or "").strip()
-                    generation_id = str(gamma_result.get("generation_id") or "").strip()
-                    if gamma_url:
-                        gamma_batch_links.append(gamma_url)
-                    if generation_id:
-                        gamma_generation_ids.append(generation_id)
-
-                    drive_link: str | None = None
-                    drive_file_id: str | None = None
-                    suffix = f" Batch {bi}" if len(module_batches) > 1 else ""
-                    module_gamma_links.append(
-                        {
-                            "module_index": str(mi),
-                            "link_name": f"Module {mi}{suffix}",
-                            "module_name": module_name,
-                            "gamma_link": gamma_url or None,
-                            "editable_gamma_link": editable_gamma_url or gamma_url or None,
-                            "drive_link": drive_link,
-                            "file_id": drive_file_id,
-                        }
-                    )
-                # Persist links incrementally so polling shows completed modules even if later modules fail.
-                try:
-                    payload_progress = json.loads(job.payload_json or "{}")
-                    if not isinstance(payload_progress, dict):
-                        payload_progress = {}
-                except Exception:
-                    payload_progress = {}
-                payload_progress["module_gamma_links"] = module_gamma_links
-                payload_progress["gamma_batch_links"] = gamma_batch_links
-                payload_progress["gamma_generation_ids"] = gamma_generation_ids
-                payload_progress["gamma_request_log"] = gamma_request_log
-                job.payload_json = json.dumps(payload_progress)
-                await db.commit()
-                await asyncio.sleep(0)
+            await db.refresh(job)
 
             # Keep status progression unchanged; merging deferred.
             await _set_status(db, job, "merging")

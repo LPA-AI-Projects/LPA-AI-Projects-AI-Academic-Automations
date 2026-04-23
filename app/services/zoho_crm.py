@@ -644,7 +644,7 @@ async def update_assessment_links_field(
     field_name = (
         field_api_name
         or settings.ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME
-        or "Assessment_Links"
+        or "Links_for_Pre_Post"
     ).strip()
     url = f"{base}/crm/v8/{module_api}"
     headers = {

@@ -90,5 +90,24 @@ async def generate_slide(
         timeout_s=120.0,
         model_override=model,
     )
-    return _safe_slide_json(raw)
+    try:
+        return _safe_slide_json(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning(
+            "Slide JSON parse failed; retrying once | title=%s err=%s",
+            title,
+            exc,
+        )
+        repair_prompt = (
+            user_prompt
+            + "\n\nYour previous reply was not valid JSON. "
+            "Return ONLY one JSON object with keys title, bullets, notes, visual. No markdown fences."
+        )
+        raw2 = await ai.generate_text_completion(
+            system_prompt=SLIDE_GENERATION_SYSTEM_PROMPT,
+            user_prompt=repair_prompt,
+            timeout_s=120.0,
+            model_override=model,
+        )
+        return _safe_slide_json(raw2)
 

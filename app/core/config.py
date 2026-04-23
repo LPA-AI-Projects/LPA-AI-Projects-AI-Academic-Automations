@@ -66,7 +66,8 @@ class Settings(BaseSettings):
     GAMMA_EMAIL_EDIT_LIST: str = ""
     # Access level for emailOptions.recipients (view|comment|edit|fullAccess). Empty = "edit".
     GAMMA_EMAIL_OPTIONS_ACCESS: str = ""
-    # Optional imageOptions for POST /v1.0/generations/from-template only. All empty = omit (Gamma defaults).
+    # Optional imageOptions for POST /v1.0/generations/from-template: only model/style are sent;
+    # ``source`` is not allowed by Gamma in template mode (this field is ignored for from-template).
     GAMMA_IMAGE_SOURCE: str = ""
     GAMMA_IMAGE_MODEL: str = ""
     GAMMA_IMAGE_STYLE: str = ""
@@ -101,7 +102,7 @@ class Settings(BaseSettings):
     # Per-IP and per-record-id rate limit (requests / minute) on public assessment generation.
     ASSESSMENT_RATE_LIMIT_PER_MIN: int = 12
     # Zoho CRM field API name used to store pre/post assessment URLs (separate from Gamma links).
-    ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME: str = "Assessment_Links"
+    ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME: str = "Links_for_Pre_Post"
     # When true, on slides job completion store a copy of validated_slides.json content into the
     # CourseJob.payload_json (under "validated_slides_blob") so multi-replica deploys can serve
     # post-assessment generation without sharing the on-disk cache.

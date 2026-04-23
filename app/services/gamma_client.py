@@ -38,20 +38,20 @@ def _build_sharing_options() -> dict[str, Any]:
 
 def _build_image_options_for_template() -> dict[str, Any] | None:
     """
-    Optional imageOptions for from-template only (see Gamma template API guide).
-    If GAMMA_IMAGE_SOURCE is unset, returns None and the request omits imageOptions.
+    Optional imageOptions for POST /v1.0/generations/from-template only.
+
+    Gamma rejects ``source`` in template mode (e.g. ``source should not exist``).
+    Allowed keys are effectively ``model`` and ``style`` only; ``GAMMA_IMAGE_SOURCE``
+    is ignored here and applies only to non-template generation if we add it later.
     """
-    source = str(getattr(settings, "GAMMA_IMAGE_SOURCE", "") or "").strip()
-    if not source:
-        return None
-    out: dict[str, Any] = {"source": source}
+    out: dict[str, Any] = {}
     model = str(getattr(settings, "GAMMA_IMAGE_MODEL", "") or "").strip()
     if model:
         out["model"] = model
     style = str(getattr(settings, "GAMMA_IMAGE_STYLE", "") or "").strip()
     if style:
         out["style"] = style
-    return out
+    return out or None
 
 
 async def generate_ppt(
