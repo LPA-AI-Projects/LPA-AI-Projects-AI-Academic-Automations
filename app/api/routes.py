@@ -311,7 +311,6 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
             "company_name",
             "course_name",
             "department",
-            "designation",
         ]
 
     missing_required = [
@@ -413,6 +412,17 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             job.error = None
             await db.commit()
             logger.info("Job status set to processing | job_id=%s", str(job_id))
+            try:
+                await update_outline_module_record_fields(
+                    zoho_record_id=zoho_record_id,
+                    fields={"Status": "In Progress"},
+                )
+            except Exception:
+                logger.exception(
+                    "Zoho Status update failed (In Progress) | job_id=%s zoho_record_id=%s",
+                    str(job_id),
+                    zoho_record_id,
+                )
 
             if _is_public_course_type((input_data or {}).get("course_type")):
                 # Public: Google Sheet CSV lookup only — no Claude, no brochure PDF generation.
@@ -458,7 +468,7 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                     try:
                         await update_outline_module_record_fields(
                             zoho_record_id=zoho_record_id,
-                            fields={field_name: match.final_curriculum_url},
+                            fields={field_name: pdf_url},
                         )
                     except Exception:
                         logger.exception(
@@ -476,6 +486,17 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                     str(job_id),
                     pdf_url,
                 )
+                try:
+                    await update_outline_module_record_fields(
+                        zoho_record_id=zoho_record_id,
+                        fields={"Status": "Completed"},
+                    )
+                except Exception:
+                    logger.exception(
+                        "Zoho Status update failed (Completed) | job_id=%s zoho_record_id=%s",
+                        str(job_id),
+                        zoho_record_id,
+                    )
                 await zoho_notify_course_outline_job_finished(
                     job,
                     created_version_number,
@@ -572,6 +593,17 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 created_version_number,
                 pdf_url,
             )
+            try:
+                await update_outline_module_record_fields(
+                    zoho_record_id=zoho_record_id,
+                    fields={"Status": "Completed"},
+                )
+            except Exception:
+                logger.exception(
+                    "Zoho Status update failed (Completed) | job_id=%s zoho_record_id=%s",
+                    str(job_id),
+                    zoho_record_id,
+                )
             await zoho_notify_course_outline_job_finished(
                 job,
                 created_version_number,
@@ -582,6 +614,17 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 job.status = "failed"
                 job.error = str(e)[:4000]
                 await db.commit()
+                try:
+                    await update_outline_module_record_fields(
+                        zoho_record_id=zoho_record_id,
+                        fields={"Status": "Failed to create - Try Again"},
+                    )
+                except Exception:
+                    logger.exception(
+                        "Zoho Status update failed (Failed to create) | job_id=%s zoho_record_id=%s",
+                        str(job_id),
+                        zoho_record_id,
+                    )
                 await zoho_notify_course_outline_job_finished(
                     job,
                     created_version_number,
