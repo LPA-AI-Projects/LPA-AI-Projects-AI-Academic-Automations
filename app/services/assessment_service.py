@@ -35,6 +35,12 @@ MAX_CURRICULUM_CHARS = 100_000
 
 
 def normalize_difficulty(raw: str | None) -> str:
+    """
+    Map free-text difficulty to ``basic`` | ``intermediate`` | ``advanced``.
+
+    Zoho CRM picklists often use **Beginner** / **Intermediate** / **Advanced**; those
+    match after lowercasing (``beginner`` → ``basic``).
+    """
     s = (raw or "").strip().lower()
     if s in ("basic", "beginner", "fundamental", "entry"):
         return "basic"

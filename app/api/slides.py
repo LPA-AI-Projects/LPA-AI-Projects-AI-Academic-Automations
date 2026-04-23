@@ -17,8 +17,10 @@ from app.core.database import get_db
 from app.core.storage_paths import slides_upload_dir
 from app.models.job import CourseJob
 from app.services.slides_service import process_slides_job
+from app.services.assessment_service import post_difficulty_from_pre
 from app.services.zoho_crm import (
     download_file_upload_content,
+    fetch_slides_assessment_levels_from_zoho,
     get_record_file_upload_field,
     get_record_file_upload_files,
     get_slides_module_api_name,
@@ -151,7 +153,7 @@ async def _fetch_instructor_ppt_files_from_zoho(upload_dir: str, job_id: uuid.UU
 
 
 def _normalize_assessment_difficulty(raw: str | None) -> str | None:
-    """Map form input to basic | intermediate | advanced, or None if unset/invalid."""
+    """Map form input (or Zoho-style labels) to basic | intermediate | advanced, or None if unset/invalid."""
     s = (raw or "").strip().lower()
     if s in ("beginner", "fundamental", "entry"):
         s = "basic"
@@ -333,18 +335,17 @@ async def generate_slides(
     pre_assessment_difficulty: str | None = Form(
         None,
         description=(
-            'Optional default difficulty for the on-demand pre-assessment link '
-            '("basic" | "intermediate" | "advanced"). Used when the learner URL '
-            'does not pass ?difficulty=.'
+            'Optional override for pre-assessment difficulty (basic | intermediate | advanced). '
+            "If omitted, the app reads the CRM picklist ``Pre_Assessment_Level`` on the slides "
+            "module record (when Zoho OAuth is configured); otherwise the learner URL / env default applies."
         ),
     ),
     post_assessment_difficulty: str | None = Form(
         None,
         description=(
-            'Optional default difficulty for the on-demand post-assessment link '
-            '("basic" | "intermediate" | "advanced"). Used when the learner URL '
-            'does not pass ?difficulty=. If omitted, post difficulty is derived '
-            'from pre_assessment_difficulty (one level higher) or the global default.'
+            'Optional override for post-assessment difficulty. If omitted, reads ``Post_Assessment_Level`` '
+            "from the same CRM record when OAuth is configured; if that is empty too, derives one level "
+            "above pre when pre is known."
         ),
     ),
     pre_assessment_num_questions: int | None = Form(
@@ -555,6 +556,13 @@ async def generate_slides(
     ipp = (instructor_ppt_priority or "").strip().lower()
     pad = _normalize_assessment_difficulty(pre_assessment_difficulty)
     post_pad = _normalize_assessment_difficulty(post_assessment_difficulty)
+    zoho_pre, zoho_post = await fetch_slides_assessment_levels_from_zoho(rid)
+    if pad is None:
+        pad = zoho_pre
+    if post_pad is None:
+        post_pad = zoho_post
+    if post_pad is None and pad:
+        post_pad = post_difficulty_from_pre(pad)
     payload = {
         "outline_pdf_path": outline_path,
         "lesson_plan_and_activity_plan_pdf_path": lesson_paths[0] if lesson_paths else None,

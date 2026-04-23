@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     ASSESSMENT_RATE_LIMIT_PER_MIN: int = 12
     # Zoho CRM field API name used to store pre/post assessment URLs (separate from Gamma links).
     ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME: str = "Links_for_Pre_Post"
+    # Picklists on the slides CRM record (e.g. Beginner / Intermediate / Advanced) when POST /slides omits difficulty.
+    ZOHO_CRM_PRE_ASSESSMENT_LEVEL_FIELD_API_NAME: str = "Pre_Assessment_Level"
+    ZOHO_CRM_POST_ASSESSMENT_LEVEL_FIELD_API_NAME: str = "Post_Assessment_Level"
     # When true, on slides job completion store a copy of validated_slides.json content into the
     # CourseJob.payload_json (under "validated_slides_blob") so multi-replica deploys can serve
     # post-assessment generation without sharing the on-disk cache.
@@ -151,6 +154,8 @@ class Settings(BaseSettings):
         "ZOHO_CRM_SLIDES_MODULE_API_NAME",
         "ZOHO_CRM_SLIDES_LINKS_FIELD_API_NAME",
         "ZOHO_CRM_ASSESSMENT_LINKS_FIELD_API_NAME",
+        "ZOHO_CRM_PRE_ASSESSMENT_LEVEL_FIELD_API_NAME",
+        "ZOHO_CRM_POST_ASSESSMENT_LEVEL_FIELD_API_NAME",
         "ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME",
         "PUBLIC_COURSE_SHEET_CSV_URL",
         "PUBLIC_COURSE_CATALOG_CSV_URL",

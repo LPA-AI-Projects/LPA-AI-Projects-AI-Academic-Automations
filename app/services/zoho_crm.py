@@ -61,6 +61,120 @@ def get_slides_module_api_name() -> str:
     )
 
 
+def _scalar_crm_field_value(raw: Any) -> str | None:
+    """Normalize Zoho picklist / text field payloads to a display string or None."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        return s or None
+    if isinstance(raw, dict):
+        for key in ("name", "display_label", "display_value", "value"):
+            v = raw.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+            if isinstance(v, dict):
+                inner = v.get("name") or v.get("display_value") or v.get("value")
+                if isinstance(inner, str) and inner.strip():
+                    return inner.strip()
+    s = str(raw).strip()
+    return s or None
+
+
+async def get_record_field_values(
+    *,
+    module_api_name: str,
+    crm_record_id: str,
+    field_api_names: list[str],
+) -> dict[str, str | None]:
+    """
+    GET ``/crm/v8/{module}/{id}?fields=a,b,c`` and return requested field values.
+
+    Works for picklists, text, and other scalar-ish fields (not file upload blobs).
+    """
+    rid = (crm_record_id or "").strip()
+    mod = (module_api_name or "").strip("/")
+    names = [str(n).strip() for n in field_api_names if str(n).strip()]
+    if not rid or not mod or not names:
+        return {n: None for n in names}
+
+    token = await get_access_token()
+    base = settings.ZOHO_CRM_API_BASE.rstrip("/")
+    fields_param = ",".join(names)
+    url = f"{base}/crm/v8/{mod}/{quote(rid, safe='')}?fields={quote(fields_param, safe=',_')}"
+    logger.info(
+        "Zoho CRM fetch record fields | module=%s record_id=%s fields=%s",
+        mod,
+        rid,
+        fields_param,
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url, headers=_auth_header(token))
+    if response.status_code >= 400:
+        logger.warning(
+            "Zoho CRM fetch record fields failed | status=%s body=%s",
+            response.status_code,
+            (response.text or "")[:2000],
+        )
+        response.raise_for_status()
+
+    payload = response.json() if response.content else {}
+    records = payload.get("data") if isinstance(payload, dict) else None
+    record = records[0] if isinstance(records, list) and records else {}
+    if not isinstance(record, dict):
+        record = {}
+    out: dict[str, str | None] = {}
+    for n in names:
+        out[n] = _scalar_crm_field_value(record.get(n))
+    return out
+
+
+async def fetch_slides_assessment_levels_from_zoho(crm_record_id: str) -> tuple[str | None, str | None]:
+    """
+    Read pre/post assessment difficulty from CRM picklists on the slides module record.
+
+    Expected picklist labels (case-insensitive): **Beginner**, **Intermediate**, **Advanced**
+    → stored in the job as ``basic``, ``intermediate``, ``advanced``.
+
+    Returns ``(pre, post)`` or ``None`` for each side when unset / OAuth not configured /
+    request failed. Non-empty CRM text is passed through ``normalize_difficulty``.
+    """
+    if not _crm_configured():
+        return None, None
+
+    from app.services.assessment_service import normalize_difficulty
+
+    pre_field = (settings.ZOHO_CRM_PRE_ASSESSMENT_LEVEL_FIELD_API_NAME or "Pre_Assessment_Level").strip()
+    post_field = (settings.ZOHO_CRM_POST_ASSESSMENT_LEVEL_FIELD_API_NAME or "Post_Assessment_Level").strip()
+    module = get_slides_module_api_name()
+    try:
+        vals = await get_record_field_values(
+            module_api_name=module,
+            crm_record_id=crm_record_id,
+            field_api_names=[pre_field, post_field],
+        )
+    except Exception:
+        logger.exception(
+            "Zoho CRM assessment level fields fetch failed | record_id=%s",
+            crm_record_id,
+        )
+        return None, None
+
+    raw_pre = vals.get(pre_field)
+    raw_post = vals.get(post_field)
+    pre_out = normalize_difficulty(raw_pre) if raw_pre else None
+    post_out = normalize_difficulty(raw_post) if raw_post else None
+    logger.info(
+        "Zoho CRM assessment levels | record_id=%s raw_pre=%r raw_post=%r mapped_pre=%s mapped_post=%s",
+        crm_record_id,
+        raw_pre,
+        raw_post,
+        pre_out,
+        post_out,
+    )
+    return pre_out, post_out
+
+
 async def update_outline_module_record_fields(
     *,
     zoho_record_id: str,
