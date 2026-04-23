@@ -10,6 +10,10 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Keep Gamma prompts within typical 16:9 card height (template + export warnings).
+GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE = 5
+GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS = 320
+
 
 class GammaNotConfigured(RuntimeError):
     pass
@@ -72,20 +76,26 @@ async def generate_ppt(
     base = str(getattr(settings, "GAMMA_BASE_URL")).rstrip("/")
     api_key = str(getattr(settings, "GAMMA_API_KEY")).strip()
 
-    # Build a compact, deterministic inputText for Gamma.
+    # Build a compact, deterministic inputText for Gamma (dense decks overflow 16:9 cards).
     lines: list[str] = []
+    cap = GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE
     for i, s in enumerate(slides_batch, start=1):
         title = str(s.get("title") or "").strip()
         bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
         notes = str(s.get("notes") or "").strip()
+        if len(notes) > GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS:
+            notes = notes[:GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS].rsplit(" ", 1)[0].strip() + "…"
         visual = str(s.get("visual") or "").strip()
         lines.append(f"Slide {i}: {title}")
-        for b in bullets[:8]:
+        for b in bullets[:cap]:
             lines.append(f"- {str(b).strip()}")
         if notes:
-            lines.append(f"Speaker notes: {notes}")
+            lines.append(f"Speaker notes (presenter only; do not paste verbatim as body text): {notes}")
         if visual:
-            lines.append(f"Visual suggestion: {visual}")
+            lines.append(
+                "Required on-slide graphic (photo, AI illustration, or diagram — not an empty box): "
+                f"{visual}"
+            )
         lines.append("")  # blank line separator
 
     input_text = "\n".join(lines).strip()
@@ -102,14 +112,17 @@ async def generate_ppt(
         "Do not merge sections. Do not skip sections. "
         "Do not summarize into fewer slides. Keep slide count very close to requested."
     )
-    # Visual consistency: standard deck layout (Gamma applies theme; these instructions bias uniformity).
+    # Gamma warns when card content exceeds 16:9 — bias toward shorter on-slide copy + real graphics.
     visual_layout_instructions = (
-        "Visual and layout: Use a standard widescreen presentation aspect (16:9). "
-        "Keep every slide visually consistent: same margins/padding, aligned title area, "
-        "readable body text size, and balanced whitespace. "
-        "Avoid cramming too much text on one slide; split content rather than shrinking fonts. "
-        "Use a single coherent theme and color palette across all slides. "
-        "Keep bullet counts similar per slide where possible for a uniform rhythm."
+        "Layout (16:9): Each card must fit without vertical overflow or tiny illegible text. "
+        "Title + at most 4–5 short bullets per slide (roughly ≤12 words per bullet). "
+        "Do not duplicate speaker notes on the slide. Prefer splitting ideas across slides over shrinking fonts. "
+        "Graphics: Every 'Required on-slide graphic' line must result in a visible asset — AI illustration, "
+        "photo, or a clear diagram/infographic (flowchart, matrix, cycle, icon set, simple chart). "
+        "Do not leave image or diagram regions as empty grey placeholders; if the template has a side or "
+        "lower panel for visuals, use it. Match diagram style to the description (e.g. 2x2 grid = four-quadrant "
+        "graphic with labels). Use consistent iconography across the deck. "
+        "Keep margins, title band, and body rhythm consistent; one coherent palette."
     )
     merged_instructions = f"{strict_instructions} {visual_layout_instructions}"
     if (additional_instructions or "").strip():

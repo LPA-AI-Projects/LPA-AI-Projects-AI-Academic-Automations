@@ -94,6 +94,12 @@ def validate_slides(
             s["notes"] = ""
         if "visual" not in s or not isinstance(s.get("visual"), str):
             s["visual"] = ""
+        vis = str(s.get("visual") or "").strip()
+        if not vis and "placeholder" not in title.lower():
+            s["visual"] = (
+                "Vector-style diagram or structured infographic (flowchart, matrix, steps, or labeled icons) "
+                f"that illustrates the slide topic; not a blank placeholder."
+            )
         cleaned.append(s)
 
     # Activity slide checks

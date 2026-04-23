@@ -25,7 +25,14 @@ Rules:
 - title must match the requested slide title closely
 - bullets: 3-6 bullets for content slides; 2-5 bullets for activity slides
 - notes: short instructor notes (1-4 sentences)
-- visual: describe a suggested visual (icon/chart/diagram/photo), not a URL
+- visual: required, 1-2 sentences, not a URL. Name a concrete graphic to render on the slide:
+  - For frameworks, comparisons, or categorization: say the diagram type (e.g. 2x2 matrix, Venn, pyramid,
+    swimlane, cycle/steps, before/after).
+  - For processes: flowchart, numbered path, or decision tree.
+  - For data: simple bar/line/pie (describe what is compared), or icon row with labels.
+  - For people/roles: personas or org-style icons, not stock photos of faces unless essential.
+  - Section dividers: minimal (band, large numeral, or single hero shape) — still describe it.
+  Avoid vague "nice image"; always specify diagram/infographic/illustration style.
 """
 
 

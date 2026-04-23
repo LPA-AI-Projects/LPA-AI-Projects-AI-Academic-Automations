@@ -25,7 +25,11 @@ from app.services.assessment_service import (
     DEFAULT_NUM_QUESTIONS,
     generate_assessment_questions_from_text,
 )
-from app.services.gamma_client import generate_ppt
+from app.services.gamma_client import (
+    GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE,
+    GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS,
+    generate_ppt,
+)
 from app.services.slides_graph import run_module_slides_pipeline
 from app.services.zoho_crm import update_assessment_links_field, update_slides_links_field
 from app.utils.logger import get_logger
@@ -95,25 +99,32 @@ def _normalize_instructor_ppt_priority(raw: str | None) -> str:
 
 
 def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
+    """Mirror gamma_client.generate_ppt text shaping (bullet cap, note trim) for on-disk batch dumps."""
     lines: list[str] = []
+    cap = GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE
+    max_notes = GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS
     for i, s in enumerate(slides_batch, start=1):
         title = str(s.get("title") or "").strip()
         bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
         notes = str(s.get("notes") or "").strip()
+        if len(notes) > max_notes:
+            notes = notes[:max_notes].rsplit(" ", 1)[0].strip() + "…"
         visual = str(s.get("visual") or "").strip()
         lines.append(f"Slide {i}: {title}")
-        for b in bullets[:8]:
+        for b in bullets[:cap]:
             lines.append(f"- {str(b).strip()}")
         if notes:
-            lines.append(f"Speaker notes: {notes}")
+            lines.append(f"Speaker notes (presenter only): {notes}")
         if visual:
-            lines.append(f"Visual suggestion: {visual}")
+            lines.append(
+                "Required on-slide graphic (photo, diagram, or infographic — not an empty box): " + visual
+            )
         lines.append("")
     return "\n".join(lines).strip()
 
 
 def _build_module_cover_slide(module_name: str) -> dict[str, Any]:
-    heading = str(module_name or "Module").strip() or "Module"
+    heading = _sanitize_module_display_name(module_name) or "Module"
     return {
         "title": heading,
         "bullets": [f"Overview and key outcomes for {heading}"],
@@ -128,6 +139,19 @@ def _safe_filename(name: str | None) -> str:
     for ch in forbidden:
         cleaned = cleaned.replace(ch, "_")
     return cleaned[:120] or "module"
+
+
+def _sanitize_module_display_name(name: str | None) -> str:
+    """
+    Single-line module heading for logs, Gamma, and prompts.
+
+    Outline/PDF extraction can inject newlines inside titles; parallel tasks also make
+    multi-line names look truncated when log lines interleave — collapsing whitespace avoids both issues.
+    """
+    s = str(name or "").strip()
+    if not s:
+        return ""
+    return re.sub(r"\s+", " ", s)
 
 
 def _extract_outline_modules(outline_text: str, *, program_name: str | None = None) -> list[dict[str, str]]:
@@ -161,7 +185,7 @@ def _extract_outline_modules(outline_text: str, *, program_name: str | None = No
             start = m.start()
             end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
             module_num = int(m.group(2))
-            module_title = str((m.group(3) or "")).strip(" :-\u2013\u2014\t")
+            module_title = _sanitize_module_display_name(str((m.group(3) or "")).strip(" :-\u2013\u2014\t"))
             heading = f"Module {module_num}" + (f": {module_title}" if module_title else "")
             body = text[start:end].strip()
             modules.append({"module_name": heading, "module_text": body})
@@ -218,7 +242,7 @@ def _extract_outline_modules(outline_text: str, *, program_name: str | None = No
                         break
                     if len(title_lines) >= 3:
                         break
-                title = " ".join(title_lines).strip(" :-\u2013\u2014\t")
+                title = _sanitize_module_display_name(" ".join(title_lines).strip(" :-\u2013\u2014\t"))
                 heading = f"Module {row_num}" + (f": {title}" if title else "")
                 table_modules.append({"module_name": heading, "module_text": body})
 
@@ -692,7 +716,9 @@ async def process_slides_job(job_id) -> None:
                 job_log = str(job.id)
 
                 async def _run_single_module(mi: int, mod: dict[str, str]) -> tuple[int, str, list[dict[str, Any]]]:
-                    module_name = str(mod.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
+                    module_name = _sanitize_module_display_name(str(mod.get("module_name") or "").strip()) or (
+                        f"Module {mi}"
+                    )
                     module_text = str(mod.get("module_text") or "").strip()
                     mod_instructor = (
                         slice_instructor_ppt_for_module(
@@ -853,7 +879,9 @@ async def process_slides_job(job_id) -> None:
 
             if not gamma_completed_with_pipeline:
                 for mi, module in enumerate(module_entries, start=1):
-                    module_name = str(module.get("module_name") or f"Module {mi}").strip() or f"Module {mi}"
+                    module_name = _sanitize_module_display_name(
+                        str(module.get("module_name") or "").strip()
+                    ) or (f"Module {mi}")
                     module_slides = module.get("slides") if isinstance(module.get("slides"), list) else []
                     await _gamma_render_and_record_module_batches(
                         job_id=job.id,
