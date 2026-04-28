@@ -165,11 +165,12 @@ class GenerateCourseRequest(BaseModel):
 
 class RefineCourseRequest(BaseModel):
     feedback: str = Field(..., min_length=10, description="Feedback for refinement")
-    course_name: Optional[str] = Field(
-        None,
+    course_name: str = Field(
+        ...,
+        min_length=1,
         validation_alias=AliasChoices("course_name", "title", "note_title"),
         description=(
-            "Which course track to refine when zoho_record_id has multiple outlines. "
+            "Required: which course track to refine for this zoho_record_id. "
             "Must match the per-job payload course_name from generation. "
             "Also accepted as JSON keys title or note_title (same as /courses/refine)."
         ),

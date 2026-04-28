@@ -769,6 +769,11 @@ async def refine_course(
 
     requested_title = str((req.course_name or "")).strip()
     requested_course_name, requested_version = parse_title(requested_title)
+    if not requested_course_name:
+        raise HTTPException(
+            status_code=422,
+            detail="course_name is required for refine requests (aliases: title, note_title).",
+        )
     logger.info(
         "Refine requested | zoho_record_id=%s title=%s parsed_course=%s requested_version=%s",
         rid,
@@ -801,26 +806,22 @@ async def refine_course(
             raise HTTPException(status_code=404, detail="Course not found for this zoho_record_id.")
 
         target_course_id: uuid.UUID | None = None
-        # Prefer explicit title mapping against payload_json.course_name.
-        if requested_course_name:
-            for job in jobs:
-                jname = _job_payload_course_name(job)
-                if jname and jname.strip().lower() == requested_course_name.strip().lower():
-                    target_course_id = job.course_id
-                    break
-            if target_course_id is None:
-                logger.warning(
-                    "Refine failed: no matching course_name track found | zoho_record_id=%s requested=%s",
-                    rid,
-                    requested_course_name,
-                )
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No generated course track found for title '{requested_course_name}'.",
-                )
-        else:
-            # No title provided: use latest generated course track for this Zoho record.
-            target_course_id = jobs[0].course_id
+        # course_name is required: always map explicitly against payload_json.course_name.
+        for job in jobs:
+            jname = _job_payload_course_name(job)
+            if jname and jname.strip().lower() == requested_course_name.strip().lower():
+                target_course_id = job.course_id
+                break
+        if target_course_id is None:
+            logger.warning(
+                "Refine failed: no matching course_name track found | zoho_record_id=%s requested=%s",
+                rid,
+                requested_course_name,
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"No generated course track found for title '{requested_course_name}'.",
+            )
 
         course_uuid = target_course_id
         if course_uuid is None:
