@@ -42,12 +42,15 @@ Return ONLY valid JSON with this shape:
 
 Rules:
 {priority_rules.strip()}
-- Generate 10-20 slides per module
-- Hard maximum: 20
-- Minimum target: 10 (if content allows)
+- Generate 15-25 slides per module
+- Hard maximum: 25
+- Minimum target: 15 (if content allows)
 - Include exactly 1 summary slide
 - Use activity slides only when LP/AP context exists
 - Avoid duplicate or near-duplicate slides
+- Prefer diagram/visual-oriented slides where appropriate (frameworks, process flows, comparisons, matrices).
+- 16:9 fit-first planning: if a topic is dense, split it into continuation slides
+  (e.g., "Risk Assessment - Part 1" / "Risk Assessment - Part 2") instead of overloading one slide.
 - title must be short and specific (max 10 words)
 - type must be one of: "content", "activity", "summary"
 """

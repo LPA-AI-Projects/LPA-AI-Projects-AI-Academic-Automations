@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     SLIDES_GENERATOR_MODEL: str = ""
     SLIDES_VALIDATOR_MODEL: str = ""
     SLIDES_VALIDATION_MAX_LOOPS: int = 2
-    SLIDES_MIN_PER_MODULE: int = 10
-    SLIDES_MAX_PER_MODULE: int = 20
+    SLIDES_MIN_PER_MODULE: int = 15
+    SLIDES_MAX_PER_MODULE: int = 25
     SLIDES_MODULE_PARALLELISM: int = 3
     # How strongly instructor PPT text influences planning/generation: "supplement" (default) or "primary".
     SLIDES_INSTRUCTOR_PPT_PRIORITY: str = "supplement"

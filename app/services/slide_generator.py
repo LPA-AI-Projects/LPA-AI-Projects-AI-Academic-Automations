@@ -30,6 +30,9 @@ Rules:
 - title must match the requested slide title closely
 - bullets: 3-6 bullets for content slides; 2-5 bullets for activity slides
 - notes: short instructor notes (1-4 sentences)
+- Keep on-slide density suitable for 16:9: concise bullets, no paragraph walls.
+  If content is too dense for one slide, keep only the core points for this slide
+  and indicate continuation in notes (the planner can split into follow-up slides).
 - visual: required, 1-2 sentences, not a URL. Name a concrete graphic to render on the slide:
   - For frameworks, comparisons, or categorization: say the diagram type (e.g. 2x2 matrix, Venn, pyramid,
     swimlane, cycle/steps, before/after).
@@ -38,6 +41,7 @@ Rules:
   - For people/roles: personas or org-style icons, not stock photos of faces unless essential.
   - Section dividers: minimal (band, large numeral, or single hero shape) — still describe it.
   Avoid vague "nice image"; always specify diagram/infographic/illustration style.
+- Prefer diagrams/infographics over plain decorative images whenever content can be structured.
 - In JSON string values, never place a raw double-quote (") in the middle of a string — it breaks JSON.
   Rephrase (use single quotes in English) or use \\" for an internal double-quote.
 """

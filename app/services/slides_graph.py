@@ -16,7 +16,11 @@ from langgraph.graph import END, StateGraph
 
 from app.services.slide_generator import generate_slide
 from app.services.slide_planner import plan_slides
-from app.services.slide_validator import validate_slides, validate_slides_ai
+from app.services.slide_validator import (
+    merge_validator_result_with_local_checks,
+    validate_slides,
+    validate_slides_ai,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -147,11 +151,21 @@ async def _validator_node(state: ModulePipelineState) -> ModulePipelineState:
         state["module_name"],
         state.get("validator_model") or "default",
     )
-    result = await validate_slides_ai(
+    ai_result = await validate_slides_ai(
         planned_slides=state["planned_slides"],
         generated_slides=state["generated_slides"],
         has_lesson_plan=state["has_lesson_plan"],
+        module_text=state.get("module_text"),
+        lesson_text=state.get("lesson_text"),
+        instructor_text=state.get("instructor_text"),
         model=state["validator_model"],
+    )
+    result = merge_validator_result_with_local_checks(
+        ai_result=ai_result,
+        module_text=state.get("module_text"),
+        lesson_text=state.get("lesson_text"),
+        instructor_text=state.get("instructor_text"),
+        generated_slides=state["generated_slides"],
     )
     state["approved"] = bool(result.get("approved"))
     state["issues"] = [str(i) for i in (result.get("issues") or [])]
