@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 import httpx
@@ -9,10 +10,6 @@ from app.core.config import settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Keep Gamma prompts within typical 16:9 card height (template + export warnings).
-GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE = 5
-GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS = 320
 
 
 class GammaNotConfigured(RuntimeError):
@@ -61,6 +58,7 @@ def _build_image_options_for_template() -> dict[str, Any] | None:
 async def generate_ppt(
     slides_batch: list[dict[str, Any]],
     *,
+    input_text_path: str | None = None,
     additional_instructions: str = "",
     include_export_bytes: bool = True,
 ) -> dict[str, Any]:
@@ -69,6 +67,11 @@ async def generate_ppt(
     - POST /v1.0/generations
     - poll GET /v1.0/generations/{id}
     - optionally download exportUrl (pptx)
+
+    When ``input_text_path`` is set, the file contents (UTF-8) are the **sole** input text
+    sent to Gamma (same as ``module_*_batch_*_input.txt`` on disk), so the prompt is not
+    re-serialized from ``slides_batch``.``slides_batch`` is still used for card count
+    and logging. If unset, text is built from the slide dicts.
     """
     if not _gamma_configured():
         raise GammaNotConfigured("Gamma API is not configured. Set GAMMA_API_KEY and GAMMA_BASE_URL.")
@@ -76,29 +79,36 @@ async def generate_ppt(
     base = str(getattr(settings, "GAMMA_BASE_URL")).rstrip("/")
     api_key = str(getattr(settings, "GAMMA_API_KEY")).strip()
 
-    # Build a compact, deterministic inputText for Gamma (dense decks overflow 16:9 cards).
-    lines: list[str] = []
-    cap = GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE
-    for i, s in enumerate(slides_batch, start=1):
-        title = str(s.get("title") or "").strip()
-        bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
-        notes = str(s.get("notes") or "").strip()
-        if len(notes) > GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS:
-            notes = notes[:GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS].rsplit(" ", 1)[0].strip() + "…"
-        visual = str(s.get("visual") or "").strip()
-        lines.append(f"Slide {i}: {title}")
-        for b in bullets[:cap]:
-            lines.append(f"- {str(b).strip()}")
-        if notes:
-            lines.append(f"Speaker notes (presenter only; do not paste verbatim as body text): {notes}")
-        if visual:
-            lines.append(
-                "Required on-slide graphic (photo, AI illustration, or diagram — not an empty box): "
-                f"{visual}"
-            )
-        lines.append("")  # blank line separator
+    if input_text_path is not None:
+        path = os.path.normpath(input_text_path)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Gamma input text file not found: {path}")
+        with open(path, "r", encoding="utf-8") as f:
+            input_text = f.read().strip()
+        if not input_text:
+            raise ValueError(f"Gamma input text file is empty: {path}")
+        logger.info("Gamma using input from file (not in-memory JSON) | path=%s chars=%s", path, len(input_text))
+    else:
+        # Build a deterministic inputText for Gamma (full bullet list and notes from each slide dict).
+        lines: list[str] = []
+        for i, s in enumerate(slides_batch, start=1):
+            title = str(s.get("title") or "").strip()
+            bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
+            notes = str(s.get("notes") or "").strip()
+            visual = str(s.get("visual") or "").strip()
+            lines.append(f"Slide {i}: {title}")
+            for b in bullets:
+                lines.append(f"- {str(b).strip()}")
+            if notes:
+                lines.append(f"Speaker notes (presenter only; do not paste verbatim as body text): {notes}")
+            if visual:
+                lines.append(
+                    "Required on-slide graphic (photo, AI illustration, or diagram — not an empty box): "
+                    f"{visual}"
+                )
+            lines.append("")  # blank line separator
 
-    input_text = "\n".join(lines).strip()
+        input_text = "\n".join(lines).strip()
 
     use_template = bool(getattr(settings, "GAMMA_USE_TEMPLATE", False))
     template_id = str(getattr(settings, "GAMMA_TEMPLATE_ID", "") or "").strip()
@@ -112,10 +122,8 @@ async def generate_ppt(
         "Do not merge sections. Do not skip sections. "
         "Do not summarize into fewer slides. Keep slide count very close to requested."
     )
-    # Gamma warns when card content exceeds 16:9 — bias toward shorter on-slide copy + real graphics.
     visual_layout_instructions = (
-        "Layout (16:9): Each card must fit without vertical overflow or tiny illegible text. "
-        "Title + at most 4–5 short bullets per slide (roughly ≤12 words per bullet). "
+        "Layout (16:9): Each card should fit without vertical overflow or tiny illegible text. "
         "Do not duplicate speaker notes on the slide. Prefer splitting ideas across slides over shrinking fonts. "
         "Graphics: Every 'Required on-slide graphic' line must result in a visible asset — AI illustration, "
         "photo, or a clear diagram/infographic (flowchart, matrix, cycle, icon set, simple chart). "

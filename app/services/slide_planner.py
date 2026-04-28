@@ -1,3 +1,7 @@
+"""
+**Slide planner** — given outline/lesson/instructor text, returns a list of planned slides
+(titles + types). Invoked from ``slides_graph._planner_node`` via ``plan_slides``.
+"""
 from __future__ import annotations
 
 import json

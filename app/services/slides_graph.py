@@ -1,3 +1,13 @@
+"""
+Per-module slide pipeline (LangGraph).
+
+- **Planning (slide titles + types)**: ``_planner_node`` → ``app.services.slide_planner.plan_slides``
+- **Content generation (title/bullets/notes/visual JSON)**: ``_generator_node`` →
+  ``app.services.slide_generator.generate_slide`` (one call per planned slide)
+- **Validation**: ``_validator_node`` → ``app.services.slide_validator`` (AI + structural)
+
+Graph entry: ``run_module_slides_pipeline`` in this file (used from ``slides_service``).
+"""
 from __future__ import annotations
 
 from typing import Any, TypedDict

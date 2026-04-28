@@ -25,11 +25,7 @@ from app.services.assessment_service import (
     DEFAULT_NUM_QUESTIONS,
     generate_assessment_questions_from_text,
 )
-from app.services.gamma_client import (
-    GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE,
-    GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS,
-    generate_ppt,
-)
+from app.services.gamma_client import generate_ppt
 from app.services.slides_graph import run_module_slides_pipeline
 from app.services.zoho_crm import update_assessment_links_field, update_slides_links_field
 from app.utils.logger import get_logger
@@ -99,22 +95,18 @@ def _normalize_instructor_ppt_priority(raw: str | None) -> str:
 
 
 def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
-    """Mirror gamma_client.generate_ppt text shaping (bullet cap, note trim) for on-disk batch dumps."""
+    """Mirror gamma_client input shaping for on-disk batch dumps (full bullets and notes)."""
     lines: list[str] = []
-    cap = GAMMA_PROMPT_MAX_BULLETS_PER_SLIDE
-    max_notes = GAMMA_PROMPT_MAX_SPEAKER_NOTES_CHARS
     for i, s in enumerate(slides_batch, start=1):
         title = str(s.get("title") or "").strip()
         bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
         notes = str(s.get("notes") or "").strip()
-        if len(notes) > max_notes:
-            notes = notes[:max_notes].rsplit(" ", 1)[0].strip() + "…"
         visual = str(s.get("visual") or "").strip()
         lines.append(f"Slide {i}: {title}")
-        for b in bullets[:cap]:
+        for b in bullets:
             lines.append(f"- {str(b).strip()}")
         if notes:
-            lines.append(f"Speaker notes (presenter only): {notes}")
+            lines.append(f"Speaker notes (presenter only; do not paste verbatim as body text): {notes}")
         if visual:
             lines.append(
                 "Required on-slide graphic (photo, diagram, or infographic — not an empty box): " + visual
@@ -357,7 +349,11 @@ async def _gamma_render_and_record_module_batches(
             bi,
             len(slides_batch),
         )
-        gamma_result = await generate_ppt(slides_batch, include_export_bytes=False)
+        gamma_result = await generate_ppt(
+            slides_batch,
+            input_text_path=batch_input_path,
+            include_export_bytes=False,
+        )
         batch_out.append((bi, slides_batch, gamma_result))
 
     async with lock:
@@ -452,6 +448,20 @@ def _build_assessment_urls(zoho_record_id: str) -> dict[str, str | None]:
     }
 
 
+def _load_modules_from_validated_slides_path(path: str) -> list[dict[str, Any]] | None:
+    """Load ``modules`` from ``validated_slides.json`` on disk (source of truth for post-assessment)."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("modules"), list):
+            return [m for m in data["modules"] if isinstance(m, dict)]
+    except Exception:
+        logger.exception("Failed to read validated_slides.json for post curriculum | path=%s", path)
+    return None
+
+
 def _build_post_curriculum_from_modules(module_entries: list[dict[str, Any]]) -> str:
     """Flatten validated module slides into compact text for post-assessment generation."""
     lines: list[str] = []
@@ -477,6 +487,14 @@ async def process_slides_job(job_id) -> None:
     Pipeline:
     extracting -> planning -> generating_slides -> validating -> batching
     -> gamma_rendering -> merging -> attaching -> completed
+
+    - **Slide structure + text** is produced in ``slides_graph`` (planner → generator → validator);
+      see that module for where planning / content generation run.
+    - **Gamma** reads each batch from ``module_{i}_batch_{j}_input.txt`` (that file is the
+      body sent to Gamma, not a second serialization from memory).
+    - **Post-assessment** curriculum for the in-job task is built from
+      ``validated_slides_path`` (``validated_slides.json``) when readable; the public
+      courseware API uses the same file via ``courseware_assessment_resolver``.
     """
     started = time.time()
     async with AsyncSessionLocal() as db:
@@ -850,7 +868,10 @@ async def process_slides_job(job_id) -> None:
                             )
                     except Exception:
                         logger.exception("Slides pre-assessment generation failed | job_id=%s", str(job.id))
-                post_context = _build_post_curriculum_from_modules(module_entries)
+                # Post-assessment: curriculum text comes only from ``validated_slides.json`` (on disk),
+                # not from a parallel in-memory structure, when the file is available.
+                modules_for_post = _load_modules_from_validated_slides_path(validated_cache_path) or module_entries
+                post_context = _build_post_curriculum_from_modules(modules_for_post)
                 if post_context:
                     post_assessment_task = asyncio.create_task(
                         generate_assessment_questions_from_text(
