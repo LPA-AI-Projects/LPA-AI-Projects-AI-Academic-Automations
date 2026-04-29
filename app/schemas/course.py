@@ -44,10 +44,12 @@ class CourseInputData(BaseModel):
         ge=1,
         description="Optional: number of training days. Preferred over free-text duration when provided.",
     )
-    per_day_duration_in_hours: Optional[float] = Field(
+    per_day_duration_in_hours: Optional[str] = Field(
         None,
-        gt=0,
-        description="Optional: duration per training day in hours. Preferred over free-text duration when provided.",
+        description=(
+            "Optional: duration per training day in hours, accepted as free text "
+            "(e.g. '8', '8.5', '8 hours per day'). Preferred over free-text duration when provided."
+        ),
     )
 
     no_of_pax: Optional[str] = Field(
@@ -139,12 +141,9 @@ class CourseInputData(BaseModel):
             s = v.strip()
             if not s:
                 return None
-            try:
-                return float(s)
-            except Exception:
-                return v
+            return s
         if isinstance(v, (int, float)):
-            return float(v)
+            return str(v)
         return v
 
     @field_validator("referral_course_links", mode="before")
