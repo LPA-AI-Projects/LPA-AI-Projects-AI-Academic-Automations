@@ -55,6 +55,73 @@ def _build_image_options_for_template() -> dict[str, Any] | None:
     return out or None
 
 
+def _build_image_options_for_generate() -> dict[str, Any] | None:
+    """
+    Optional imageOptions for POST /v1.0/generations (non-template mode).
+
+    Non-template mode supports source/model/style, so we include any configured
+    values and omit empty keys.
+    """
+    out: dict[str, Any] = {}
+    source = str(getattr(settings, "GAMMA_IMAGE_SOURCE", "") or "").strip()
+    if source:
+        out["source"] = source
+    model = str(getattr(settings, "GAMMA_IMAGE_MODEL", "") or "").strip()
+    if model:
+        out["model"] = model
+    style = str(getattr(settings, "GAMMA_IMAGE_STYLE", "") or "").strip()
+    if style:
+        out["style"] = style
+    return out or None
+
+
+def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
+    """
+    Build structured Gamma input text from slide dicts.
+
+    Format intentionally uses section headers and separators so Gamma treats
+    each block as a distinct card with explicit body and visual intent.
+    """
+    blocks: list[str] = []
+    for i, s in enumerate(slides_batch, start=1):
+        title = str(s.get("title") or "").strip() or f"Slide {i}"
+        bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
+        notes = str(s.get("notes") or "").strip()
+        visual = str(s.get("visual") or "").strip()
+
+        lines: list[str] = [f"# Slide {i}: {title}", "", "Bullets:"]
+        if bullets:
+            for b in bullets:
+                clean = str(b).strip()
+                if clean:
+                    lines.append(f"- {clean}")
+        else:
+            lines.append("- (No bullet text provided)") 
+
+        lines.extend(["", "Visual:"])
+        if visual:
+            lines.append(visual)
+            lines.append(
+                "Visual Spec: include diagram/chart type, labels, numeric values (if any), and style details."
+            )
+        else:
+            lines.append("Relevant visual that supports the slide message (diagram, icon row, or simple chart).")
+
+        if notes:
+            lines.extend(
+                [
+                    "",
+                    "Speaker Notes (presenter only; do not place verbatim in body text):",
+                    notes,
+                ]
+            )
+
+        lines.extend(["", "---"])
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks).strip()
+
+
 async def generate_ppt(
     slides_batch: list[dict[str, Any]],
     *,
@@ -78,6 +145,8 @@ async def generate_ppt(
 
     base = str(getattr(settings, "GAMMA_BASE_URL")).rstrip("/")
     api_key = str(getattr(settings, "GAMMA_API_KEY")).strip()
+    if len(slides_batch) == 0:
+        raise ValueError("slides_batch must contain at least one slide.")
 
     if input_text_path is not None:
         path = os.path.normpath(input_text_path)
@@ -89,33 +158,14 @@ async def generate_ppt(
             raise ValueError(f"Gamma input text file is empty: {path}")
         logger.info("Gamma using input from file (not in-memory JSON) | path=%s chars=%s", path, len(input_text))
     else:
-        # Build a deterministic inputText for Gamma (full bullet list and notes from each slide dict).
-        lines: list[str] = []
-        for i, s in enumerate(slides_batch, start=1):
-            title = str(s.get("title") or "").strip()
-            bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
-            notes = str(s.get("notes") or "").strip()
-            visual = str(s.get("visual") or "").strip()
-            lines.append(f"Slide {i}: {title}")
-            for b in bullets:
-                lines.append(f"- {str(b).strip()}")
-            if notes:
-                lines.append(f"Speaker notes (presenter only; do not paste verbatim as body text): {notes}")
-            if visual:
-                lines.append(
-                    "Required on-slide graphic (photo, AI illustration, or diagram — not an empty box): "
-                    f"{visual}"
-                )
-            lines.append("")  # blank line separator
-
-        input_text = "\n".join(lines).strip()
+        input_text = _gamma_input_from_batch(slides_batch)
 
     use_template = bool(getattr(settings, "GAMMA_USE_TEMPLATE", False))
     template_id = str(getattr(settings, "GAMMA_TEMPLATE_ID", "") or "").strip()
     use_template = use_template and bool(template_id)
     create_url = f"{base}/v1.0/generations/from-template" if use_template else f"{base}/v1.0/generations"
     headers = {"X-API-KEY": api_key, "Accept": "application/json"}
-    desired_cards = max(1, len(slides_batch))
+    desired_cards = len(slides_batch)
     strict_instructions = (
         f"Create exactly {desired_cards} slides/cards. "
         "Treat each 'Slide X:' section as one distinct slide. "
@@ -156,8 +206,8 @@ async def generate_ppt(
     else:
         payload = {
             "inputText": input_text,
-            # Gamma defaults can condense aggressively; generate + numCards gives tighter count control.
-            "textMode": "generate",
+            # Preserve authored copy; Gamma should design/layout rather than rewrite content.
+            "textMode": "preserve",
             "format": "presentation",
             "cardOptions": {"dimensions": "16x9"},
             "numCards": desired_cards,
@@ -165,6 +215,12 @@ async def generate_ppt(
             "additionalInstructions": merged_instructions[:5000],
             "sharingOptions": sharing_options,
         }
+        image_opts = _build_image_options_for_generate()
+        if image_opts:
+            payload["imageOptions"] = image_opts
+        theme_id = str(getattr(settings, "GAMMA_THEME_ID", "") or "").strip()
+        if theme_id:
+            payload["themeId"] = theme_id
 
     gamma_endpoint = "from-template" if use_template else "generate"
     logger.info(
