@@ -144,6 +144,7 @@ async def generate_ppt(
             "gammaId": template_id,
             "prompt": prompt,
             "exportAs": "pptx",
+            "cardOptions": {"dimensions": "16x9"},
             "sharingOptions": sharing_options,
         }
         image_opts = _build_image_options_for_template()
@@ -158,6 +159,7 @@ async def generate_ppt(
             # Gamma defaults can condense aggressively; generate + numCards gives tighter count control.
             "textMode": "generate",
             "format": "presentation",
+            "cardOptions": {"dimensions": "16x9"},
             "numCards": desired_cards,
             "exportAs": "pptx",
             "additionalInstructions": merged_instructions[:5000],

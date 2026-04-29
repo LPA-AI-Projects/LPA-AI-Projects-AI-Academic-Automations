@@ -39,6 +39,16 @@ class CourseInputData(BaseModel):
     goal_of_training: str = ""
     size_of_company: str = ""
     duration: str = ""
+    training_days: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Optional: number of training days. Preferred over free-text duration when provided.",
+    )
+    per_day_duration_in_hours: Optional[float] = Field(
+        None,
+        gt=0,
+        description="Optional: duration per training day in hours. Preferred over free-text duration when provided.",
+    )
 
     no_of_pax: Optional[str] = Field(
         None,
@@ -103,6 +113,40 @@ class CourseInputData(BaseModel):
             return s if s else None
         return v
 
+    @field_validator("training_days", mode="before")
+    @classmethod
+    def _coerce_training_days(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            try:
+                return int(float(s))
+            except Exception:
+                return v
+        if isinstance(v, (int, float)):
+            return int(v)
+        return v
+
+    @field_validator("per_day_duration_in_hours", mode="before")
+    @classmethod
+    def _coerce_per_day_hours(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            try:
+                return float(s)
+            except Exception:
+                return v
+        if isinstance(v, (int, float)):
+            return float(v)
+        return v
+
     @field_validator("referral_course_links", mode="before")
     @classmethod
     def _coerce_referral_course_links(cls, v: Any) -> Any:
@@ -152,6 +196,8 @@ class GenerateCourseRequest(BaseModel):
                     "need_of_training": "End Customer --- IBM",
                     "size_of_company": "Above 10k",
                     "duration": "4 weeks",
+                    "training_days": 2,
+                    "per_day_duration_in_hours": 6,
                     "no_of_pax": "24",
                     "languages_prefered": "English",
                     "additional_certifications": "PMP alignment optional",

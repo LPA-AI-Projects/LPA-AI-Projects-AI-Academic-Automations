@@ -559,6 +559,8 @@ bullets: exactly SIX lines (the template always shows six). Each line ONE outcom
 COURSE DETAILS TABLE (course_details)
 - details_page_intro: ONE paragraph for the Course Details page, placed ABOVE the table (not inside table cells). Purpose: answer in a short, crisp way how this particular course will help participants (benefits and outcomes for them, tied to this course topic, not generic training boilerplate). Plain text only: do NOT use **bold**, italics, or any markdown. No em dash. Write several short sentences rather than one or two long ones so it reads crisp on the page. Length: aim for copy that naturally fills about six to eight lines in a typical brochure column (compact but not cramped; not a full page). Do not artificially pad to hit a length and do not cut mid-thought to fit a quota; if the draft runs slightly shorter or longer while staying clear and participant-focused, that is acceptable. CRITICAL: write ORIGINAL prose; do NOT repeat program_insight.paragraphs; do NOT duplicate key_benefits or value_addition. Avoid packing in cohort size, PC count, full module lists, or six separate mini-ideas that balloon length.
 - regions_served, course_duration, total_learning_hours: from client input when present, else sensible defaults.
+- If input includes training_days and per_day_duration_in_hours, treat them as canonical schedule inputs.
+  Compute/reflect total hours from those values before relying on free-text duration strings.
 - key_benefits: ONE paragraph for the Key Benefits table cell. EXACTLY TWO sentences. Target about 38 to 52 words total. Brochure style: high-level participant outcomes (skills, dashboards, reporting, stakeholders). Do not write four long sentences. Do not list SQL keywords (SELECT, JOIN, GROUP BY), week numbers, or step-by-step syllabus detail here. No bullet characters. Tone like: first sentence on what participants enhance; second sentence on capabilities and presenting to stakeholders (adapt to course).
 - value_addition: ONE paragraph for the Value Addition & Impact cell. EXACTLY TWO sentences. Same length band (about 38 to 52 words). Organization-level value: reporting quality, insights, visibility, alignment, efficiency. Do not duplicate key_benefits sentence openings. No bullet characters. No em dash.
 - location, date_time: "To be confirmed" when unknown.
@@ -590,8 +592,11 @@ CAPABILITY IMPACT (brochure page after the six checkmark rows)
 
 MODULES (compact table: Sno., Modules, Topics, Exercises)
 - If **topics_to_include** (or legacy topics_must_include / mandatory_topics / important_topics) appears in input JSON, every listed theme must be reflected somewhere in module topics (or clearly in learning objectives). Do not skip any.
-- MODULE COUNT (must follow duration and total_learning_hours from input; never invent a fixed count of five for every course)
-  - Read course_duration and total_learning_hours (or infer from phrases like "2 days", "16 hours"). When days and hours both appear, prefer splitting into enough modules to fill the real schedule.
+- MODULE COUNT (must follow training_days, per_day_duration_in_hours, duration, and total_learning_hours; never invent a fixed count of five for every course)
+  - Prefer explicit numeric schedule values when provided:
+    training_days and per_day_duration_in_hours. Derive total contact time from these.
+  - Otherwise read course_duration and total_learning_hours (or infer from phrases like "2 days", "16 hours").
+    When days and hours both appear, prefer splitting into enough modules to fill the real schedule.
   - Guide by contact time: 1 day (~6–8 h): 3–4 modules. **2 days (~12–16 h): 6–8 modules** (morning/afternoon blocks). 3 days: 7–10. Longer programs: scale up. A **two-day** program should **not** default to five modules unless the client explicitly requested a compact five-module agenda.
   - Broad scope or high total hours for the same calendar days: use the **upper** end of the range (more modules, thinner slices per module).
 - Each module should map to a coherent block (half-day, theme, or official domain). Do not merge whole days into one module just to keep the array short.
@@ -687,6 +692,9 @@ Return strict JSON only with keys:
   "company_size": "string",
   "training_level": "string",
   "duration": "string",
+  "training_days": "string",
+  "per_day_duration_in_hours": "string",
+  "total_learning_hours": "string",
   "pax": "string",
   "delivery_mode": "string",
   "roles": ["string"]

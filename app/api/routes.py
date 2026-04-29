@@ -65,7 +65,21 @@ auth = Depends(verify_api_key)
 
 def _input_data_dict_for_job(data: CourseInputData) -> dict:
     """Flatten outline job input for JSON context; drop unset optional CRM fields."""
-    return data.model_dump(exclude_none=True, mode="json")
+    out = data.model_dump(exclude_none=True, mode="json")
+    # Backward-compatible derived duration string:
+    # if explicit days + per-day-hours are provided, prefer this deterministic duration.
+    td = out.get("training_days")
+    ph = out.get("per_day_duration_in_hours")
+    try:
+        if td is not None and ph is not None:
+            td_i = int(td)
+            ph_f = float(ph)
+            total = td_i * ph_f
+            out["duration"] = f"{td_i} day(s) x {ph_f:g} hour(s)/day ({total:g} total hours)"
+    except Exception:
+        # Keep original free-text duration as-is when numeric coercion fails.
+        pass
+    return out
 
 
 def _enforce_regions_served_constant(payload) -> None:
@@ -229,6 +243,12 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
             "department": form_data.get("department", ""),
             "designation": form_data.get("designation", ""),
             "duration": form_data.get("duration", ""),
+            "training_days": form_data.get("training_days", ""),
+            "per_day_duration_in_hours": (
+                form_data.get("per_day_duration_in_hours")
+                or form_data.get("per_day_hours")
+                or ""
+            ),
             "level_of_training": form_data.get("level_of_training", ""),
             "mode_of_training": (
                 form_data.get("mode_of_training")
