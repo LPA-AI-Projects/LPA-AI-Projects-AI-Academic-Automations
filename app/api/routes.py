@@ -66,16 +66,22 @@ auth = Depends(verify_api_key)
 def _input_data_dict_for_job(data: CourseInputData) -> dict:
     """Flatten outline job input for JSON context; drop unset optional CRM fields."""
     out = data.model_dump(exclude_none=True, mode="json")
-    # Backward-compatible derived duration string:
-    # if explicit days + per-day-hours are provided, prefer this deterministic duration.
+    # Front-page duration display normalization from structured schedule inputs:
+    # - days + hours -> show days only
+    # - hours only -> show hours only
+    # - days only -> show days only
     td = out.get("training_days")
     ph = out.get("per_day_duration_in_hours")
     try:
         if td is not None and ph is not None:
             td_i = int(td)
+            out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
+        elif td is not None:
+            td_i = int(td)
+            out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
+        elif ph is not None:
             ph_f = float(ph)
-            total = td_i * ph_f
-            out["duration"] = f"{td_i} day(s) x {ph_f:g} hour(s)/day ({total:g} total hours)"
+            out["duration"] = f"{ph_f:g} Hour" if ph_f == 1 else f"{ph_f:g} Hours"
     except Exception:
         # Keep original free-text duration as-is when numeric coercion fails.
         pass
@@ -519,12 +525,29 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
 
             context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
             ai = ClaudeService()
-            # Legacy outline pipeline only (no LangGraph / multi-node graph).
+            # Outline pipeline with optional context profiling + research helper notes.
             logger.info("Outline generation started | job_id=%s", str(job_id))
             learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
+            context_profile_text = ""
+            research_notes_text = ""
+            try:
+                context_profile_text, research_notes_text = await asyncio.gather(
+                    wait_for(ai.build_context_profile(context_text), timeout=180),
+                    wait_for(ai.research_support_data(context_text, learning_objectives), timeout=220),
+                )
+            except Exception:
+                logger.exception(
+                    "Outline helper generation failed (context/research); continuing without helpers | job_id=%s",
+                    str(job_id),
+                )
             try:
                 outline_payload = await wait_for(
-                    ai.build_roi_course_outline_json(context_text, learning_objectives),
+                    ai.build_roi_course_outline_json(
+                        context_text,
+                        learning_objectives,
+                        research_notes_text=research_notes_text,
+                        context_profile_text=context_profile_text,
+                    ),
                     timeout=310,
                 )
                 _enforce_regions_served_constant(outline_payload)

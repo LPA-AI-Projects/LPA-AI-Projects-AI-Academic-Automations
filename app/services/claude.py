@@ -31,6 +31,8 @@ LEARNING_OBJECTIVES_PROMPT = """You are a Training Objectives Expert for Learner
 - **Company Name** (always provided)
 - **Course Topic** (always provided)
 - **Additional context** (sometimes provided)
+- **need_of_training** (if present): treat as primary problem statement; derive objectives to directly close this gap.
+- **goal_of_training** (if present): treat as target business/learning outcome; objectives must measurably support it.
 - **level_of_training** (optional): e.g. Beginner, Intermediate, Advanced. If missing or empty, assume **Intermediate** for objective depth unless the topic or context clearly implies another level.
 - **mode_of_training** (optional; aliases delivery_mode, training_mode): Online, Onsite (offline), or Hybrid. If missing or empty, assume **Hybrid** when choosing examples and delivery notes unless context clearly implies one mode.
 - **topics_to_include** (optional JSON field; legacy key **topics_must_include**; also mandatory_topics, important_topics): when present, these are **mandatory themes or topics** the client requires in the program. You must reflect them in the training need, gaps, and learning objectives. Do not drop or ignore any listed item. If the list is long, prioritize covering every theme across the objectives (combine only when clearly redundant).
@@ -531,6 +533,8 @@ VOICE
 
 INPUT JSON — MANDATORY TOPICS
 - If the input context includes **topics_to_include** (or legacy **topics_must_include**, or **mandatory_topics**, **important_topics**), treat every listed theme as a **mandatory inclusion** for module topics, learning objectives, and program_insight bullets where appropriate. Spread coverage across modules; do not omit any item. Build a complete course for the subject while ensuring every mandatory topic appears in at least one module's topics lines or is clearly addressed in objectives.
+- If **need_of_training** is present, treat it as the core capability gap to close. Ensure modules and exercises directly target this gap.
+- If **goal_of_training** is present, treat it as the target end-state. Ensure module flow and outcomes clearly lead to this goal.
 
 INPUT JSON — REFERRAL COURSE LINKS
 - If **referral_course_links** (or **referral_course_link**, **referral_links**) is present in the input JSON, it contains one or more URLs. Use **web search** to read those pages and treat them as **reference programs**: align module titles, topic lines, and progression with the substance of those pages where it fits the client's course name and objectives. Balance referral content with **topics_to_include** and the rest of the brief. Do not paste long quotes; synthesize into brochure-ready JSON.
