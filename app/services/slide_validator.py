@@ -28,8 +28,15 @@ Return ONLY valid JSON:
 {
   "approved": true,
   "issues": [],
-  "fix_instructions": ""
+  "fix_instructions": "",
+  "slides_to_revise": [2, 5]
 }
+
+slides_to_revise rules:
+- 1-based indices of slides that need changes
+- include only slides that actually need edits
+- if issue is global, include all relevant indices
+- if approved=true, return an empty list
 """
 
 _STOPWORDS = {
@@ -74,7 +81,25 @@ def _safe_json(text: str) -> dict[str, Any]:
     fix = data.get("fix_instructions")
     if not isinstance(fix, str):
         fix = ""
-    return {"approved": approved, "issues": [str(i) for i in issues if str(i).strip()], "fix_instructions": fix}
+    revise = data.get("slides_to_revise")
+    revise_out: list[int] = []
+    if isinstance(revise, list):
+        for item in revise:
+            try:
+                idx = int(item)
+            except Exception:
+                continue
+            if idx >= 1:
+                revise_out.append(idx)
+    # Deduplicate while preserving order
+    seen: set[int] = set()
+    revise_out = [x for x in revise_out if not (x in seen or seen.add(x))]
+    return {
+        "approved": approved,
+        "issues": [str(i) for i in issues if str(i).strip()],
+        "fix_instructions": fix,
+        "slides_to_revise": revise_out,
+    }
 
 
 async def validate_slides_ai(
@@ -184,6 +209,11 @@ def merge_validator_result_with_local_checks(
         "approved": bool(ai_result.get("approved")) and not issues,
         "issues": issues,
         "fix_instructions": fix,
+        "slides_to_revise": [
+            int(i)
+            for i in (ai_result.get("slides_to_revise") or [])
+            if isinstance(i, int) and i >= 1
+        ],
     }
 
 

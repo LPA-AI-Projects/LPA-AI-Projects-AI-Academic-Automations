@@ -14,7 +14,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from app.services.slide_generator import generate_slide
+from app.services.slide_generator import generate_module_slides, regenerate_selected_slides
 from app.services.slide_planner import plan_slides
 from app.services.slide_validator import (
     merge_validator_result_with_local_checks,
@@ -39,11 +39,13 @@ class ModulePipelineState(TypedDict):
     max_slides: int
     max_loops: int
     loop_count: int
+    module_plan: dict[str, Any]
     planned_slides: list[dict[str, Any]]
     generated_slides: list[dict[str, Any]]
     approved: bool
     issues: list[str]
     fix_instructions: str
+    slides_to_revise: list[int]
     has_lesson_plan: bool
     failed: bool
 
@@ -98,6 +100,7 @@ async def _planner_node(state: ModulePipelineState) -> ModulePipelineState:
         model=state["planner_model"],
     )
     raw_slides = plan.get("slides") if isinstance(plan, dict) else []
+    state["module_plan"] = plan.get("module_plan") if isinstance(plan, dict) and isinstance(plan.get("module_plan"), dict) else {}
     normalized = _normalize_plan_slides(raw_slides if isinstance(raw_slides, list) else [])
     state["planned_slides"] = _enforce_slide_count(
         normalized,
@@ -121,20 +124,28 @@ async def _generator_node(state: ModulePipelineState) -> ModulePipelineState:
         int(state.get("loop_count", 0)),
     )
     context = {
+        "module_plan": state.get("module_plan") or {},
         "course_outline": state["module_text"][:150000],
         "lesson_plan_and_activity_plan": (state["lesson_text"] or "")[:150000],
         "instructor_ppt": (state["instructor_text"] or "")[:150000],
     }
-    generated: list[dict[str, Any]] = []
-    for slide in state["planned_slides"]:
-        generated.append(
-            await generate_slide(
-                slide=slide,
-                context=context,
-                instructor_ppt_priority=state["instructor_ppt_priority"],
-                model=state["generator_model"],
-                fix_instructions=state.get("fix_instructions") or "",
-            )
+    if int(state.get("loop_count", 0)) > 0 and state.get("slides_to_revise"):
+        generated = await regenerate_selected_slides(
+            planned_slides=state["planned_slides"],
+            existing_slides=state.get("generated_slides") or [],
+            slides_to_revise=state.get("slides_to_revise") or [],
+            context=context,
+            instructor_ppt_priority=state["instructor_ppt_priority"],
+            model=state["generator_model"],
+            fix_instructions=state.get("fix_instructions") or "",
+        )
+    else:
+        generated = await generate_module_slides(
+            planned_slides=state["planned_slides"],
+            context=context,
+            instructor_ppt_priority=state["instructor_ppt_priority"],
+            model=state["generator_model"],
+            fix_instructions=state.get("fix_instructions") or "",
         )
     state["generated_slides"] = generated
     logger.info(
@@ -170,6 +181,11 @@ async def _validator_node(state: ModulePipelineState) -> ModulePipelineState:
     state["approved"] = bool(result.get("approved"))
     state["issues"] = [str(i) for i in (result.get("issues") or [])]
     state["fix_instructions"] = str(result.get("fix_instructions") or "").strip()
+    state["slides_to_revise"] = [
+        int(i)
+        for i in (result.get("slides_to_revise") or [])
+        if isinstance(i, int) or (isinstance(i, str) and str(i).strip().isdigit())
+    ]
 
     # Always run local structural sanitizer.
     state["generated_slides"] = validate_slides(
@@ -250,11 +266,13 @@ async def run_module_slides_pipeline(
         "max_slides": max_slides,
         "max_loops": max_loops,
         "loop_count": 0,
+        "module_plan": {},
         "planned_slides": [],
         "generated_slides": [],
         "approved": False,
         "issues": [],
         "fix_instructions": "",
+        "slides_to_revise": [],
         "has_lesson_plan": bool((lesson_text or "").strip()),
         "failed": False,
     }

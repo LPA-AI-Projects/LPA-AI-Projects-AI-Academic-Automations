@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     GAMMA_IMAGE_SOURCE: str = ""
     GAMMA_IMAGE_MODEL: str = ""
     GAMMA_IMAGE_STYLE: str = ""
+    # When true (non-template mode), do not send numCards and let Gamma infer card count.
+    GAMMA_AUTO_CARD_COUNT: bool = False
 
     # Slides multi-bot pipeline configuration
     SLIDES_PLANNER_MODEL: str = ""
@@ -181,7 +183,12 @@ class Settings(BaseSettings):
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
 
-    @field_validator("ASSESSMENT_LINK_REQUIRE_TOKEN", "COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD", mode="before")
+    @field_validator(
+        "ASSESSMENT_LINK_REQUIRE_TOKEN",
+        "COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD",
+        "GAMMA_AUTO_CARD_COUNT",
+        mode="before",
+    )
     @classmethod
     def coerce_bool_flags(cls, value: object) -> bool:
         if isinstance(value, bool):

@@ -34,6 +34,14 @@ Your job: produce a slide plan (titles + types) from the provided training mater
 
 Return ONLY valid JSON with this shape:
 {{
+  "module_plan": {{
+    "module_name": "...",
+    "topics": ["..."],
+    "exercises": ["..."],
+    "activities": ["..."],
+    "lesson_plan_focus": "...",
+    "no_of_slides": 18
+  }},
   "slides": [
     {{"title": "...", "type": "content"}},
     {{"title": "...", "type": "activity"}}
@@ -45,6 +53,8 @@ Rules:
 - Generate 15-25 slides per module
 - Hard maximum: 25
 - Minimum target: 15 (if content allows)
+- module_plan.no_of_slides should match final planned slide count
+- module_plan.topics/exercises/activities should summarize source coverage for this module
 - Include exactly 1 summary slide
 - Use activity slides only when LP/AP context exists
 - Avoid duplicate or near-duplicate slides

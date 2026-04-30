@@ -115,6 +115,33 @@ def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
     return "\n".join(lines).strip()
 
 
+def _gamma_input_from_module_text(module_name: str, module_slides: list[dict[str, Any]]) -> str:
+    """
+    Build one consolidated module text block for Gamma from validated module content.
+
+    This is intentionally module-first (not "Slide X") so Gamma can design the flow
+    from a cohesive lesson narrative.
+    """
+    heading = _sanitize_module_display_name(module_name) or "Module"
+    lines: list[str] = [f"Module: {heading}", "", "Module Content:"]
+    for s in module_slides:
+        title = str(s.get("title") or "").strip()
+        bullets = s.get("bullets") if isinstance(s.get("bullets"), list) else []
+        notes = str(s.get("notes") or "").strip()
+        visual = str(s.get("visual") or "").strip()
+        if title:
+            lines.append(f"\nSection: {title}")
+        for b in bullets:
+            bt = str(b).strip()
+            if bt:
+                lines.append(f"- {bt}")
+        if notes:
+            lines.append(f"Facilitator guidance: {notes}")
+        if visual:
+            lines.append(f"Suggested visual: {visual}")
+    return "\n".join(lines).strip()
+
+
 def _build_module_cover_slide(module_name: str) -> dict[str, Any]:
     heading = _sanitize_module_display_name(module_name) or "Module"
     return {
@@ -326,35 +353,34 @@ async def _gamma_render_and_record_module_batches(
     if not module_slides:
         return
     module_slides_for_gamma = [_build_module_cover_slide(module_name), *module_slides]
-    module_batches = _batch_slides(module_slides_for_gamma)
     logger.info(
         "Gamma rendering module | job_id=%s module=%s module_index=%s slides=%s batches=%s",
         job_log_id,
         module_name,
         module_index,
         len(module_slides_for_gamma),
-        len(module_batches),
+        1,
     )
 
     batch_out: list[tuple[int, list[dict[str, Any]], dict[str, Any]]] = []
-    for bi, slides_batch in enumerate(module_batches, start=1):
-        batch_input_path = os.path.join(cache_dir, f"module_{module_index}_batch_{bi}_input.txt")
-        with open(batch_input_path, "w", encoding="utf-8") as f:
-            f.write(_gamma_input_from_batch(slides_batch))
+    # Preferred approach: one consolidated module text file to Gamma.
+    module_input_path = os.path.join(cache_dir, f"module_{module_index}_batch_1_input.txt")
+    with open(module_input_path, "w", encoding="utf-8") as f:
+        f.write(_gamma_input_from_module_text(module_name, module_slides_for_gamma))
 
-        logger.info(
-            "Gamma rendering batch | job_id=%s module_index=%s batch_index=%s slides=%s",
-            job_log_id,
-            module_index,
-            bi,
-            len(slides_batch),
-        )
-        gamma_result = await generate_ppt(
-            slides_batch,
-            input_text_path=batch_input_path,
-            include_export_bytes=False,
-        )
-        batch_out.append((bi, slides_batch, gamma_result))
+    logger.info(
+        "Gamma rendering batch | job_id=%s module_index=%s batch_index=%s slides=%s",
+        job_log_id,
+        module_index,
+        1,
+        len(module_slides_for_gamma),
+    )
+    gamma_result = await generate_ppt(
+        module_slides_for_gamma,
+        input_text_path=module_input_path,
+        include_export_bytes=False,
+    )
+    batch_out.append((1, module_slides_for_gamma, gamma_result))
 
     async with lock:
         for bi, _slides_batch, gamma_result in batch_out:
@@ -383,7 +409,7 @@ async def _gamma_render_and_record_module_batches(
 
             drive_link: str | None = None
             drive_file_id: str | None = None
-            suffix = f" Batch {bi}" if len(module_batches) > 1 else ""
+            suffix = ""
             module_gamma_links.append(
                 {
                     "module_index": str(module_index),
