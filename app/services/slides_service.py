@@ -25,6 +25,7 @@ from app.services.assessment_service import (
     DEFAULT_NUM_QUESTIONS,
     generate_assessment_questions_from_text,
 )
+from app.services.course_map import build_course_map
 from app.services.gamma_client import generate_ppt
 from app.services.slides_graph import run_module_slides_pipeline
 from app.services.zoho_crm import update_assessment_links_field, update_slides_links_field
@@ -51,7 +52,7 @@ async def _extract_instructor_file_text_async(blob: bytes, basename: str) -> str
 
 
 MAX_SLIDES_PER_BATCH = 60
-CACHE_VERSION = "slides_cache_v3"
+CACHE_VERSION = "slides_cache_v4"
 
 
 def _safe_course_name(name: str | None) -> str:
@@ -115,13 +116,32 @@ def _gamma_input_from_batch(slides_batch: list[dict[str, Any]]) -> str:
     return "\n".join(lines).strip()
 
 
-def _gamma_input_from_module_text(module_name: str, module_slides: list[dict[str, Any]]) -> str:
-    """
-    Build one consolidated module text block for Gamma from validated module content.
+def _gamma_input_plain_module_body(module_name: str, module_body: str) -> str:
+    """Single validated module document for Gamma (Markdown/plain text)."""
+    heading = _sanitize_module_display_name(module_name) or "Module"
+    body = (module_body or "").strip()
+    return f"Module: {heading}\n\n{body}\n"
 
-    This is intentionally module-first (not "Slide X") so Gamma can design the flow
-    from a cohesive lesson narrative.
-    """
+
+def _extract_module_body_and_card_count(module: dict[str, Any], module_name: str) -> tuple[str, int]:
+    """New format: module_content + card_count. Legacy: slides[] converted to text."""
+    raw = str(module.get("module_content") or "").strip()
+    if raw:
+        try:
+            n = int(module.get("card_count"))
+        except (TypeError, ValueError):
+            n = 15
+        return raw, max(1, n)
+    slides = module.get("slides") if isinstance(module.get("slides"), list) else []
+    if not slides:
+        return "", 1
+    legacy_batch = [_build_module_cover_slide(module_name), *slides]
+    text = _gamma_input_from_module_text_legacy(module_name, legacy_batch)
+    return text, len(legacy_batch)
+
+
+def _gamma_input_from_module_text_legacy(module_name: str, module_slides: list[dict[str, Any]]) -> str:
+    """Legacy: build text from slide dicts (cached jobs before module_content)."""
     heading = _sanitize_module_display_name(module_name) or "Module"
     lines: list[str] = [f"Module: {heading}", "", "Module Content:"]
     for s in module_slides:
@@ -338,7 +358,8 @@ async def _gamma_render_and_record_module_batches(
     cache_dir: str,
     module_index: int,
     module_name: str,
-    module_slides: list[dict[str, Any]],
+    module_body: str,
+    card_count: int,
     gamma_batch_links: list[str],
     gamma_generation_ids: list[str],
     gamma_request_log: list[dict[str, Any]],
@@ -347,40 +368,41 @@ async def _gamma_render_and_record_module_batches(
     job_log_id: str,
 ) -> None:
     """
-    Call Gamma for all batches of one module, then append results and commit payload
-    (under ``lock``). Network I/O runs outside the lock where possible.
+    Call Gamma once per module with a single text file (validated module body).
+    ``card_count`` sizes the synthetic batch for ``numCards`` when not using auto card count.
     """
-    if not module_slides:
+    text = (module_body or "").strip()
+    if not text:
         return
-    module_slides_for_gamma = [_build_module_cover_slide(module_name), *module_slides]
+    n = max(1, int(card_count))
+    synthetic_batch = [{"title": f"Segment {i + 1}", "type": "content"} for i in range(n)]
     logger.info(
-        "Gamma rendering module | job_id=%s module=%s module_index=%s slides=%s batches=%s",
+        "Gamma rendering module | job_id=%s module=%s module_index=%s card_count=%s batches=%s",
         job_log_id,
         module_name,
         module_index,
-        len(module_slides_for_gamma),
+        n,
         1,
     )
 
     batch_out: list[tuple[int, list[dict[str, Any]], dict[str, Any]]] = []
-    # Preferred approach: one consolidated module text file to Gamma.
     module_input_path = os.path.join(cache_dir, f"module_{module_index}_batch_1_input.txt")
     with open(module_input_path, "w", encoding="utf-8") as f:
-        f.write(_gamma_input_from_module_text(module_name, module_slides_for_gamma))
+        f.write(_gamma_input_plain_module_body(module_name, text))
 
     logger.info(
         "Gamma rendering batch | job_id=%s module_index=%s batch_index=%s slides=%s",
         job_log_id,
         module_index,
         1,
-        len(module_slides_for_gamma),
+        len(synthetic_batch),
     )
     gamma_result = await generate_ppt(
-        module_slides_for_gamma,
+        synthetic_batch,
         input_text_path=module_input_path,
         include_export_bytes=False,
     )
-    batch_out.append((1, module_slides_for_gamma, gamma_result))
+    batch_out.append((1, synthetic_batch, gamma_result))
 
     async with lock:
         for bi, _slides_batch, gamma_result in batch_out:
@@ -489,11 +511,16 @@ def _load_modules_from_validated_slides_path(path: str) -> list[dict[str, Any]] 
 
 
 def _build_post_curriculum_from_modules(module_entries: list[dict[str, Any]]) -> str:
-    """Flatten validated module slides into compact text for post-assessment generation."""
+    """Flatten validated module content into text for post-assessment (module_content or legacy slides)."""
     lines: list[str] = []
     for module in module_entries:
         module_name = str(module.get("module_name") or "Module").strip()
         lines.append(f"## {module_name}")
+        body = str(module.get("module_content") or "").strip()
+        if body:
+            lines.append(body)
+            lines.append("")
+            continue
         slides = module.get("slides") if isinstance(module.get("slides"), list) else []
         for s in slides:
             title = str(s.get("title") or "").strip()
@@ -687,9 +714,33 @@ async def process_slides_job(job_id) -> None:
             outline_hash = _hash_text(outline_text)
             lesson_hash = _hash_text(lesson_text)
             instructor_hash = _hash_text(instructor_text)
+
+            planner_model = (settings.SLIDES_PLANNER_MODEL or "").strip() or None
+            generator_model = (settings.SLIDES_GENERATOR_MODEL or "").strip() or None
+            validator_model = (settings.SLIDES_VALIDATOR_MODEL or "").strip() or None
+            min_per_module = max(1, int(getattr(settings, "SLIDES_MIN_PER_MODULE", 10) or 10))
+            max_per_module = max(min_per_module, int(getattr(settings, "SLIDES_MAX_PER_MODULE", 20) or 20))
+            max_loops = max(1, int(getattr(settings, "SLIDES_VALIDATION_MAX_LOOPS", 2) or 2))
+            module_parallelism = max(1, int(getattr(settings, "SLIDES_MODULE_PARALLELISM", 3) or 3))
+
+            course_map_text = ""
+            try:
+                course_map_text = await build_course_map(
+                    outline_text=outline_text or "",
+                    lesson_text=lesson_text,
+                    course_name=course_name,
+                    model=planner_model,
+                )
+            except Exception:
+                logger.exception("Course map generation failed; continuing without | job_id=%s", str(job.id))
+                course_map_text = ""
+            course_map_hash = _hash_text(course_map_text)
             content_hash = hashlib.sha256(
-                f"{outline_hash}|{lesson_hash}|{instructor_hash}|{instructor_ppt_priority}".encode("utf-8")
+                f"{outline_hash}|{lesson_hash}|{instructor_hash}|{course_map_hash}|{instructor_ppt_priority}".encode(
+                    "utf-8"
+                )
             ).hexdigest()
+
             cache_dir = os.path.join(cache_root, f"{CACHE_VERSION}_{content_hash[:16]}")
             os.makedirs(cache_dir, exist_ok=True)
             validated_cache_path = os.path.join(cache_dir, "validated_slides.json")
@@ -698,13 +749,6 @@ async def process_slides_job(job_id) -> None:
             post_assessment_cache_path = os.path.join(cache_dir, "post_assessment.json")
 
             module_entries: list[dict[str, Any]] = []
-            planner_model = (settings.SLIDES_PLANNER_MODEL or "").strip() or None
-            generator_model = (settings.SLIDES_GENERATOR_MODEL or "").strip() or None
-            validator_model = (settings.SLIDES_VALIDATOR_MODEL or "").strip() or None
-            min_per_module = max(1, int(getattr(settings, "SLIDES_MIN_PER_MODULE", 10) or 10))
-            max_per_module = max(min_per_module, int(getattr(settings, "SLIDES_MAX_PER_MODULE", 20) or 20))
-            max_loops = max(1, int(getattr(settings, "SLIDES_VALIDATION_MAX_LOOPS", 2) or 2))
-            module_parallelism = max(1, int(getattr(settings, "SLIDES_MODULE_PARALLELISM", 3) or 3))
             gamma_batch_links: list[str] = []
             gamma_generation_ids: list[str] = []
             gamma_request_log: list[dict[str, Any]] = []
@@ -759,7 +803,9 @@ async def process_slides_job(job_id) -> None:
                 job_pk = job.id
                 job_log = str(job.id)
 
-                async def _run_single_module(mi: int, mod: dict[str, str]) -> tuple[int, str, list[dict[str, Any]]]:
+                async def _run_single_module(
+                    mi: int, mod: dict[str, str]
+                ) -> tuple[int, str, str, int, dict[str, Any]]:
                     module_name = _sanitize_module_display_name(str(mod.get("module_name") or "").strip()) or (
                         f"Module {mi}"
                     )
@@ -773,11 +819,12 @@ async def process_slides_job(job_id) -> None:
                     )
                     t0 = time.time()
                     async with semaphore:
-                        validated_module = await run_module_slides_pipeline(
+                        out = await run_module_slides_pipeline(
                             module_name=module_name,
                             module_text=module_text,
                             lesson_text=lesson_text,
                             instructor_text=mod_instructor,
+                            course_map=course_map_text,
                             planner_model=planner_model,
                             generator_model=generator_model,
                             validator_model=validator_model,
@@ -786,11 +833,14 @@ async def process_slides_job(job_id) -> None:
                             max_loops=max_loops,
                             instructor_ppt_priority=instructor_ppt_priority,
                         )
+                    module_body = str(out.get("module_body") or "")
+                    card_count = int(out.get("card_count") or min_per_module)
+                    module_plan = out.get("module_plan") if isinstance(out.get("module_plan"), dict) else {}
                     logger.info(
-                        "Module pipeline completed | job_id=%s module=%s slides=%s seconds=%.2f",
+                        "Module pipeline completed | job_id=%s module=%s cards=%s seconds=%.2f",
                         job_log,
                         module_name,
-                        len(validated_module),
+                        card_count,
                         time.time() - t0,
                     )
                     await _gamma_render_and_record_module_batches(
@@ -798,7 +848,8 @@ async def process_slides_job(job_id) -> None:
                         cache_dir=cache_dir,
                         module_index=mi,
                         module_name=module_name,
-                        module_slides=validated_module,
+                        module_body=module_body,
+                        card_count=card_count,
                         gamma_batch_links=gamma_batch_links,
                         gamma_generation_ids=gamma_generation_ids,
                         gamma_request_log=gamma_request_log,
@@ -806,9 +857,9 @@ async def process_slides_job(job_id) -> None:
                         lock=gamma_lock,
                         job_log_id=job_log,
                     )
-                    return mi, module_name, validated_module
+                    return mi, module_name, module_body, card_count, module_plan
 
-                task_handles: list[asyncio.Task[tuple[int, str, list[dict[str, Any]]]]] = []
+                task_handles: list[asyncio.Task[tuple[int, str, str, int, dict[str, Any]]]] = []
                 try:
                     async with asyncio.TaskGroup() as tg:
                         for mi, mod in enumerate(modules, start=1):
@@ -822,8 +873,15 @@ async def process_slides_job(job_id) -> None:
                     raise eg.exceptions[0] from eg
                 module_results = sorted((h.result() for h in task_handles), key=lambda r: r[0])
 
-                for _, module_name, validated_module in module_results:
-                    module_entries.append({"module_name": module_name, "slides": validated_module})
+                for _, module_name, module_body, card_count, module_plan in module_results:
+                    module_entries.append(
+                        {
+                            "module_name": module_name,
+                            "module_content": module_body,
+                            "card_count": card_count,
+                            "module_plan": module_plan,
+                        }
+                    )
                     await db.refresh(job)
                     try:
                         base_prog = json.loads(job.payload_json or "{}")
@@ -833,14 +891,14 @@ async def process_slides_job(job_id) -> None:
                         base_prog = {}
                     base_prog["progress"] = {
                         "module": module_name,
-                        "generated": len(validated_module),
-                        "total": len(validated_module),
+                        "generated": card_count,
+                        "total": card_count,
                     }
                     job.payload_json = json.dumps(base_prog)
                     await db.commit()
 
                 if not module_entries:
-                    raise RuntimeError("No modules produced slides.")
+                    raise RuntimeError("No modules produced validated content.")
 
                 with open(validated_cache_path, "w", encoding="utf-8") as f:
                     json.dump(
@@ -859,6 +917,11 @@ async def process_slides_job(job_id) -> None:
                     for module in module_entries:
                         m_name = str(module.get("module_name") or "Module").strip()
                         f.write(f"## {m_name}\n")
+                        body = str(module.get("module_content") or "").strip()
+                        if body:
+                            f.write(body)
+                            f.write("\n\n")
+                            continue
                         slides = module.get("slides") if isinstance(module.get("slides"), list) else []
                         for i, slide in enumerate(slides, start=1):
                             f.write(f"Slide {i}: {str(slide.get('title') or '').strip()}\n")
@@ -929,13 +992,14 @@ async def process_slides_job(job_id) -> None:
                     module_name = _sanitize_module_display_name(
                         str(module.get("module_name") or "").strip()
                     ) or (f"Module {mi}")
-                    module_slides = module.get("slides") if isinstance(module.get("slides"), list) else []
+                    module_body, card_n = _extract_module_body_and_card_count(module, module_name)
                     await _gamma_render_and_record_module_batches(
                         job_id=job.id,
                         cache_dir=cache_dir,
                         module_index=mi,
                         module_name=module_name,
-                        module_slides=module_slides,
+                        module_body=module_body,
+                        card_count=card_n,
                         gamma_batch_links=gamma_batch_links,
                         gamma_generation_ids=gamma_generation_ids,
                         gamma_request_log=gamma_request_log,

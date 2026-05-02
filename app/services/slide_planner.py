@@ -1,6 +1,6 @@
 """
-**Slide planner** — given outline/lesson/instructor text, returns a list of planned slides
-(titles + types). Invoked from ``slides_graph._planner_node`` via ``plan_slides``.
+**Slide planner** — returns a structured ``module_plan`` for one module (no per-slide list).
+Gamma and the content generator use this blueprint; slide count is ``no_of_slides``.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def _slide_plan_system_prompt(instructor_ppt_priority: str) -> str:
         priority_rules = """
 - Primary source priority:
   1) Course Outline (mandatory: module scope, topics, and sequencing)
-  2) Instructor PPT (primary for factual detail, examples, definitions, and slide-relevant wording)
+  2) Instructor PPT (primary for factual detail, examples, definitions)
   3) Lesson Plan / Activity Plan (secondary)
 """
     else:
@@ -29,8 +29,8 @@ def _slide_plan_system_prompt(instructor_ppt_priority: str) -> str:
   3) Instructor PPT (supplement only)
 """
     return f"""
-You are a senior instructional designer and slide strategist.
-Your job: produce a slide plan (titles + types) from the provided training materials.
+You are a senior instructional designer.
+Your job: produce ONE module_plan object from the provided training materials for THIS module only.
 
 Return ONLY valid JSON with this shape:
 {{
@@ -41,28 +41,14 @@ Return ONLY valid JSON with this shape:
     "activities": ["..."],
     "lesson_plan_focus": "...",
     "no_of_slides": 18
-  }},
-  "slides": [
-    {{"title": "...", "type": "content"}},
-    {{"title": "...", "type": "activity"}}
-  ]
+  }}
 }}
 
 Rules:
 {priority_rules.strip()}
-- Generate 15-25 slides per module
-- Hard maximum: 25
-- Minimum target: 15 (if content allows)
-- module_plan.no_of_slides should match final planned slide count
-- module_plan.topics/exercises/activities should summarize source coverage for this module
-- Include exactly 1 summary slide
-- Use activity slides only when LP/AP context exists
-- Avoid duplicate or near-duplicate slides
-- Prefer diagram/visual-oriented slides where appropriate (frameworks, process flows, comparisons, matrices).
-- 16:9 fit-first planning: if a topic is dense, split it into continuation slides
-  (e.g., "Risk Assessment - Part 1" / "Risk Assessment - Part 2") instead of overloading one slide.
-- title must be short and specific (max 10 words)
-- type must be one of: "content", "activity", "summary"
+- no_of_slides: integer between 15 and 25 (target deck size hint for downstream layout; Gamma may adjust if configured)
+- module_plan.topics/exercises/activities must reflect this module's outline + LP/AP + instructor context
+- Do not output a "slides" array — only module_plan
 """
 
 
@@ -73,7 +59,7 @@ def _safe_json(text: str) -> dict[str, Any]:
     if first >= 0 and last > first:
         raw = raw[first : last + 1]
     data = json.loads(raw)
-    if not isinstance(data, dict) or "slides" not in data:
+    if not isinstance(data, dict) or "module_plan" not in data:
         raise ValueError("Planner returned invalid JSON structure.")
     return data
 
@@ -107,4 +93,3 @@ async def plan_slides(
         model_override=model,
     )
     return _safe_json(raw)
-
