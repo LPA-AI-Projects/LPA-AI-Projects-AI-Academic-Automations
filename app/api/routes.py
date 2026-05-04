@@ -329,7 +329,6 @@ async def _parse_generate_request(request: Request) -> GenerateCourseRequest:
         required_input_fields = [
             "company_name",
             "course_name",
-            "department",
         ]
 
     missing_required = [
