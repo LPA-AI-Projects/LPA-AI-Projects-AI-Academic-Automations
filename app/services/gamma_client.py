@@ -166,17 +166,11 @@ async def generate_ppt(
     create_url = f"{base}/v1.0/generations/from-template" if use_template else f"{base}/v1.0/generations"
     headers = {"X-API-KEY": api_key, "Accept": "application/json"}
     desired_cards = len(slides_batch)
-    auto_card_count = bool(getattr(settings, "GAMMA_AUTO_CARD_COUNT", False))
     strict_instructions = (
-        "Infer an appropriate number of slides/cards from the provided module content and structure. "
-        "Treat each section as distinct content and avoid collapsing important sections."
-        if auto_card_count
-        else (
-            f"Create exactly {desired_cards} slides/cards. "
-            "Treat each 'Slide X:' section as one distinct slide. "
-            "Do not merge sections. Do not skip sections. "
-            "Do not summarize into fewer slides. Keep slide count very close to requested."
-        )
+        f"Create exactly {desired_cards} slides/cards. "
+        "Treat each 'Slide X:' section as one distinct slide. "
+        "Do not merge sections. Do not skip sections. "
+        "Do not summarize into fewer slides. Keep slide count very close to requested."
     )
     visual_layout_instructions = (
         "Layout (16:9): Each card should fit without vertical overflow or tiny illegible text. "
@@ -186,8 +180,7 @@ async def generate_ppt(
         "Do not leave image or diagram regions as empty grey placeholders; if the template has a side or "
         "lower panel for visuals, use it. Match diagram style to the description (e.g. 2x2 grid = four-quadrant "
         "graphic with labels). Use consistent iconography across the deck. "
-        "Keep margins, title band, and body rhythm consistent; one coherent palette. "
-        "Visual direction: modern, clean, professional slide aesthetic."
+        "Keep margins, title band, and body rhythm consistent; one coherent palette."
     )
     merged_instructions = f"{strict_instructions} {visual_layout_instructions}"
     if (additional_instructions or "").strip():
@@ -201,6 +194,7 @@ async def generate_ppt(
             "gammaId": template_id,
             "prompt": prompt,
             "exportAs": "pptx",
+            "cardOptions": {"dimensions": "16x9"},
             "sharingOptions": sharing_options,
         }
         image_opts = _build_image_options_for_template()
@@ -216,12 +210,11 @@ async def generate_ppt(
             "textMode": "preserve",
             "format": "presentation",
             "cardOptions": {"dimensions": "16x9"},
+            "numCards": desired_cards,
             "exportAs": "pptx",
             "additionalInstructions": merged_instructions[:5000],
             "sharingOptions": sharing_options,
         }
-        if not auto_card_count:
-            payload["numCards"] = desired_cards
         image_opts = _build_image_options_for_generate()
         if image_opts:
             payload["imageOptions"] = image_opts

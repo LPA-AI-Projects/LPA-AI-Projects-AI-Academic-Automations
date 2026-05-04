@@ -31,6 +31,7 @@ LEVEL_MAP: dict[str, str] = {
 }
 
 DEFAULT_NUM_QUESTIONS = 15
+# Optional ceiling for ``curriculum_max_chars`` when callers want bounded prompts.
 MAX_CURRICULUM_CHARS = 100_000
 
 
@@ -142,6 +143,7 @@ def build_user_prompt(
     num_questions: int,
     pre_difficulty: str | None = None,
     nonce: str | None = None,
+    curriculum_max_chars: int | None = None,
 ) -> str:
     phase = "post" if phase == "post" else "pre"
     extra = ""
@@ -164,11 +166,16 @@ def build_user_prompt(
             "topic emphasis within the curriculum, distractor wording and option ordering "
             "compared to any previous session you might imagine.\n"
         )
+    curriculum_block = (
+        _truncate(curriculum_excerpt, curriculum_max_chars)
+        if curriculum_max_chars is not None
+        else (curriculum_excerpt or "").strip()
+    )
     return f"""Course name: {course_name}
 
 Curriculum content (excerpt):
 ---
-{_truncate(curriculum_excerpt, MAX_CURRICULUM_CHARS)}
+{curriculum_block}
 ---
 {extra}{nonce_block}
 Produce JSON in this exact shape:
@@ -195,6 +202,7 @@ async def _generate_mcqs(
     num_questions: int,
     pre_difficulty: str | None,
     nonce: str | None = None,
+    curriculum_max_chars: int | None = None,
 ) -> list[dict[str, Any]]:
     ai = ClaudeService()
     sys_p = build_system_prompt(phase=phase, difficulty=difficulty, num_questions=num_questions)
@@ -206,6 +214,7 @@ async def _generate_mcqs(
         num_questions=num_questions,
         pre_difficulty=pre_difficulty,
         nonce=nonce,
+        curriculum_max_chars=curriculum_max_chars,
     )
     raw = await ai.generate_text_completion(system_prompt=sys_p, user_prompt=usr_p, timeout_s=300.0)
     questions = _parse_questions_json(raw)
@@ -232,6 +241,8 @@ async def generate_assessment_questions_from_text(
     Reusable assessment generation helper for non-assessment pipelines (e.g. slides).
     Does not persist any DB state.
 
+    Sends the full ``curriculum_text`` into the model prompt (no character cap).
+
     Pass a fresh ``nonce`` per call when you need successive invocations to
     produce DIFFERENT question sets from the same curriculum (e.g. on-demand
     generation behind a public learner URL).
@@ -243,7 +254,7 @@ async def generate_assessment_questions_from_text(
         nq = DEFAULT_NUM_QUESTIONS
     if nq > 50:
         nq = 50
-    text = _truncate(str(curriculum_text or ""), MAX_CURRICULUM_CHARS)
+    text = str(curriculum_text or "").strip()
     if not text:
         return []
     return await _generate_mcqs(
@@ -301,7 +312,6 @@ async def process_assessment_job(job_id) -> None:
                 with open(pdf_path, "rb") as f:
                     b = f.read()
                 curriculum_text = await extract_pdf_text_async(b)
-                curriculum_text = _truncate(curriculum_text, MAX_CURRICULUM_CHARS)
                 payload["curriculum_text_excerpt"] = curriculum_text
                 payload["difficulty"] = difficulty
 

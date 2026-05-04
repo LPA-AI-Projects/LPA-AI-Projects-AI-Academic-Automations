@@ -52,7 +52,7 @@ async def _extract_instructor_file_text_async(blob: bytes, basename: str) -> str
 
 
 MAX_SLIDES_PER_BATCH = 60
-CACHE_VERSION = "slides_cache_v4"
+CACHE_VERSION = "slides_cache_v5"
 
 
 def _safe_course_name(name: str | None) -> str:
@@ -431,7 +431,7 @@ async def _gamma_render_and_record_module_batches(
 
             drive_link: str | None = None
             drive_file_id: str | None = None
-            suffix = ""
+            suffix = f" Batch {bi}" if len(batch_out) > 1 else ""
             module_gamma_links.append(
                 {
                     "module_index": str(module_index),
@@ -511,7 +511,7 @@ def _load_modules_from_validated_slides_path(path: str) -> list[dict[str, Any]] 
 
 
 def _build_post_curriculum_from_modules(module_entries: list[dict[str, Any]]) -> str:
-    """Flatten validated module content into text for post-assessment (module_content or legacy slides)."""
+    """Flatten validated module content for post-assessment (module_content or legacy slides)."""
     lines: list[str] = []
     for module in module_entries:
         module_name = str(module.get("module_name") or "Module").strip()
@@ -541,13 +541,10 @@ async def process_slides_job(job_id) -> None:
     extracting -> planning -> generating_slides -> validating -> batching
     -> gamma_rendering -> merging -> attaching -> completed
 
-    - **Slide structure + text** is produced in ``slides_graph`` (planner → generator → validator);
-      see that module for where planning / content generation run.
-    - **Gamma** reads each batch from ``module_{i}_batch_{j}_input.txt`` (that file is the
-      body sent to Gamma, not a second serialization from memory).
-    - **Post-assessment** curriculum for the in-job task is built from
-      ``validated_slides_path`` (``validated_slides.json``) when readable; the public
-      courseware API uses the same file via ``courseware_assessment_resolver``.
+    - **Per module**: ``slides_graph`` runs brief → single Markdown body → validator
+      (full-module regen on retry). Course map is built once per job and reused.
+    - **Gamma** reads ``module_{i}_batch_1_input.txt`` (plain module text for that module).
+    - **Post-assessment** uses ``module_content`` in ``validated_slides.json`` (concatenated text).
     """
     started = time.time()
     async with AsyncSessionLocal() as db:
@@ -740,7 +737,6 @@ async def process_slides_job(job_id) -> None:
                     "utf-8"
                 )
             ).hexdigest()
-
             cache_dir = os.path.join(cache_root, f"{CACHE_VERSION}_{content_hash[:16]}")
             os.makedirs(cache_dir, exist_ok=True)
             validated_cache_path = os.path.join(cache_dir, "validated_slides.json")
@@ -843,6 +839,12 @@ async def process_slides_job(job_id) -> None:
                         card_count,
                         time.time() - t0,
                     )
+                    body_path = os.path.join(cache_dir, f"module_{mi}_validated_body.txt")
+                    try:
+                        with open(body_path, "w", encoding="utf-8") as bf:
+                            bf.write(module_body)
+                    except Exception:
+                        logger.exception("Failed writing module body text | path=%s", body_path)
                     await _gamma_render_and_record_module_batches(
                         job_id=job_pk,
                         cache_dir=cache_dir,

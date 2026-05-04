@@ -18,11 +18,13 @@ Design notes:
 """
 from __future__ import annotations
 
+import hashlib
 import secrets
 import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -134,6 +136,57 @@ async def _enforce_rate_limit(*, ip: str, zoho_record_id: str, phase: str) -> No
 def _normalize_num_questions(raw: int | None) -> int:
     nq = int(raw or settings.COURSEWARE_ASSESSMENT_DEFAULT_NUM_QUESTIONS or DEFAULT_NUM_QUESTIONS)
     return max(1, min(50, nq))
+
+
+def _verify_api_key_only(*, x_api_key: str | None) -> None:
+    if not x_api_key or x_api_key != settings.API_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A valid X-API-Key is required.",
+        )
+
+
+class ModuleCurriculumBlock(BaseModel):
+    """One training module: heading + free-text body (Markdown/plain)."""
+
+    module_name: str = Field(default="", description="Display name, e.g. Module 1: Leadership basics")
+    content: str = Field(default="", description="Full subject content for this module")
+
+
+class GenerateFromModulesRequest(BaseModel):
+    """
+    Build an assessment from explicit curriculum (no Zoho / slides job).
+
+    Either pass ``curriculum_text`` as one blob or pass ``modules``; if both are
+    set, ``curriculum_text`` wins. Shape matches how post-assessment flattens
+    multi-module courseware (``##`` headings + body).
+    """
+
+    phase: str = Field(default="post", description="pre or post")
+    course_name: str = Field(default="Course", min_length=1)
+    modules: list[ModuleCurriculumBlock] = Field(default_factory=list)
+    curriculum_text: str | None = Field(
+        default=None,
+        description="Optional single document; if non-empty, used instead of modules",
+    )
+    difficulty: str | None = None
+    num_questions: int | None = Field(default=None, ge=1, le=50)
+    pre_difficulty: str | None = Field(
+        default=None,
+        description="For post: approximate pre-test level for prompt context",
+    )
+
+
+def _flatten_modules_to_curriculum(modules: list[ModuleCurriculumBlock]) -> str:
+    lines: list[str] = []
+    for m in modules:
+        name = (m.module_name or "").strip() or "Module"
+        body = (m.content or "").strip()
+        lines.append(f"## {name}")
+        if body:
+            lines.append(body)
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def _resolve_num_questions(
@@ -265,6 +318,108 @@ async def _generate_for_phase(
         "content_hash": content.content_hash,
         "generation_ms": int(elapsed_ms),
         "nonce": nonce,
+    }
+
+
+@router.post("/from-modules")
+async def post_generate_from_modules(
+    body: GenerateFromModulesRequest,
+    request: Request,
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> dict[str, Any]:
+    """
+    Generate pre/post MCQs from explicit multi-module curriculum (or one ``curriculum_text``).
+
+    Intended for internal / Vercel-proxy use: same ``X-API-Key`` as other courseware routes.
+    Flattens ``modules`` the same way as post-assessment course text (``##`` title + body per module).
+    """
+    _verify_api_key_only(x_api_key=x_api_key)
+    phase_raw = (body.phase or "post").strip().lower()
+    phase_norm = "post" if phase_raw == "post" else "pre"
+    rid_metric = "from-modules"
+    ip = _client_ip(request)
+    await _enforce_rate_limit(ip=ip, zoho_record_id=f"{rid_metric}:{ip}", phase=phase_norm)
+
+    curriculum = (body.curriculum_text or "").strip()
+    if not curriculum:
+        curriculum = _flatten_modules_to_curriculum(body.modules)
+    if not curriculum:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide non-empty curriculum_text or at least one module with content.",
+        )
+
+    default_diff = settings.COURSEWARE_ASSESSMENT_DEFAULT_DIFFICULTY or "intermediate"
+    if phase_norm == "pre":
+        diff = normalize_difficulty(body.difficulty or default_diff)
+        pre_for_post: str | None = None
+    else:
+        if body.difficulty:
+            diff = normalize_difficulty(body.difficulty)
+        elif body.pre_difficulty:
+            diff = post_difficulty_from_pre(body.pre_difficulty)
+        else:
+            diff = post_difficulty_from_pre(default_diff)
+        pre_for_post = normalize_difficulty(body.pre_difficulty or default_diff)
+
+    nq = _normalize_num_questions(body.num_questions)
+    nonce = secrets.token_urlsafe(8)
+    started = time.monotonic()
+    try:
+        questions = await generate_assessment_questions_from_text(
+            phase=phase_norm,
+            difficulty=diff,
+            course_name=body.course_name,
+            curriculum_text=curriculum,
+            num_questions=nq,
+            pre_difficulty=pre_for_post,
+            nonce=nonce,
+        )
+    except Exception as exc:
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        await record_error(
+            phase=phase_norm,
+            zoho_record_id=rid_metric,
+            kind="generation_failed",
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+        logger.exception(
+            "courseware_assessment from-modules failed | phase=%s elapsed_ms=%.1f",
+            phase_norm,
+            elapsed_ms,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Question generation failed upstream. Please try again.",
+        ) from exc
+
+    if not questions:
+        raise HTTPException(
+            status_code=502,
+            detail="The model returned no usable questions. Please try again.",
+        )
+
+    elapsed_ms = (time.monotonic() - started) * 1000.0
+    content_hash = hashlib.sha256(curriculum.encode("utf-8")).hexdigest()
+    await record_generation(
+        phase=phase_norm,
+        zoho_record_id=rid_metric,
+        elapsed_ms=elapsed_ms,
+        content_hash=content_hash,
+    )
+
+    return {
+        "zoho_record_id": None,
+        "phase": phase_norm,
+        "course_name": body.course_name,
+        "difficulty": diff,
+        "num_questions": len(questions),
+        "questions": questions,
+        "content_hash": content_hash,
+        "generation_ms": int(elapsed_ms),
+        "nonce": nonce,
+        "source": "from-modules",
+        "seconds_per_question": 45,
     }
 
 

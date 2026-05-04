@@ -1,7 +1,7 @@
 """
 One-shot course map for slides jobs: short global context reused per module.
 
-Avoids passing full outline + full LP/AP into every module generation call.
+Avoids sending full outline + full LP/AP into every module call.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ async def build_course_map(
     model: str | None = None,
     timeout_s: float = 90.0,
 ) -> str:
-    """Single LLM call after extraction; result is passed into each module generator."""
+    """Single LLM call after extraction; result is passed into each module pipeline."""
     ai = ClaudeService()
     user = (
         f"COURSE_NAME: {course_name or 'Training'}\n\n"
