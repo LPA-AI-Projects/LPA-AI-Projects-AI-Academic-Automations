@@ -748,6 +748,12 @@ class ClaudeService:
         self.api_key = settings.ANTHROPIC_API_KEY
         self.base_url = settings.ANTHROPIC_BASE_URL.rstrip("/")
         self.model = settings.ANTHROPIC_MODEL
+        self.fallback_models = [
+            m.strip()
+            for m in str(getattr(settings, "ANTHROPIC_FALLBACK_MODELS", "") or "").split(",")
+            if m and m.strip()
+        ]
+        self.fallback_to_openai = bool(getattr(settings, "AI_FALLBACK_TO_OPENAI", True))
         self.openai_api_key = str(getattr(settings, "OPENAI_API_KEY", "") or "").strip()
         self.openai_base_url = str(getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com") or "").rstrip("/")
         self.openai_model = str(getattr(settings, "OPENAI_MODEL", "gpt-4o-mini") or "").strip()
@@ -814,12 +820,8 @@ class ClaudeService:
 
         candidate_models: list[str] = []
         preferred_model = (model_override or "").strip() or self.model
-        # Fallbacks if primary model errors (avoid deprecated/invalid IDs).
-        fallback_models = (
-            "claude-sonnet-4-20250514",
-            "claude-3-5-haiku-20241022",
-        )
-        for m in (preferred_model, self.model, *fallback_models):
+        # Fallbacks if primary model errors, configurable via ANTHROPIC_FALLBACK_MODELS.
+        for m in (preferred_model, self.model, *self.fallback_models):
             mm = (m or "").strip()
             if mm and mm not in candidate_models:
                 candidate_models.append(mm)
@@ -919,6 +921,18 @@ class ClaudeService:
                         await asyncio.sleep(2 ** (attempt - 1))
 
         logger.error("Claude failed after retries | last_error=%r", last_error)
+        if self.provider != "openai" and self.fallback_to_openai and self.openai_api_key:
+            logger.warning(
+                "Anthropic exhausted, trying OpenAI fallback | model=%s openai_model=%s",
+                self.model,
+                self.openai_model,
+            )
+            return await self._call_openai_chat_api(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                timeout_s=timeout_s,
+                max_attempts=max_attempts,
+            )
         raise RuntimeError("AI service failed after retries. Please try again later.")
 
     async def _call_openai_chat_api(

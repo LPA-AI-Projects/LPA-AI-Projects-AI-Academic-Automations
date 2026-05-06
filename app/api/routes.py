@@ -527,7 +527,7 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             ai = ClaudeService()
             # Outline pipeline with optional context profiling + research helper notes.
             logger.info("Outline generation started | job_id=%s", str(job_id))
-            learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=310)
+            learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=600)
             context_profile_text = ""
             research_notes_text = ""
             try:
@@ -548,14 +548,14 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                         research_notes_text=research_notes_text,
                         context_profile_text=context_profile_text,
                     ),
-                    timeout=310,
+                    timeout=600,
                 )
                 _enforce_regions_served_constant(outline_payload)
                 outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
             except RuntimeError:
                 outline = await wait_for(
                     ai.build_roi_course_outline(context_text, learning_objectives),
-                    timeout=310,
+                    timeout=600,
                 )
                 outline_payload = None
             logger.info("Outline generation completed | job_id=%s", str(job_id))
@@ -904,7 +904,7 @@ async def refine_course(
             logger.info("Refine AI started with structured mode | zoho_record_id=%s", rid)
             refined_payload = await wait_for(
                 ai.refine_course_outline_json(base_outline, req.feedback),
-                timeout=310,
+                timeout=600,
             )
             _enforce_regions_served_constant(refined_payload)
             updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
@@ -921,7 +921,7 @@ async def refine_course(
             )
             updated_outline = await wait_for(
                 ai.build_roi_course_outline(context_text, base_outline),
-                timeout=310,
+                timeout=600,
             )
             refined_payload = None
             logger.info("Refine AI fallback completed | zoho_record_id=%s", rid)

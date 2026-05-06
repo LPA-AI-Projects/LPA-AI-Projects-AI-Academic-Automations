@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     AI_PROVIDER: str = "anthropic"
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+    # Comma-separated fallback model IDs tried after ANTHROPIC_MODEL on transient/model errors.
+    ANTHROPIC_FALLBACK_MODELS: str = "claude-haiku-4-5,claude-3-5-haiku-20241022"
+    # When true, if Anthropic retries/fallback-models are exhausted, one final OpenAI attempt is made.
+    AI_FALLBACK_TO_OPENAI: bool = True
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     # httpx read timeout for Anthropic (long generations + web_search often exceed 2 minutes).
     ANTHROPIC_READ_TIMEOUT_S: float = 600.0
@@ -157,6 +161,7 @@ class Settings(BaseSettings):
         "ZOHO_CRM_PRE_ASSESSMENT_LEVEL_FIELD_API_NAME",
         "ZOHO_CRM_POST_ASSESSMENT_LEVEL_FIELD_API_NAME",
         "ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME",
+        "ANTHROPIC_FALLBACK_MODELS",
         "PUBLIC_COURSE_SHEET_CSV_URL",
         "PUBLIC_COURSE_CATALOG_CSV_URL",
         "PUBLIC_COURSE_SHEET_COURSE_COLUMN",
@@ -181,7 +186,12 @@ class Settings(BaseSettings):
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
 
-    @field_validator("ASSESSMENT_LINK_REQUIRE_TOKEN", "COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD", mode="before")
+    @field_validator(
+        "ASSESSMENT_LINK_REQUIRE_TOKEN",
+        "COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD",
+        "AI_FALLBACK_TO_OPENAI",
+        mode="before",
+    )
     @classmethod
     def coerce_bool_flags(cls, value: object) -> bool:
         if isinstance(value, bool):
