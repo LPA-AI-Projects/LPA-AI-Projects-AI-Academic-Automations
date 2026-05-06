@@ -12,12 +12,13 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
     # Comma-separated fallback model IDs tried after ANTHROPIC_MODEL on transient/model errors.
+    # Set to "none" to disable Anthropic model fallbacks and move directly to provider fallback.
     ANTHROPIC_FALLBACK_MODELS: str = "claude-haiku-4-5,claude-3-5-haiku-20241022"
     # When true, if Anthropic retries/fallback-models are exhausted, one final OpenAI attempt is made.
     AI_FALLBACK_TO_OPENAI: bool = True
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
-    # httpx read timeout for Anthropic (long generations + web_search often exceed 2 minutes).
-    ANTHROPIC_READ_TIMEOUT_S: float = 600.0
+    # httpx read timeout for Anthropic model calls.
+    ANTHROPIC_READ_TIMEOUT_S: float = 310.0
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com"

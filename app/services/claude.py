@@ -748,11 +748,16 @@ class ClaudeService:
         self.api_key = settings.ANTHROPIC_API_KEY
         self.base_url = settings.ANTHROPIC_BASE_URL.rstrip("/")
         self.model = settings.ANTHROPIC_MODEL
-        self.fallback_models = [
-            m.strip()
-            for m in str(getattr(settings, "ANTHROPIC_FALLBACK_MODELS", "") or "").split(",")
-            if m and m.strip()
-        ]
+        raw_fallback_models = str(getattr(settings, "ANTHROPIC_FALLBACK_MODELS", "") or "").strip()
+        disable_markers = {"none", "null", "off", "false", "0", "disabled"}
+        if raw_fallback_models.lower() in disable_markers:
+            self.fallback_models = []
+        else:
+            self.fallback_models = [
+                m.strip()
+                for m in raw_fallback_models.split(",")
+                if m and m.strip()
+            ]
         self.fallback_to_openai = bool(getattr(settings, "AI_FALLBACK_TO_OPENAI", True))
         self.openai_api_key = str(getattr(settings, "OPENAI_API_KEY", "") or "").strip()
         self.openai_base_url = str(getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com") or "").rstrip("/")
