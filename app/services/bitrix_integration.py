@@ -9,6 +9,7 @@ import httpx
 
 from app.core.config import settings
 from app.models.job import CourseJob
+from app.api.auth_deps import bitrix_application_token_configured
 from app.services.bitrix_crm import bitrix_configured, maybe_attach_course_pdf, update_outline_record_fields
 from app.utils.logger import get_logger
 
@@ -32,6 +33,7 @@ def bitrix_completion_webhook_is_configured() -> bool:
 def get_bitrix_course_outline_integration_status() -> dict[str, bool]:
     return {
         "bitrix_webhook_configured": bitrix_configured(),
+        "bitrix_application_token_configured": bitrix_application_token_configured(),
         "bitrix_crm_attach_configured": bool(
             settings.BITRIX_ATTACH_PDF_TO_CRM
             and bitrix_configured()

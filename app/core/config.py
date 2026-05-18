@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     # Bitrix24 — incoming webhook + optional outline write-back
     # Full base URL, e.g. https://your-domain.bitrix24.com/rest/1/secret_code/
     BITRIX_WEBHOOK_URL: str = ""
+    # Outgoing webhook: auth[application_token] from Bitrix (Business process / automation)
+    BITRIX_APPLICATION_TOKEN: str = ""
     # deal | lead | dynamic (uses crm.item.update + BITRIX_CRM_ENTITY_TYPE_ID)
     BITRIX_CRM_ENTITY: str = "deal"
     # entityTypeId for crm.item.update (2 = deal in universal CRM API)
@@ -191,6 +193,7 @@ class Settings(BaseSettings):
         "ZOHO_CRM_POST_ASSESSMENT_LEVEL_FIELD_API_NAME",
         "ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME",
         "BITRIX_WEBHOOK_URL",
+        "BITRIX_APPLICATION_TOKEN",
         "BITRIX_CRM_ENTITY",
         "BITRIX_OUTLINE_PDF_FIELD",
         "BITRIX_OUTLINE_STATUS_FIELD",

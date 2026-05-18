@@ -192,8 +192,8 @@ def bitrix_course_outline_integration_status():
         "Accepts: (1) Bitrix task webhook / task.item.getdata JSON with DESCRIPTION table, "
         "(2) `{ \"taskId\": 78776 }` to fetch task from Bitrix, or "
         "(3) `{ \"bitrix_record_id\": \"...\", \"input_data\": {...} }`. "
-        "Auth (any one): ?x-api-key= on webhook URL, X-API-Key header, or "
-        "`\"api_key\"` in JSON body (matches Railway API_SECRET_KEY). "
+        "Auth: Bitrix outgoing webhook sends auth[application_token] — set "
+        "BITRIX_APPLICATION_TOKEN in Railway to that value. Or use X-API-Key / ?x-api-key= / api_key in body. "
         "On success, uploads PDF to Drive, attaches via tasks.task.files.attach, "
         "and posts tasks.task.chat.message.send when BITRIX_TASK_ATTACH_ENABLED=true."
     ),

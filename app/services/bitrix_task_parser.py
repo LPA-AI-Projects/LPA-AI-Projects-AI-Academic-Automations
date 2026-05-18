@@ -172,7 +172,18 @@ def extract_task_id(payload: dict[str, Any]) -> str | None:
     if not isinstance(payload, dict):
         return None
 
-    for key in ("ID", "id", "taskId", "task_id", "document_id", "bitrix_record_id"):
+    for key in (
+        "ID",
+        "id",
+        "taskId",
+        "task_id",
+        "document_id",
+        "bitrix_record_id",
+        # Bitrix outgoing webhook (flat form keys)
+        "data[FIELDS_AFTER][ID]",
+        "data[FIELDS_BEFORE][ID]",
+        "data[FIELDS][ID]",
+    ):
         v = payload.get(key)
         if v is not None and str(v).strip():
             return str(v).strip()

@@ -14,6 +14,7 @@ class BitrixCourseOutlineIntegrationStatus(BaseModel):
     """Non-secret flags for Bitrix24 incoming webhook + optional callback."""
 
     bitrix_webhook_configured: bool
+    bitrix_application_token_configured: bool
     bitrix_crm_attach_configured: bool
     bitrix_task_attach_configured: bool
     bitrix_completion_callback_configured: bool
