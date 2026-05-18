@@ -128,6 +128,111 @@ async def fetch_task_item_data(task_id: str | int) -> dict[str, Any]:
     raise RuntimeError(f"task.item.getdata returned unexpected type: {type(result)}")
 
 
+def _message_text_from_im_row(row: dict[str, Any]) -> str:
+    for key in ("text", "message", "MESSAGE", "TEXT"):
+        v = row.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+async def _fetch_task_chat_id(task_id: str | int) -> int | None:
+    """Resolve task chat id (old CHAT_ID or new chat.id)."""
+    tid = int(task_id)
+    try:
+        result = await bitrix_call_api(
+            "tasks.task.get",
+            {"id": tid, "select": ["id", "chat.id", "chatId"]},
+        )
+    except Exception:
+        logger.warning("tasks.task.get via /rest/api/ failed; trying standard /rest/")
+        result = await bitrix_call("tasks.task.get", {"taskId": tid, "select": ["CHAT_ID", "chatId"]})
+
+    if isinstance(result, dict):
+        item = result.get("item") if isinstance(result.get("item"), dict) else result.get("task")
+        if isinstance(item, dict):
+            chat = item.get("chat")
+            if isinstance(chat, dict):
+                cid = chat.get("id")
+                if cid is not None:
+                    return int(cid)
+            for key in ("chatId", "CHAT_ID", "chat_id"):
+                v = item.get(key)
+                if v is not None:
+                    return int(v)
+        for key in ("chatId", "CHAT_ID"):
+            v = result.get(key)
+            if v is not None:
+                return int(v)
+    return None
+
+
+async def fetch_task_comment_text(task_id: str | int, message_id: str | int) -> str | None:
+    """
+    Load task chat / comment text for ONTASKCOMMENTADD.
+
+    New task card: MESSAGE_ID + im.dialog.messages.get.
+    Old card fallback: task.commentitem.get when comment id > 0.
+    """
+    mid = int(message_id)
+    chat_id = await _fetch_task_chat_id(task_id)
+    if chat_id is not None:
+        dialog_id = f"chat{chat_id}"
+        try:
+            rows = await bitrix_call(
+                "im.dialog.messages.get",
+                {
+                    "DIALOG_ID": dialog_id,
+                    "LAST_ID": mid + 1,
+                    "LIMIT": 20,
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "im.dialog.messages.get failed | task_id=%s chat_id=%s error=%s",
+                task_id,
+                chat_id,
+                e,
+            )
+            rows = None
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                row_id = row.get("id") or row.get("ID")
+                try:
+                    if row_id is not None and int(row_id) == mid:
+                        text = _message_text_from_im_row(row)
+                        if text:
+                            return text
+                except (TypeError, ValueError):
+                    continue
+            if rows:
+                text = _message_text_from_im_row(rows[-1] if isinstance(rows[-1], dict) else {})
+                if text:
+                    return text
+
+    comment_id = int(message_id)
+    if comment_id > 0:
+        try:
+            result = await bitrix_call(
+                "task.commentitem.get",
+                {"TASKID": int(task_id), "ITEMID": comment_id},
+            )
+            if isinstance(result, dict):
+                text = str(result.get("POST_MESSAGE") or result.get("postMessage") or "").strip()
+                if text:
+                    return text
+        except Exception as e:
+            logger.warning(
+                "task.commentitem.get failed | task_id=%s item_id=%s error=%s",
+                task_id,
+                comment_id,
+                e,
+            )
+    return None
+
+
 async def deliver_outline_pdf_to_bitrix_task(
     *,
     task_id: str,

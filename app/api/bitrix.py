@@ -5,11 +5,15 @@ Supports:
 - Explicit JSON: ``{ "bitrix_record_id": "78776", "input_data": { ... } }``
 - Task webhook / ``task.item.getdata`` body with ``DESCRIPTION`` table (parsed automatically)
 - Minimal trigger: ``{ "taskId": 78776 }`` — task fields are fetched from Bitrix
+- ONTASKCOMMENTADD with ``Refine: ...`` in task chat → outline refine (v2+)
 """
 from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
@@ -34,15 +38,45 @@ from app.schemas.course import CourseInputData
 from app.schemas.integration import BitrixCourseOutlineIntegrationStatus
 from app.schemas.job import CourseOutlineQueuedResponse
 from app.services.bitrix_integration import get_bitrix_course_outline_integration_status
-from app.services.bitrix_task_parser import extract_task_id, resolve_bitrix_task_request
-from app.services.bitrix_tasks import fetch_task_item_data
+from app.services.bitrix_task_parser import (
+    _positive_task_id,
+    extract_message_id,
+    extract_task_id,
+    parse_refine_feedback_from_comment,
+    resolve_bitrix_task_request,
+)
+from app.services.bitrix_tasks import fetch_task_comment_text, fetch_task_item_data
+from app.services.course_refine import BITRIX_OUTLINE_JOB_TYPE, run_bitrix_comment_refine
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-BITRIX_OUTLINE_JOB_TYPE = "bitrix_outline"
-
 router = APIRouter(prefix="/api/v1/bitrix", tags=["bitrix"])
+
+BITRIX_GENERATE_EVENTS = frozenset({"ONTASKADD", "ONTASKUPDATE"})
+
+
+class BitrixWebhookKind(str, Enum):
+    GENERATE = "generate"
+    REFINE = "refine"
+    IGNORED = "ignored"
+
+
+@dataclass
+class BitrixWebhookDispatch:
+    kind: BitrixWebhookKind
+    generate_req: BitrixGenerateCourseRequest | None = None
+    refine_task_id: str | None = None
+    refine_feedback: str | None = None
+    refine_course_name: str | None = None
+    ignore_reason: str | None = None
+
+
+def _ignored_response(reason: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"ok": True, "status": "ignored", "reason": reason},
+    )
 
 
 def _is_task_payload(payload: dict) -> bool:
@@ -61,11 +95,8 @@ def _is_task_payload(payload: dict) -> bool:
     return False
 
 
-async def _parse_bitrix_generate_request(request: Request) -> BitrixGenerateCourseRequest:
-    """JSON, form-urlencoded, or raw Bitrix task / automation payload."""
+async def _read_bitrix_payload(request: Request) -> dict[str, Any]:
     content_type = (request.headers.get("content-type") or "").lower()
-
-    payload: dict
     if "application/json" in content_type:
         try:
             payload = await request.json()
@@ -75,34 +106,150 @@ async def _parse_bitrix_generate_request(request: Request) -> BitrixGenerateCour
         body_bytes = await request.body()
         raw_body = body_bytes.decode("utf-8", errors="replace")
         parsed = parse_qs(raw_body, keep_blank_values=True)
-        form_data = {k: (v[0] if isinstance(v, list) and v else "") for k, v in parsed.items()}
-        payload = dict(form_data)
+        payload = {k: (v[0] if isinstance(v, list) and v else "") for k, v in parsed.items()}
     else:
         raise HTTPException(
             status_code=415,
             detail="Use application/json or application/x-www-form-urlencoded.",
         )
-
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail="Request body must be a JSON object.")
+    return payload
+
+
+async def _resolve_bitrix_comment_refine(payload: dict[str, Any]) -> BitrixWebhookDispatch:
+    task_id = extract_task_id(payload)
+    if not task_id:
+        return BitrixWebhookDispatch(
+            kind=BitrixWebhookKind.IGNORED,
+            ignore_reason="missing_task_id",
+        )
+
+    message_id = extract_message_id(payload)
+    if not message_id:
+        comment_id = _positive_task_id(payload.get("data[FIELDS_AFTER][ID]"))
+        if comment_id:
+            message_id = comment_id
+
+    if not message_id:
+        return BitrixWebhookDispatch(
+            kind=BitrixWebhookKind.IGNORED,
+            ignore_reason="missing_message_id",
+        )
+
+    try:
+        comment_text = await fetch_task_comment_text(task_id, message_id)
+    except Exception as e:
+        logger.warning(
+            "Bitrix comment fetch failed | taskId=%s messageId=%s error=%s",
+            task_id,
+            message_id,
+            e,
+        )
+        return BitrixWebhookDispatch(
+            kind=BitrixWebhookKind.IGNORED,
+            ignore_reason="comment_fetch_failed",
+        )
+
+    feedback = parse_refine_feedback_from_comment(comment_text)
+    if not feedback:
+        logger.info(
+            "Bitrix comment ignored (no Refine: prefix) | taskId=%s preview=%s",
+            task_id,
+            (comment_text or "")[:120],
+        )
+        return BitrixWebhookDispatch(
+            kind=BitrixWebhookKind.IGNORED,
+            ignore_reason="not_a_refine_comment",
+        )
+
+    course_name = await _latest_bitrix_course_name(task_id)
+    if not course_name:
+        return BitrixWebhookDispatch(
+            kind=BitrixWebhookKind.IGNORED,
+            ignore_reason="no_completed_outline_for_task",
+        )
 
     logger.info(
-        "Bitrix /courses incoming payload (preview) | keys=%s",
-        sorted(payload.keys()),
+        "Bitrix refine from comment | taskId=%s course_name=%s feedback_len=%s",
+        task_id,
+        course_name,
+        len(feedback),
+    )
+    return BitrixWebhookDispatch(
+        kind=BitrixWebhookKind.REFINE,
+        refine_task_id=task_id,
+        refine_feedback=feedback,
+        refine_course_name=course_name,
     )
 
-    # ── Task flow: DESCRIPTION table or taskId-only ─────────────────────────
+
+async def _latest_bitrix_course_name(task_id: str) -> str | None:
+    import json as _json
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(CourseJob)
+                .where(
+                    CourseJob.zoho_record_id == task_id,
+                    CourseJob.job_type == BITRIX_OUTLINE_JOB_TYPE,
+                    CourseJob.status == "completed",
+                )
+                .order_by(CourseJob.created_at.desc())
+            )
+            job = result.scalars().first()
+        if job is None:
+            return None
+        raw = str(job.payload_json or "").strip()
+        if raw:
+            data = _json.loads(raw)
+            if isinstance(data, dict):
+                name = str(data.get("course_name") or "").strip()
+                if name:
+                    return name
+    except Exception:
+        logger.exception("Failed to load course_name for Bitrix refine | task_id=%s", task_id)
+    return None
+
+
+async def _parse_bitrix_generate_request(payload: dict[str, Any]) -> BitrixGenerateCourseRequest:
+    logger.info(
+        "Bitrix /courses incoming payload (preview) | keys=%s event=%s",
+        sorted(payload.keys()),
+        payload.get("event"),
+    )
+
+    event = str(payload.get("event") or "").upper()
+    if event == "ONTASKCOMMENTADD":
+        raise HTTPException(
+            status_code=422,
+            detail="Use webhook dispatch for ONTASKCOMMENTADD (refine path).",
+        )
+    if event and event not in BITRIX_GENERATE_EVENTS and _is_task_payload(payload):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported Bitrix event for generate: {event}",
+        )
+
     if _is_task_payload(payload):
         try:
-            if extract_task_id(payload) and not str(
-                payload.get("DESCRIPTION") or ""
-            ).strip() and not (
+            if extract_task_id(payload) and not str(payload.get("DESCRIPTION") or "").strip() and not (
                 isinstance(payload.get("result"), dict)
                 and str(payload["result"].get("DESCRIPTION") or "").strip()
             ):
                 tid = extract_task_id(payload)
+                if not tid:
+                    raise HTTPException(status_code=422, detail="Invalid Bitrix task ID.")
                 logger.info("Bitrix task fetch | taskId=%s", tid)
-                task_body = await fetch_task_item_data(str(tid))
+                try:
+                    task_body = await fetch_task_item_data(str(tid))
+                except Exception as e:
+                    logger.warning("Bitrix task fetch failed | taskId=%s error=%s", tid, e)
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Could not load task {tid} from Bitrix.",
+                    ) from e
                 payload = {"result": task_body}
 
             task_id, input_dict = resolve_bitrix_task_request(payload)
@@ -116,7 +263,6 @@ async def _parse_bitrix_generate_request(request: Request) -> BitrixGenerateCour
         except ValidationError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
-    # ── Explicit bitrix_record_id + input_data ──────────────────────────────
     bitrix_record_id = (
         str(payload.get("bitrix_record_id") or "")
         or str(payload.get("deal_id") or "")
@@ -145,7 +291,7 @@ async def _parse_bitrix_generate_request(request: Request) -> BitrixGenerateCour
             status_code=422,
             detail=(
                 "Missing bitrix_record_id or task id. Send a task webhook body, "
-                "{ \"taskId\": 78776 }, or { \"bitrix_record_id\": \"...\", \"input_data\": {...} }."
+                '{ "taskId": 78776 }, or { "bitrix_record_id": "...", "input_data": {...} }.'
             ),
         )
 
@@ -174,6 +320,33 @@ async def _parse_bitrix_generate_request(request: Request) -> BitrixGenerateCour
         raise HTTPException(status_code=422, detail="Payload validation failed for /bitrix/courses.")
 
 
+async def dispatch_bitrix_webhook(request: Request) -> BitrixWebhookDispatch:
+    payload = await _read_bitrix_payload(request)
+    event = str(payload.get("event") or "").upper()
+
+    if event == "ONTASKCOMMENTADD":
+        return await _resolve_bitrix_comment_refine(payload)
+
+    if event and event not in BITRIX_GENERATE_EVENTS:
+        if _is_task_payload(payload):
+            return BitrixWebhookDispatch(
+                kind=BitrixWebhookKind.IGNORED,
+                ignore_reason=f"unsupported_event:{event}",
+            )
+
+    try:
+        req = await _parse_bitrix_generate_request(payload)
+        return BitrixWebhookDispatch(kind=BitrixWebhookKind.GENERATE, generate_req=req)
+    except HTTPException as e:
+        if event in BITRIX_GENERATE_EVENTS or _is_task_payload(payload):
+            logger.warning("Bitrix generate parse failed | event=%s detail=%s", event, e.detail)
+            return BitrixWebhookDispatch(
+                kind=BitrixWebhookKind.IGNORED,
+                ignore_reason=str(e.detail),
+            )
+        raise
+
+
 @router.get(
     "/integrations/course-outline-status",
     response_model=BitrixCourseOutlineIntegrationStatus,
@@ -187,15 +360,11 @@ def bitrix_course_outline_integration_status():
 @router.post(
     "/courses",
     dependencies=[bitrix_auth],
-    summary="Create course outline from Bitrix24 task or CRM record",
+    summary="Create or refine course outline from Bitrix24",
     description=(
-        "Accepts: (1) Bitrix task webhook / task.item.getdata JSON with DESCRIPTION table, "
-        "(2) `{ \"taskId\": 78776 }` to fetch task from Bitrix, or "
-        "(3) `{ \"bitrix_record_id\": \"...\", \"input_data\": {...} }`. "
-        "Auth: Bitrix outgoing webhook sends auth[application_token] — set "
-        "BITRIX_APPLICATION_TOKEN in Railway to that value. Or use X-API-Key / ?x-api-key= / api_key in body. "
-        "On success, uploads PDF to Drive, attaches via tasks.task.files.attach, "
-        "and posts tasks.task.chat.message.send when BITRIX_TASK_ATTACH_ENABLED=true."
+        "ONTASKADD/ONTASKUPDATE: generate outline from task DESCRIPTION. "
+        "ONTASKCOMMENTADD: refine when comment starts with BITRIX_REFINE_COMMENT_PREFIX (default Refine:). "
+        "Auth: auth[application_token] or X-API-Key."
     ),
 )
 async def generate_course_from_bitrix(
@@ -203,7 +372,32 @@ async def generate_course_from_bitrix(
     background_tasks: BackgroundTasks,
     sync: bool = Query(False, description="Wait for completion and return full job JSON."),
 ):
-    req = await _parse_bitrix_generate_request(request)
+    dispatch = await dispatch_bitrix_webhook(request)
+
+    if dispatch.kind == BitrixWebhookKind.IGNORED:
+        return _ignored_response(dispatch.ignore_reason or "ignored")
+
+    if dispatch.kind == BitrixWebhookKind.REFINE:
+        background_tasks.add_task(
+            run_bitrix_comment_refine,
+            task_id=dispatch.refine_task_id or "",
+            feedback=dispatch.refine_feedback or "",
+            course_name=dispatch.refine_course_name or "",
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "ok": True,
+                "status": "refine_queued",
+                "bitrix_task_id": dispatch.refine_task_id,
+                "course_name": dispatch.refine_course_name,
+            },
+        )
+
+    req = dispatch.generate_req
+    if req is None:
+        return _ignored_response("missing_generate_request")
+
     rid = req.bitrix_record_id.strip()
     course_name = _normalize_single_course_name(req.input_data.course_name)
     if not course_name:
@@ -328,4 +522,3 @@ async def get_latest_bitrix_course_outline_job(
         1 for j in jobs if str(j.status or "").strip().lower() == "completed"
     )
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
-

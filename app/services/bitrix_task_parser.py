@@ -167,45 +167,146 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _positive_task_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw or raw.lower() == "undefined":
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    return str(n) if n > 0 else None
+
+
+def extract_message_id(payload: dict[str, Any]) -> str | None:
+    """Task chat message id from ONTASKCOMMENTADD (new task card)."""
+    if not isinstance(payload, dict):
+        return None
+    for key in (
+        "MESSAGE_ID",
+        "message_id",
+        "data[FIELDS_AFTER][MESSAGE_ID]",
+        "data[FIELDS_BEFORE][MESSAGE_ID]",
+    ):
+        mid = _positive_task_id(payload.get(key))
+        if mid:
+            return mid
+    data = payload.get("data")
+    if isinstance(data, dict):
+        after = data.get("FIELDS_AFTER")
+        if isinstance(after, dict):
+            mid = _positive_task_id(after.get("MESSAGE_ID"))
+            if mid:
+                return mid
+    return None
+
+
+def _log_task_id_resolution(payload: dict[str, Any], event: str, resolved: str | None) -> None:
+    logger.info(
+        "Bitrix extract_task_id | event=%s AFTER_ID=%s TASK_ID=%s resolved=%s",
+        event or "(none)",
+        payload.get("data[FIELDS_AFTER][ID]"),
+        payload.get("data[FIELDS_AFTER][TASK_ID]"),
+        resolved,
+    )
+
+
 def extract_task_id(payload: dict[str, Any]) -> str | None:
     """Resolve task id from automation / webhook / task.getdata shapes."""
     if not isinstance(payload, dict):
         return None
 
+    event = str(payload.get("event") or "").upper()
+
     for key in (
-        "ID",
-        "id",
         "taskId",
         "task_id",
-        "document_id",
         "bitrix_record_id",
-        # Bitrix outgoing webhook (flat form keys)
+        "document_id",
+        "data[FIELDS_AFTER][TASK_ID]",
+        "data[FIELDS_BEFORE][TASK_ID]",
+    ):
+        tid = _positive_task_id(payload.get(key))
+        if tid:
+            _log_task_id_resolution(payload, event, tid)
+            return tid
+
+    for key in ("ID", "id"):
+        tid = _positive_task_id(payload.get(key))
+        if tid:
+            _log_task_id_resolution(payload, event, tid)
+            return tid
+
+    for key in (
         "data[FIELDS_AFTER][ID]",
         "data[FIELDS_BEFORE][ID]",
         "data[FIELDS][ID]",
     ):
-        v = payload.get(key)
-        if v is not None and str(v).strip():
-            return str(v).strip()
+        tid = _positive_task_id(payload.get(key))
+        if tid:
+            _log_task_id_resolution(payload, event, tid)
+            return tid
 
     data = payload.get("data")
     if isinstance(data, dict):
+        after = data.get("FIELDS_AFTER")
+        if isinstance(after, dict):
+            tid = _positive_task_id(after.get("TASK_ID")) or _positive_task_id(after.get("ID"))
+            if tid:
+                _log_task_id_resolution(payload, event, tid)
+                return tid
+        before = data.get("FIELDS_BEFORE")
+        if isinstance(before, dict):
+            tid = _positive_task_id(before.get("TASK_ID")) or _positive_task_id(before.get("ID"))
+            if tid:
+                _log_task_id_resolution(payload, event, tid)
+                return tid
         fields = data.get("FIELDS")
         if isinstance(fields, dict):
-            tid = fields.get("ID") or fields.get("id")
-            if tid is not None and str(tid).strip():
-                return str(tid).strip()
-        tid = data.get("ID") or data.get("id") or data.get("taskId")
-        if tid is not None and str(tid).strip():
-            return str(tid).strip()
+            tid = _positive_task_id(fields.get("TASK_ID")) or _positive_task_id(
+                fields.get("ID") or fields.get("id")
+            )
+            if tid:
+                _log_task_id_resolution(payload, event, tid)
+                return tid
+        tid = _positive_task_id(data.get("taskId") or data.get("ID") or data.get("id"))
+        if tid:
+            _log_task_id_resolution(payload, event, tid)
+            return tid
 
     result = payload.get("result")
     if isinstance(result, dict):
-        tid = result.get("ID") or result.get("id")
-        if tid is not None and str(tid).strip():
-            return str(tid).strip()
+        tid = _positive_task_id(result.get("ID") or result.get("id"))
+        if tid:
+            _log_task_id_resolution(payload, event, tid)
+            return tid
 
+    _log_task_id_resolution(payload, event, None)
     return None
+
+
+def parse_refine_feedback_from_comment(
+    comment_text: str | None,
+    *,
+    prefix: str | None = None,
+) -> str | None:
+    """If comment starts with Refine: (or configured prefix), return feedback body; else None."""
+    from app.core.config import settings
+
+    text = str(comment_text or "").strip()
+    if not text:
+        return None
+    pfx = (
+        prefix if prefix is not None else (settings.BITRIX_REFINE_COMMENT_PREFIX or "Refine:")
+    ).strip()
+    if not pfx:
+        return text if len(text) >= 10 else None
+    if not text.lower().startswith(pfx.lower()):
+        return None
+    feedback = text[len(pfx) :].strip()
+    return feedback if len(feedback) >= 10 else None
 
 
 def extract_task_fields(payload: dict[str, Any]) -> dict[str, Any]:

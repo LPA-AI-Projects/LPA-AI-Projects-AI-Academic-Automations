@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     BITRIX_TASK_CHAT_MESSAGE: str = ""
     # Log full Bitrix webhook URL, query, headers, body preview (debug 401s)
     BITRIX_LOG_INCOMING_REQUESTS: bool = False
+    # Task chat comments starting with this prefix trigger outline refine (ONTASKCOMMENTADD)
+    BITRIX_REFINE_COMMENT_PREFIX: str = "Refine:"
 
     # Gamma Public API (PPT generation)
     GAMMA_API_KEY: str = ""
@@ -206,6 +208,7 @@ class Settings(BaseSettings):
         "BITRIX_DRIVE_FOLDER_ID",
         "BITRIX_TASK_CHAT_MESSAGE",
         "BITRIX_LOG_INCOMING_REQUESTS",
+        "BITRIX_REFINE_COMMENT_PREFIX",
         "ANTHROPIC_FALLBACK_MODELS",
         "PUBLIC_COURSE_SHEET_CSV_URL",
         "PUBLIC_COURSE_CATALOG_CSV_URL",
