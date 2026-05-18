@@ -15,7 +15,6 @@ from fastapi import (
     Depends,
     File,
     Form,
-    Header,
     HTTPException,
     Query,
     UploadFile,
@@ -26,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth_deps import auth
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage_paths import assessments_upload_dir
@@ -45,20 +45,6 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["assessments"])
-
-
-def verify_api_key(
-    x_api_key: str | None = Header(None, description="Your API secret key"),
-):
-    if not x_api_key or x_api_key != settings.API_SECRET_KEY:
-        logger.warning("Rejected request: invalid API key")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key.",
-        )
-
-
-auth = Depends(verify_api_key)
 
 
 def _ensure_dir(path: str) -> None:

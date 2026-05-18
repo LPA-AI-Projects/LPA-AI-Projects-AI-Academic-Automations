@@ -6,12 +6,13 @@ from datetime import datetime
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 
+from app.api.auth_deps import auth
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage_paths import slides_upload_dir
@@ -30,21 +31,6 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["slides"])
-
-
-def verify_api_key(
-    x_api_key: Optional[str] = Header(None, description="Your API secret key"),
-):
-    """All routes require X-API-Key header matching API_SECRET_KEY in .env"""
-    if not x_api_key or x_api_key != settings.API_SECRET_KEY:
-        logger.warning("Rejected request: invalid API key")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key.",
-        )
-
-
-auth = Depends(verify_api_key)
 
 
 def _ensure_dir(path: str) -> None:

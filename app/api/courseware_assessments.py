@@ -25,6 +25,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth_deps import api_key_is_valid, resolve_api_key
 from app.core.config import settings
 from app.core.database import get_db
 from app.services.assessment_service import (
@@ -75,6 +76,7 @@ def _client_ip(request: Request) -> str:
 
 def _verify_api_key_or_token(
     *,
+    request: Request,
     zoho_record_id: str,
     phase: str,
     x_api_key: str | None,
@@ -92,7 +94,8 @@ def _verify_api_key_or_token(
     When ``ASSESSMENT_LINK_REQUIRE_TOKEN`` is true, BOTH conditions become
     available paths but at least one must succeed.
     """
-    api_key_ok = bool(x_api_key) and x_api_key == settings.API_SECRET_KEY
+    resolved_key = resolve_api_key(request, header_key=x_api_key)
+    api_key_ok = api_key_is_valid(resolved_key)
     token_ok = verify_assessment_link_token(
         zoho_record_id=zoho_record_id, phase=phase, token=t
     )
@@ -172,7 +175,11 @@ async def _generate_for_phase(
         raise HTTPException(status_code=400, detail="zoho_record_id is required.")
 
     _verify_api_key_or_token(
-        zoho_record_id=rid, phase=phase_norm, x_api_key=x_api_key, t=t
+        request=request,
+        zoho_record_id=rid,
+        phase=phase_norm,
+        x_api_key=x_api_key,
+        t=t,
     )
 
     ip = _client_ip(request)
@@ -358,8 +365,9 @@ async def post_post_assessment(
 
 @router.get("/_metrics")
 async def metrics_snapshot(
+    request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
 ):
-    if not x_api_key or x_api_key != settings.API_SECRET_KEY:
+    if not api_key_is_valid(resolve_api_key(request, header_key=x_api_key)):
         raise HTTPException(status_code=401, detail="Invalid API key.")
     return snapshot()

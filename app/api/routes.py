@@ -5,7 +5,7 @@ import re
 from urllib.parse import parse_qs
 from typing import Optional, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_
@@ -15,6 +15,7 @@ from asyncio import wait_for, TimeoutError as AsyncTimeoutError
 
 from sqlalchemy import text
 
+from app.api.auth_deps import auth
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings
 from app.services.public_course_sheet import lookup_public_course_pdf_url
@@ -53,23 +54,6 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["courses"])
 REGIONS_SERVED_CONSTANT = "UAE, Saudi Arabia, Africa, MENA, and Europe"
-
-
-# ─── Auth dependency ──────────────────────────────────────────────────────────
-
-def verify_api_key(
-    x_api_key: Optional[str] = Header(None, description="Your API secret key"),
-):
-    """All routes require X-API-Key header matching API_SECRET_KEY in .env"""
-    if not x_api_key or x_api_key != settings.API_SECRET_KEY:
-        logger.warning("Rejected request: invalid API key")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key.",
-        )
-
-
-auth = Depends(verify_api_key)
 
 
 def _input_data_dict_for_job(data: CourseInputData) -> dict:
