@@ -18,7 +18,14 @@ from sqlalchemy import text
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings
 from app.services.public_course_sheet import lookup_public_course_pdf_url
-from app.services.zoho_crm import update_outline_module_record_fields
+from app.services.crm_outline_hooks import (
+    CrmSource,
+    outline_notify_job_finished,
+    outline_status_completed,
+    outline_status_failed,
+    outline_status_in_progress,
+    outline_update_public_curriculum_field,
+)
 from app.schemas.course import (
     CourseInputData,
     GenerateCourseRequest,
@@ -410,7 +417,43 @@ async def _parse_refine_request(request: Request) -> tuple[str, RefineCourseRequ
     return rid, req
 
 
-async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data: dict) -> None:
+async def _bitrix_deliver_task_pdf_if_configured(
+    *,
+    crm_source: CrmSource,
+    input_data: dict,
+    pdf_path: str | None,
+    pdf_url: str | None,
+    course_title: str,
+) -> None:
+    """Upload outline PDF to Bitrix Drive and attach to task when bitrix_task_id is set."""
+    if crm_source != "bitrix":
+        return
+    task_id = str((input_data or {}).get("bitrix_task_id") or "").strip()
+    if not task_id:
+        return
+    try:
+        from app.services.bitrix_tasks import deliver_outline_pdf_to_bitrix_task
+
+        await deliver_outline_pdf_to_bitrix_task(
+            task_id=task_id,
+            pdf_path=pdf_path,
+            pdf_url=pdf_url,
+            course_name=course_title,
+        )
+    except Exception:
+        logger.exception(
+            "Bitrix task PDF delivery failed | task_id=%s",
+            task_id,
+        )
+
+
+async def process_course_job(
+    job_id: uuid.UUID,
+    zoho_record_id: str,
+    input_data: dict,
+    *,
+    crm_source: CrmSource = "zoho",
+) -> None:
     async with AsyncSessionLocal() as db:
         job: CourseJob | None = None
         created_course_id: uuid.UUID | None = None
@@ -432,15 +475,13 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
             await db.commit()
             logger.info("Job status set to processing | job_id=%s", str(job_id))
             try:
-                await update_outline_module_record_fields(
-                    zoho_record_id=zoho_record_id,
-                    fields={"Status": "In Progress"},
-                )
+                await outline_status_in_progress(zoho_record_id, crm_source=crm_source)
             except Exception:
                 logger.exception(
-                    "Zoho Status update failed (In Progress) | job_id=%s zoho_record_id=%s",
+                    "CRM Status update failed (In Progress) | job_id=%s record_id=%s crm=%s",
                     str(job_id),
                     zoho_record_id,
+                    crm_source,
                 )
 
             if _is_public_course_type((input_data or {}).get("course_type")):
@@ -482,17 +523,23 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                     created_course_id = course.id
                     created_version_number = 1
 
-                field_name = (settings.ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME or "").strip()
+                if crm_source == "bitrix":
+                    field_name = (settings.BITRIX_PUBLIC_FINAL_CURRICULUM_FIELD or "").strip()
+                else:
+                    field_name = (settings.ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME or "").strip()
                 if field_name:
                     try:
-                        await update_outline_module_record_fields(
-                            zoho_record_id=zoho_record_id,
-                            fields={field_name: pdf_url},
+                        await outline_update_public_curriculum_field(
+                            zoho_record_id,
+                            field_name,
+                            pdf_url,
+                            crm_source=crm_source,
                         )
                     except Exception:
                         logger.exception(
-                            "Zoho Final Formatted Curriculum field update failed | job_id=%s",
+                            "Final curriculum field update failed | job_id=%s crm=%s",
                             str(job_id),
+                            crm_source,
                         )
 
                 job.status = "completed"
@@ -506,19 +553,25 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                     pdf_url,
                 )
                 try:
-                    await update_outline_module_record_fields(
-                        zoho_record_id=zoho_record_id,
-                        fields={"Status": "Completed"},
-                    )
+                    await outline_status_completed(zoho_record_id, crm_source=crm_source)
                 except Exception:
                     logger.exception(
-                        "Zoho Status update failed (Completed) | job_id=%s zoho_record_id=%s",
+                        "CRM Status update failed (Completed) | job_id=%s record_id=%s crm=%s",
                         str(job_id),
                         zoho_record_id,
+                        crm_source,
                     )
-                await zoho_notify_course_outline_job_finished(
+                await _bitrix_deliver_task_pdf_if_configured(
+                    crm_source=crm_source,
+                    input_data=input_data,
+                    pdf_path=None,
+                    pdf_url=pdf_url,
+                    course_title=course_title,
+                )
+                await outline_notify_job_finished(
                     job,
                     created_version_number,
+                    crm_source=crm_source,
                     attach_course_title=f"{course_title} — outline",
                 )
                 return
@@ -630,19 +683,25 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 pdf_url,
             )
             try:
-                await update_outline_module_record_fields(
-                    zoho_record_id=zoho_record_id,
-                    fields={"Status": "Completed"},
-                )
+                await outline_status_completed(zoho_record_id, crm_source=crm_source)
             except Exception:
                 logger.exception(
-                    "Zoho Status update failed (Completed) | job_id=%s zoho_record_id=%s",
+                    "CRM Status update failed (Completed) | job_id=%s record_id=%s crm=%s",
                     str(job_id),
                     zoho_record_id,
+                    crm_source,
                 )
-            await zoho_notify_course_outline_job_finished(
+            await _bitrix_deliver_task_pdf_if_configured(
+                crm_source=crm_source,
+                input_data=input_data,
+                pdf_path=pdf_path,
+                pdf_url=pdf_url,
+                course_title=course_title,
+            )
+            await outline_notify_job_finished(
                 job,
                 created_version_number,
+                crm_source=crm_source,
                 attach_course_title=f"{course_title} — outline",
             )
         except Exception as e:
@@ -651,19 +710,18 @@ async def process_course_job(job_id: uuid.UUID, zoho_record_id: str, input_data:
                 job.error = str(e)[:4000]
                 await db.commit()
                 try:
-                    await update_outline_module_record_fields(
-                        zoho_record_id=zoho_record_id,
-                        fields={"Status": "Failed to create - Try Again"},
-                    )
+                    await outline_status_failed(zoho_record_id, crm_source=crm_source)
                 except Exception:
                     logger.exception(
-                        "Zoho Status update failed (Failed to create) | job_id=%s zoho_record_id=%s",
+                        "CRM Status update failed (Failed) | job_id=%s record_id=%s crm=%s",
                         str(job_id),
                         zoho_record_id,
+                        crm_source,
                     )
-                await zoho_notify_course_outline_job_finished(
+                await outline_notify_job_finished(
                     job,
                     created_version_number,
+                    crm_source=crm_source,
                     attach_course_title=None,
                 )
             logger.exception(
@@ -834,7 +892,11 @@ async def refine_course(
                     CourseJob.course_id.is_not(None),
                     or_(
                         CourseJob.job_type.is_(None),
-                        and_(CourseJob.job_type != "slides", CourseJob.job_type != "assessment"),
+                        and_(
+                            CourseJob.job_type != "slides",
+                            CourseJob.job_type != "assessment",
+                            CourseJob.job_type != "bitrix_outline",
+                        ),
                     ),
                 )
                 .order_by(CourseJob.created_at.desc())
@@ -1188,7 +1250,11 @@ async def get_latest_course_outline_job(
                 CourseJob.zoho_record_id == rid,
                 or_(
                     CourseJob.job_type.is_(None),
-                    and_(CourseJob.job_type != "slides", CourseJob.job_type != "assessment"),
+                    and_(
+                        CourseJob.job_type != "slides",
+                        CourseJob.job_type != "assessment",
+                        CourseJob.job_type != "bitrix_outline",
+                    ),
                 ),
             )
             .order_by(CourseJob.created_at.desc())

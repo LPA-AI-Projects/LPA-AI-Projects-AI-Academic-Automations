@@ -54,6 +54,32 @@ class Settings(BaseSettings):
     # When true, after PDF is generated, attach public URL to CRM record (needs OAuth + module)
     ZOHO_ATTACH_PDF_LINK_TO_CRM: bool = False
 
+    # Bitrix24 — incoming webhook + optional outline write-back
+    # Full base URL, e.g. https://your-domain.bitrix24.com/rest/1/secret_code/
+    BITRIX_WEBHOOK_URL: str = ""
+    # deal | lead | dynamic (uses crm.item.update + BITRIX_CRM_ENTITY_TYPE_ID)
+    BITRIX_CRM_ENTITY: str = "deal"
+    # entityTypeId for crm.item.update (2 = deal in universal CRM API)
+    BITRIX_CRM_ENTITY_TYPE_ID: int = 2
+    # String UF field API name for generated outline PDF URL
+    BITRIX_OUTLINE_PDF_FIELD: str = ""
+    # Optional string UF field for human-readable status text
+    BITRIX_OUTLINE_STATUS_FIELD: str = ""
+    BITRIX_STATUS_IN_PROGRESS: str = "In Progress"
+    BITRIX_STATUS_COMPLETED: str = "Completed"
+    BITRIX_STATUS_FAILED: str = "Failed to create - Try Again"
+    BITRIX_ATTACH_PDF_TO_CRM: bool = False
+    # Public-batch curriculum URL field (same role as Zoho public field)
+    BITRIX_PUBLIC_FINAL_CURRICULUM_FIELD: str = ""
+    # Optional HTTP callback when job completes (Bitrix automation handler URL)
+    BITRIX_CALLBACK_URL: str = ""
+    BITRIX_CALLBACK_BODY_FORMAT: str = "json"
+    # Bitrix24 Disk folder id for course outline PDFs (disk.folder.uploadfile)
+    BITRIX_DRIVE_FOLDER_ID: str = ""
+    # After outline job: upload PDF to Drive, attach to task, post task chat message
+    BITRIX_TASK_ATTACH_ENABLED: bool = True
+    BITRIX_TASK_CHAT_MESSAGE: str = ""
+
     # Gamma Public API (PPT generation)
     GAMMA_API_KEY: str = ""
     GAMMA_BASE_URL: str = "https://public-api.gamma.app"
@@ -162,6 +188,18 @@ class Settings(BaseSettings):
         "ZOHO_CRM_PRE_ASSESSMENT_LEVEL_FIELD_API_NAME",
         "ZOHO_CRM_POST_ASSESSMENT_LEVEL_FIELD_API_NAME",
         "ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME",
+        "BITRIX_WEBHOOK_URL",
+        "BITRIX_CRM_ENTITY",
+        "BITRIX_OUTLINE_PDF_FIELD",
+        "BITRIX_OUTLINE_STATUS_FIELD",
+        "BITRIX_STATUS_IN_PROGRESS",
+        "BITRIX_STATUS_COMPLETED",
+        "BITRIX_STATUS_FAILED",
+        "BITRIX_PUBLIC_FINAL_CURRICULUM_FIELD",
+        "BITRIX_CALLBACK_URL",
+        "BITRIX_CALLBACK_BODY_FORMAT",
+        "BITRIX_DRIVE_FOLDER_ID",
+        "BITRIX_TASK_CHAT_MESSAGE",
         "ANTHROPIC_FALLBACK_MODELS",
         "PUBLIC_COURSE_SHEET_CSV_URL",
         "PUBLIC_COURSE_CATALOG_CSV_URL",
@@ -186,6 +224,19 @@ class Settings(BaseSettings):
     @classmethod
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
+
+    @field_validator("BITRIX_TASK_ATTACH_ENABLED", mode="before")
+    @classmethod
+    def coerce_bitrix_task_attach(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
 
     @field_validator(
         "ASSESSMENT_LINK_REQUIRE_TOKEN",

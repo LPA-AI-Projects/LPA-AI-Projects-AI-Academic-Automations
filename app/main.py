@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.routes import router
+from app.api.bitrix import router as bitrix_router
 from app.api.slides import router as slides_router
 from app.api.assessments import router as assessments_router
 from app.api.courseware_assessments import router as courseware_assessments_router
@@ -101,6 +102,7 @@ app.mount("/ppts", StaticFiles(directory=PPT_OUTPUT_DIR), name="ppts")
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(router)
+app.include_router(bitrix_router)
 app.include_router(slides_router)
 app.include_router(assessments_router)
 app.include_router(courseware_assessments_router)
