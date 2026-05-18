@@ -39,6 +39,6 @@ RUN python -m playwright install chromium
 
 COPY . .
 
-RUN mkdir -p generated_pdfs
+RUN mkdir -p storage/pdfs storage/ppts storage/uploads/slides
 
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

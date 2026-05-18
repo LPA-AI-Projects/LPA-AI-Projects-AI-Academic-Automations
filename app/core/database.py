@@ -22,7 +22,8 @@ if _uses_external_pooler(settings.DATABASE_URL):
         echo=False,
         connect_args=_connect_args,
         poolclass=NullPool,
-        pool_pre_ping=False,
+        # Validate connections after idle; reduces "connection was closed" after proxy/DB idle cuts.
+        pool_pre_ping=True,
     )
 else:
     engine = create_async_engine(
@@ -31,9 +32,10 @@ else:
         connect_args=_connect_args,
         pool_size=10,
         max_overflow=20,
-        pool_pre_ping=False,
+        pool_pre_ping=True,
         pool_timeout=30,
-        pool_recycle=1800,
+        # Recycle before typical managed-Postgres idle/proxy timeouts (often 5–15 min).
+        pool_recycle=900,
     )
 
 AsyncSessionLocal = async_sessionmaker(

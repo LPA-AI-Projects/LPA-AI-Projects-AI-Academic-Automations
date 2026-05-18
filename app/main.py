@@ -1,4 +1,3 @@
-import os
 import sys
 import asyncio
 from contextlib import asynccontextmanager
@@ -10,13 +9,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.routes import router
+from app.api.bitrix import router as bitrix_router
+from app.api.slides import router as slides_router
+from app.api.assessments import router as assessments_router
+from app.api.courseware_assessments import router as courseware_assessments_router
 from app.core.database import Base, engine
+from app.core.storage_paths import ensure_storage_dirs, pdfs_dir, ppts_dir
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-OUTPUT_DIR = "generated_pdfs"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+ensure_storage_dirs()
+OUTPUT_DIR = pdfs_dir()
+PPT_OUTPUT_DIR = ppts_dir()
 
 # Playwright launches Chromium via subprocess; ensure an event loop policy
 # that supports subprocesses on Windows.
@@ -49,6 +54,21 @@ async def lifespan(app: FastAPI):
                         "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS version_number INTEGER NULL"
                     )
                 )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS job_type VARCHAR NULL"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS ppt_url VARCHAR NULL"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE course_jobs ADD COLUMN IF NOT EXISTS payload_json TEXT NULL"
+                    )
+                )
             except Exception:
                 logger.warning("course_jobs column migration skipped (non-Postgres or already applied)")
         logger.info("Database tables ready.")
@@ -78,9 +98,14 @@ app.add_middleware(
 
 # ── Static files: serve generated PDFs at /pdfs/<filename> ───────────────────
 app.mount("/pdfs", StaticFiles(directory=OUTPUT_DIR), name="pdfs")
+app.mount("/ppts", StaticFiles(directory=PPT_OUTPUT_DIR), name="ppts")
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(router)
+app.include_router(bitrix_router)
+app.include_router(slides_router)
+app.include_router(assessments_router)
+app.include_router(courseware_assessments_router)
 
 
 @app.middleware("http")

@@ -16,7 +16,14 @@ env/
 build/
 dist/
 *.egg-info/
+
+# Runtime uploads & generated files (see app/core/storage_paths.py)
+storage/*
+!storage/.gitkeep
 generated_pdfs/
+generated_ppts/
+uploads/
+tmp/
 
 # OS / Editor
 .vscode/

@@ -8,3 +8,9 @@ httpx
 jinja2
 alembic
 playwright
+python-multipart
+PyMuPDF
+python-pptx
+python-docx
+langgraph
+pdfplumber
