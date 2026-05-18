@@ -115,14 +115,32 @@ async def log_raw_course_requests(request: Request, call_next):
     - Logs raw body for POST /api/v1/courses (even if malformed JSON).
     - Re-injects body so downstream handlers can still read it.
     """
-    if request.method == "POST" and request.url.path == "/api/v1/courses":
+    from app.core.config import settings as app_settings
+
+    if request.method == "POST" and request.url.path in (
+        "/api/v1/courses",
+        "/api/v1/bitrix/courses",
+    ):
         body_bytes = await request.body()
         raw_body = body_bytes.decode("utf-8", errors="replace")
-        logger.info(
-            "RAW /api/v1/courses request | content_type=%s body=%s",
-            request.headers.get("content-type"),
-            raw_body[:8000],
-        )
+        if request.url.path == "/api/v1/bitrix/courses" or getattr(
+            app_settings, "BITRIX_LOG_INCOMING_REQUESTS", False
+        ):
+            logger.info(
+                "RAW %s | method=%s url=%s query=%s content_type=%s body=%s",
+                request.url.path,
+                request.method,
+                str(request.url),
+                dict(request.query_params),
+                request.headers.get("content-type"),
+                raw_body[:8000],
+            )
+        elif request.url.path == "/api/v1/courses":
+            logger.info(
+                "RAW /api/v1/courses request | content_type=%s body=%s",
+                request.headers.get("content-type"),
+                raw_body[:8000],
+            )
 
         async def receive():
             return {"type": "http.request", "body": body_bytes, "more_body": False}

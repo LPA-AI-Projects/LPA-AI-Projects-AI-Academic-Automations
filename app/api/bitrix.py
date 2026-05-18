@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth_deps import auth
+from app.api.auth_deps import bitrix_auth
 from app.api.routes import (
     _input_data_dict_for_job,
     _is_public_course_type,
@@ -177,7 +177,7 @@ async def _parse_bitrix_generate_request(request: Request) -> BitrixGenerateCour
 @router.get(
     "/integrations/course-outline-status",
     response_model=BitrixCourseOutlineIntegrationStatus,
-    dependencies=[auth],
+    dependencies=[bitrix_auth],
     summary="Bitrix24 env configuration (no secrets)",
 )
 def bitrix_course_outline_integration_status():
@@ -186,13 +186,14 @@ def bitrix_course_outline_integration_status():
 
 @router.post(
     "/courses",
-    dependencies=[auth],
+    dependencies=[bitrix_auth],
     summary="Create course outline from Bitrix24 task or CRM record",
     description=(
         "Accepts: (1) Bitrix task webhook / task.item.getdata JSON with DESCRIPTION table, "
         "(2) `{ \"taskId\": 78776 }` to fetch task from Bitrix, or "
         "(3) `{ \"bitrix_record_id\": \"...\", \"input_data\": {...} }`. "
-        "Auth: X-API-Key header or ?x-api-key= query param (same as API_SECRET_KEY). "
+        "Auth (any one): ?x-api-key= on webhook URL, X-API-Key header, or "
+        "`\"api_key\"` in JSON body (matches Railway API_SECRET_KEY). "
         "On success, uploads PDF to Drive, attaches via tasks.task.files.attach, "
         "and posts tasks.task.chat.message.send when BITRIX_TASK_ATTACH_ENABLED=true."
     ),
@@ -272,7 +273,7 @@ async def generate_course_from_bitrix(
 
 @router.get(
     "/courses/{bitrix_record_id}/outline-job",
-    dependencies=[auth],
+    dependencies=[bitrix_auth],
     summary="Latest course-outline job for a Bitrix task or CRM record id",
 )
 async def get_latest_bitrix_course_outline_job(

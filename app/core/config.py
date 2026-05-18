@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     # After outline job: upload PDF to Drive, attach to task, post task chat message
     BITRIX_TASK_ATTACH_ENABLED: bool = True
     BITRIX_TASK_CHAT_MESSAGE: str = ""
+    # Log full Bitrix webhook URL, query, headers, body preview (debug 401s)
+    BITRIX_LOG_INCOMING_REQUESTS: bool = False
 
     # Gamma Public API (PPT generation)
     GAMMA_API_KEY: str = ""
@@ -200,6 +202,7 @@ class Settings(BaseSettings):
         "BITRIX_CALLBACK_BODY_FORMAT",
         "BITRIX_DRIVE_FOLDER_ID",
         "BITRIX_TASK_CHAT_MESSAGE",
+        "BITRIX_LOG_INCOMING_REQUESTS",
         "ANTHROPIC_FALLBACK_MODELS",
         "PUBLIC_COURSE_SHEET_CSV_URL",
         "PUBLIC_COURSE_CATALOG_CSV_URL",
@@ -224,6 +227,19 @@ class Settings(BaseSettings):
     @classmethod
     def strip_zoho_strings(cls, value: str) -> str:
         return (value or "").strip() if isinstance(value, str) else value
+
+    @field_validator("BITRIX_LOG_INCOMING_REQUESTS", mode="before")
+    @classmethod
+    def coerce_bitrix_log_incoming(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+        return bool(value)
 
     @field_validator("BITRIX_TASK_ATTACH_ENABLED", mode="before")
     @classmethod
