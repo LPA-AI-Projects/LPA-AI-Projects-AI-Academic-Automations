@@ -10,6 +10,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+# Refine: / refine : / Refine : (case-insensitive); instruction may continue on next lines
+REFINE_COMMENT_PATTERN = re.compile(r"^\s*refine\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
+
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -290,23 +293,21 @@ def extract_task_id(payload: dict[str, Any]) -> str | None:
 def parse_refine_feedback_from_comment(
     comment_text: str | None,
     *,
-    prefix: str | None = None,
+    prefix: str | None = None,  # noqa: ARG001 — kept for API compat; matching is regex-only
 ) -> str | None:
-    """If comment starts with Refine: (or configured prefix), return feedback body; else None."""
-    from app.core.config import settings
+    """
+    Extract refine instruction when comment matches ``Refine:`` (flexible spacing/case).
 
-    text = str(comment_text or "").strip()
-    if not text:
+    Accepts single-line and multi-line, e.g. ``Refine :\\nchange it to 24 hours``.
+    """
+    comment = str(comment_text or "").strip()
+    if not comment:
         return None
-    pfx = (
-        prefix if prefix is not None else (settings.BITRIX_REFINE_COMMENT_PREFIX or "Refine:")
-    ).strip()
-    if not pfx:
-        return text if len(text) >= 10 else None
-    if not text.lower().startswith(pfx.lower()):
+    match = REFINE_COMMENT_PATTERN.match(comment)
+    if not match:
         return None
-    feedback = text[len(pfx) :].strip()
-    return feedback if len(feedback) >= 10 else None
+    instruction = match.group(1).strip()
+    return instruction or None
 
 
 def extract_task_fields(payload: dict[str, Any]) -> dict[str, Any]:

@@ -410,26 +410,18 @@ async def dispatch_bitrix_refine_webhook(payload: dict[str, Any]) -> BitrixWebho
             ignore_reason="comment_fetch_failed",
         )
 
-    logger.info("REFINE COMMENT = %s", comment_text or "")
-    prefix = (settings.BITRIX_REFINE_COMMENT_PREFIX or "Refine:").strip()
-    if not comment_text or not comment_text.lower().startswith(prefix.lower()):
-        logger.info(
-            "Bitrix refine ignored (no %s prefix) | taskId=%s preview=%s",
-            prefix,
-            task_id,
-            (comment_text or "")[:120],
-        )
+    comment = (comment_text or "").strip()
+    logger.info("REFINE COMMENT=%s", comment)
+
+    feedback = parse_refine_feedback_from_comment(comment)
+    if not feedback:
+        logger.info("IGNORE NON-REFINE COMMENT=%s", comment)
         return BitrixWebhookDispatch(
             kind=BitrixWebhookKind.IGNORED,
-            ignore_reason="not_a_refine_comment",
+            ignore_reason="ignored_non_refine",
         )
 
-    feedback = parse_refine_feedback_from_comment(comment_text)
-    if not feedback:
-        return BitrixWebhookDispatch(
-            kind=BitrixWebhookKind.IGNORED,
-            ignore_reason="refine_feedback_too_short",
-        )
+    logger.info("REFINE INSTRUCTION=%s", feedback)
 
     course_name = await _latest_bitrix_course_name(task_id)
     if not course_name:
@@ -559,7 +551,7 @@ async def generate_course_from_bitrix(
     summary="Refine course outline from Bitrix task comment (ONTASKCOMMENTADD)",
     description=(
         "Separate outgoing webhook: ONTASKCOMMENTADD with comment starting with "
-        "BITRIX_REFINE_COMMENT_PREFIX (default Refine:). Maps bitrix task id to prior outline "
+        "ONTASKCOMMENTADD with comment matching Refine: (regex, case-insensitive). Maps task id "
         "(same as Zoho zoho_record_id). Auth: BITRIX_REFINE_APPLICATION_TOKEN or shared token."
     ),
 )

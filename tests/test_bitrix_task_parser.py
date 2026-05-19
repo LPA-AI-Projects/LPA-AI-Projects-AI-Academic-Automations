@@ -39,15 +39,26 @@ def test_extract_message_id():
     assert extract_message_id(payload) == "39988698"
 
 
-def test_parse_refine_prefix():
-    assert (
-        parse_refine_feedback_from_comment(
-            "Refine: Make this intermediate with roleplay exercises",
-            prefix="Refine:",
-        )
-        == "Make this intermediate with roleplay exercises"
+def test_parse_refine_variants():
+    assert parse_refine_feedback_from_comment("Refine: change to 2 day program") == (
+        "change to 2 day program"
     )
+    assert parse_refine_feedback_from_comment("refine: add activities") == "add activities"
+    assert parse_refine_feedback_from_comment("Refine : add roleplay") == "add roleplay"
+    assert parse_refine_feedback_from_comment("refine : increase hours") == "increase hours"
 
 
-def test_parse_refine_no_prefix():
-    assert parse_refine_feedback_from_comment("kindly check once", prefix="Refine:") is None
+def test_parse_refine_multiline():
+    text = "Refine :\nchange it to 24 hours"
+    assert parse_refine_feedback_from_comment(text) == "change it to 24 hours"
+
+
+def test_parse_refine_rejects_non_refine():
+    for text in (
+        "Tauqeer created this task",
+        "started the task",
+        "hello",
+        "please change",
+        "kindly check once",
+    ):
+        assert parse_refine_feedback_from_comment(text) is None
