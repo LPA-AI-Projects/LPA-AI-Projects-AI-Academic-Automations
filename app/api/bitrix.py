@@ -31,6 +31,7 @@ from app.api.routes import (
     _normalize_single_course_name,
     process_course_job,
 )
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.models.job import CourseJob
 from app.schemas.bitrix import BitrixGenerateCourseRequest
@@ -47,7 +48,40 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/bitrix", tags=["bitrix"])
 
-BITRIX_GENERATE_EVENTS = frozenset({"ONTASKUPDATE"})
+BITRIX_GENERATE_EVENTS = frozenset({"ONTASKADD"})
+
+
+def _allowed_bitrix_group_ids() -> frozenset[str]:
+    raw = (settings.BITRIX_ALLOWED_GROUP_IDS or "25,28").strip()
+    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _enforce_task_project_allowed(task_body: dict[str, Any], task_id: str) -> None:
+    """Raise HTTP 200 when task is outside allowed Bitrix project (group) IDs."""
+    group_id = str(
+        task_body.get("GROUP_ID") or task_body.get("groupId") or ""
+    ).strip()
+    group_name = str(
+        task_body.get("GROUP_NAME") or task_body.get("GROUP") or ""
+    ).strip()
+
+    logger.info(
+        "BITRIX PROJECT CHECK | task=%s group_id=%s group=%s",
+        task_id,
+        group_id,
+        group_name,
+    )
+
+    allowed = _allowed_bitrix_group_ids()
+    if group_id not in allowed:
+        logger.info(
+            "Ignoring task outside outline projects | task=%s group_id=%s group=%s allowed=%s",
+            task_id,
+            group_id,
+            group_name,
+            sorted(allowed),
+        )
+        raise HTTPException(status_code=status.HTTP_200_OK, detail="project_ignored")
 
 
 class BitrixWebhookKind(str, Enum):
@@ -148,6 +182,11 @@ async def _parse_bitrix_generate_request(payload: dict[str, Any]) -> BitrixGener
                         status_code=422,
                         detail=f"Could not load task {tid} from Bitrix.",
                     ) from e
+                logger.info(
+                    "BITRIX TASK RAW = %s",
+                    json.dumps(task_body, indent=2, ensure_ascii=False),
+                )
+                _enforce_task_project_allowed(task_body, str(tid))
                 payload = {"result": task_body}
 
             task_id, input_dict = resolve_bitrix_task_request(payload)
@@ -262,10 +301,10 @@ def bitrix_course_outline_integration_status():
 @router.post(
     "/courses",
     dependencies=[bitrix_auth],
-    summary="Create course outline from Bitrix24 task update",
+    summary="Create course outline from Bitrix24 new task (ONTASKADD)",
     description=(
-        "ONTASKUPDATE: generate outline from task DESCRIPTION. "
-        "ONTASKCOMMENTADD is ignored. Auth: auth[application_token] or X-API-Key."
+        "ONTASKADD only: generate outline when task GROUP_ID is in BITRIX_ALLOWED_GROUP_IDS. "
+        "ONTASKUPDATE / ONTASKCOMMENTADD are ignored. Auth: auth[application_token] or X-API-Key."
     ),
 )
 async def generate_course_from_bitrix(

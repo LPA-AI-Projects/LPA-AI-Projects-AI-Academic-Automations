@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     BITRIX_LOG_INCOMING_REQUESTS: bool = False
     # Task chat comments starting with this prefix trigger outline refine (ONTASKCOMMENTADD)
     BITRIX_REFINE_COMMENT_PREFIX: str = "Refine:"
+    # Comma-separated Bitrix task GROUP_ID values allowed to trigger outline generation (ONTASKADD)
+    BITRIX_ALLOWED_GROUP_IDS: str = "25,28"
 
     # Gamma Public API (PPT generation)
     GAMMA_API_KEY: str = ""
@@ -212,6 +214,7 @@ class Settings(BaseSettings):
         "BITRIX_TASK_CHAT_MESSAGE",
         "BITRIX_LOG_INCOMING_REQUESTS",
         "BITRIX_REFINE_COMMENT_PREFIX",
+        "BITRIX_ALLOWED_GROUP_IDS",
         "ANTHROPIC_FALLBACK_MODELS",
         "PUBLIC_COURSE_SHEET_CSV_URL",
         "PUBLIC_COURSE_CATALOG_CSV_URL",
