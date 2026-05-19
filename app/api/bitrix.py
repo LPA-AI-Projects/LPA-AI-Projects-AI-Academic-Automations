@@ -46,7 +46,7 @@ from app.services.bitrix_task_parser import (
     parse_refine_feedback_from_comment,
     resolve_bitrix_task_request,
 )
-from app.services.bitrix_tasks import fetch_task_for_outline, get_task_comment
+from app.services.bitrix_tasks import fetch_task_for_outline, get_refine_text
 from app.services.course_refine import BITRIX_OUTLINE_JOB_TYPE, run_bitrix_comment_refine
 from app.utils.logger import get_logger
 
@@ -395,8 +395,9 @@ async def dispatch_bitrix_refine_webhook(payload: dict[str, Any]) -> BitrixWebho
             ignore_reason="project_ignored",
         )
 
+    logger.info("REFINE message_id=%s task_id=%s", message_id, task_id)
     try:
-        comment_text = await get_task_comment(task_id, message_id)
+        comment_text = await get_refine_text(task_id, message_id)
     except Exception as e:
         logger.warning(
             "Bitrix refine comment fetch failed | taskId=%s messageId=%s error=%s",
@@ -409,6 +410,7 @@ async def dispatch_bitrix_refine_webhook(payload: dict[str, Any]) -> BitrixWebho
             ignore_reason="comment_fetch_failed",
         )
 
+    logger.info("REFINE COMMENT = %s", comment_text or "")
     prefix = (settings.BITRIX_REFINE_COMMENT_PREFIX or "Refine:").strip()
     if not comment_text or not comment_text.lower().startswith(prefix.lower()):
         logger.info(

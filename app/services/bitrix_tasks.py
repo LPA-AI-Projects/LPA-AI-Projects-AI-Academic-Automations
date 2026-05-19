@@ -264,9 +264,106 @@ async def fetch_task_for_outline(task_id: str | int) -> dict[str, Any]:
     return _merge_task_fields(task_body, extra)
 
 
+async def _im_dialog_messages(dialog_id: str, *, message_id: int) -> list[dict[str, Any]]:
+    """Load recent messages from a task chat dialog; try several pagination params."""
+    param_sets: list[dict[str, Any]] = [
+        {"DIALOG_ID": dialog_id, "LAST_ID": message_id + 1, "LIMIT": 50},
+        {"DIALOG_ID": dialog_id, "FIRST_ID": max(message_id - 1, 0), "LIMIT": 50},
+        {"DIALOG_ID": dialog_id, "LIMIT": 50},
+    ]
+    merged: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    for params in param_sets:
+        try:
+            payload = await bitrix_call("im.dialog.messages.get", params)
+        except Exception as e:
+            logger.warning(
+                "im.dialog.messages.get failed | dialog=%s params=%s error=%s",
+                dialog_id,
+                params,
+                e,
+            )
+            continue
+        for row in _normalize_im_messages(payload):
+            rid = row.get("id") or row.get("ID")
+            try:
+                i = int(rid) if rid is not None else None
+            except (TypeError, ValueError):
+                i = None
+            if i is not None and i in seen_ids:
+                continue
+            if i is not None:
+                seen_ids.add(i)
+            merged.append(row)
+    return merged
+
+
+async def get_refine_text(task_id: str | int, message_id: str | int) -> str:
+    """
+    Load comment text for ONTASKCOMMENTADD refine.
+
+    New task card: MESSAGE_ID is an IM chat message — use im.dialog.messages.get.
+    Legacy card: task.commentitem.get with ITEMID (may equal MESSAGE_ID).
+    """
+    tid = int(task_id)
+    mid = int(message_id)
+    logger.info("REFINE fetch comment | task_id=%s message_id=%s", tid, mid)
+
+    # 1) Task chat (IM) — primary for new task card per Bitrix docs
+    chat_id = await _fetch_task_chat_id(tid)
+    dialog_candidates: list[str] = []
+    if chat_id is not None:
+        dialog_candidates.append(f"chat{chat_id}")
+    dialog_candidates.extend((f"TASKS_TASK_{tid}", f"TASK_{tid}"))
+
+    for dialog_id in dialog_candidates:
+        messages = await _im_dialog_messages(dialog_id, message_id=mid)
+        text = _find_im_message_text(messages, mid)
+        if text:
+            logger.info(
+                "REFINE comment source=im.dialog.messages.get | dialog=%s message_id=%s",
+                dialog_id,
+                mid,
+            )
+            return text
+        logger.info(
+            "REFINE im.dialog.messages.get no match | dialog=%s message_id=%s count=%s",
+            dialog_id,
+            mid,
+            len(messages),
+        )
+
+    # 2) Legacy task comment storage
+    if mid > 0:
+        try:
+            result = await bitrix_call(
+                "task.commentitem.get",
+                {"TASKID": tid, "ITEMID": mid},
+            )
+            text = _text_from_comment_api_result(result)
+            if text:
+                logger.info(
+                    "REFINE comment source=task.commentitem.get | task_id=%s item_id=%s",
+                    tid,
+                    mid,
+                )
+                return text
+        except Exception as e:
+            logger.warning(
+                "task.commentitem.get failed | task_id=%s item_id=%s error=%s",
+                tid,
+                mid,
+                e,
+            )
+
+    logger.warning("REFINE comment empty | task_id=%s message_id=%s", tid, mid)
+    return ""
+
+
 async def get_task_comment(task_id: str | int, message_id: str | int) -> str | None:
     """Fetch task chat / comment text for refine webhooks."""
-    return await fetch_task_comment_text(task_id, message_id)
+    text = await get_refine_text(task_id, message_id)
+    return text or None
 
 
 def _message_text_from_im_row(row: dict[str, Any]) -> str:
@@ -274,6 +371,40 @@ def _message_text_from_im_row(row: dict[str, Any]) -> str:
         v = row.get(key)
         if v is not None and str(v).strip():
             return str(v).strip()
+    return ""
+
+
+def _text_from_comment_api_result(result: Any) -> str:
+    if not isinstance(result, dict):
+        return ""
+    for key in ("POST_MESSAGE", "postMessage", "MESSAGE", "message", "TEXT", "text"):
+        v = result.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _normalize_im_messages(payload: Any) -> list[dict[str, Any]]:
+    """im.dialog.messages.get returns { chat_id, messages: [...] } not a bare list."""
+    if isinstance(payload, list):
+        return [m for m in payload if isinstance(m, dict)]
+    if isinstance(payload, dict):
+        messages = payload.get("messages")
+        if isinstance(messages, list):
+            return [m for m in messages if isinstance(m, dict)]
+    return []
+
+
+def _find_im_message_text(messages: list[dict[str, Any]], message_id: int) -> str:
+    for row in messages:
+        row_id = row.get("id") or row.get("ID")
+        try:
+            if row_id is not None and int(row_id) == message_id:
+                text = _message_text_from_im_row(row)
+                if text:
+                    return text
+        except (TypeError, ValueError):
+            continue
     return ""
 
 
@@ -309,69 +440,9 @@ async def _fetch_task_chat_id(task_id: str | int) -> int | None:
 
 
 async def fetch_task_comment_text(task_id: str | int, message_id: str | int) -> str | None:
-    """
-    Load task chat / comment text for ONTASKCOMMENTADD.
-
-    New task card: MESSAGE_ID + im.dialog.messages.get.
-    Old card fallback: task.commentitem.get when comment id > 0.
-    """
-    mid = int(message_id)
-    chat_id = await _fetch_task_chat_id(task_id)
-    if chat_id is not None:
-        dialog_id = f"chat{chat_id}"
-        try:
-            rows = await bitrix_call(
-                "im.dialog.messages.get",
-                {
-                    "DIALOG_ID": dialog_id,
-                    "LAST_ID": mid + 1,
-                    "LIMIT": 20,
-                },
-            )
-        except Exception as e:
-            logger.warning(
-                "im.dialog.messages.get failed | task_id=%s chat_id=%s error=%s",
-                task_id,
-                chat_id,
-                e,
-            )
-            rows = None
-        if isinstance(rows, list):
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                row_id = row.get("id") or row.get("ID")
-                try:
-                    if row_id is not None and int(row_id) == mid:
-                        text = _message_text_from_im_row(row)
-                        if text:
-                            return text
-                except (TypeError, ValueError):
-                    continue
-            if rows:
-                text = _message_text_from_im_row(rows[-1] if isinstance(rows[-1], dict) else {})
-                if text:
-                    return text
-
-    comment_id = int(message_id)
-    if comment_id > 0:
-        try:
-            result = await bitrix_call(
-                "task.commentitem.get",
-                {"TASKID": int(task_id), "ITEMID": comment_id},
-            )
-            if isinstance(result, dict):
-                text = str(result.get("POST_MESSAGE") or result.get("postMessage") or "").strip()
-                if text:
-                    return text
-        except Exception as e:
-            logger.warning(
-                "task.commentitem.get failed | task_id=%s item_id=%s error=%s",
-                task_id,
-                comment_id,
-                e,
-            )
-    return None
+    """Alias for :func:`get_refine_text`."""
+    text = await get_refine_text(task_id, message_id)
+    return text or None
 
 
 async def deliver_outline_pdf_to_bitrix_task(
