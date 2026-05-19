@@ -1,10 +1,10 @@
 """
-Bitrix24 Tasks: upload outline PDF to Drive, attach to task, notify task chat.
+Bitrix24 Tasks: upload outline PDF to Drive, attach to task, notify via task comment.
 
-Workflow (official docs):
-1. disk.folder.uploadfile
+Workflow:
+1. disk.folder.uploadfile (folder auto-created under My Drive if needed)
 2. tasks.task.files.attach
-3. tasks.task.chat.message.send (REST v3 path: /rest/api/... when needed)
+3. task.commentitem.add
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 
 def _api_webhook_base() -> str:
-    """Insert /api/ segment for REST v3 task chat method."""
+    """Insert /api/ segment for REST v3 task methods."""
     base = (settings.BITRIX_WEBHOOK_URL or "").strip().rstrip("/")
     if "/rest/api/" in base:
         return base
@@ -30,7 +30,7 @@ def _api_webhook_base() -> str:
 
 
 async def bitrix_call_api(method: str, params: dict[str, Any] | None = None) -> Any:
-    """Call method on /rest/api/{user}/{secret}/ (v3 task chat)."""
+    """Call method on /rest/api/{user}/{secret}/ (v3)."""
     base = _api_webhook_base()
     method_name = (method or "").strip().strip("/")
     if method_name.endswith(".json"):
@@ -71,13 +71,71 @@ def _extract_disk_file_id(upload_result: Any) -> int | None:
     return None
 
 
+def _folder_id_from_item(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    for key in ("ID", "id"):
+        v = item.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return None
+
+
+async def ensure_outline_folder() -> str:
+    """
+    Find or create ``BITRIX_DRIVE_FOLDER_NAME`` under the portal's default Drive storage.
+    """
+    folder_name = (settings.BITRIX_DRIVE_FOLDER_NAME or "CourseOutlines").strip()
+    storage = await bitrix_call("disk.storage.getlist", {})
+    if not isinstance(storage, list) or not storage:
+        raise RuntimeError("disk.storage.getlist returned no storages")
+
+    first = storage[0]
+    if not isinstance(first, dict):
+        raise RuntimeError(f"Unexpected storage entry: {first!r}")
+    storage_id = first.get("ID") or first.get("id")
+    if storage_id is None:
+        raise RuntimeError(f"Storage entry missing ID: {first!r}")
+
+    children = await bitrix_call("disk.storage.getchildren", {"id": storage_id})
+    if isinstance(children, list):
+        for item in children:
+            if isinstance(item, dict) and str(item.get("NAME") or "") == folder_name:
+                fid = _folder_id_from_item(item)
+                if fid:
+                    logger.info(
+                        "Bitrix Drive folder found | name=%s id=%s",
+                        folder_name,
+                        fid,
+                    )
+                    return fid
+
+    created = await bitrix_call(
+        "disk.storage.addfolder",
+        {
+            "id": storage_id,
+            "data": {"NAME": folder_name},
+        },
+    )
+    if isinstance(created, dict):
+        fid = _folder_id_from_item(created)
+        if fid:
+            logger.info(
+                "Bitrix Drive folder created | name=%s id=%s",
+                folder_name,
+                fid,
+            )
+            return fid
+    raise RuntimeError(f"disk.storage.addfolder did not return folder id: {created!r}")
+
+
 async def upload_pdf_to_drive_folder(pdf_path: str, *, folder_id: str | None = None) -> int:
-    fid = (folder_id or settings.BITRIX_DRIVE_FOLDER_ID or "").strip()
+    fid = (folder_id or "").strip()
     if not fid:
-        raise RuntimeError(
-            "BITRIX_DRIVE_FOLDER_ID is not set. Upload the PDF to Bitrix Drive first "
-            "(disk.folder.uploadfile requires a folder id)."
-        )
+        fid = (settings.BITRIX_DRIVE_FOLDER_ID or "").strip()
+    if not fid:
+        fid = await ensure_outline_folder()
+
     if not os.path.isfile(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
@@ -106,18 +164,17 @@ async def attach_file_to_task(task_id: str | int, file_id: int) -> dict[str, Any
     return result if isinstance(result, dict) else {"result": result}
 
 
-async def send_task_chat_message(task_id: str | int, message: str) -> Any:
+async def send_task_comment(task_id: str | int, message: str) -> Any:
     text = (message or "").strip()
     if not text:
         return None
-    body = {"fields": {"taskId": int(task_id), "text": text}}
-    try:
-        return await bitrix_call_api("tasks.task.chat.message.send", body)
-    except Exception:
-        logger.warning(
-            "tasks.task.chat.message.send via /rest/api/ failed; trying standard /rest/ path"
-        )
-        return await bitrix_call("tasks.task.chat.message.send", body)
+    return await bitrix_call(
+        "task.commentitem.add",
+        {
+            "TASKID": int(task_id),
+            "POST_MESSAGE": text,
+        },
+    )
 
 
 async def fetch_task_item_data(task_id: str | int) -> dict[str, Any]:
@@ -241,13 +298,13 @@ async def deliver_outline_pdf_to_bitrix_task(
     course_name: str,
 ) -> dict[str, Any]:
     """
-    Upload PDF to Drive, attach to task, post chat message. Failures are logged; partial success ok.
+    Upload PDF to Drive, attach to task, post task comment. Failures are logged; partial success ok.
     """
     out: dict[str, Any] = {
         "task_id": task_id,
         "drive_file_id": None,
         "attachment_id": None,
-        "chat_sent": False,
+        "comment_sent": False,
     }
     if not bitrix_configured():
         logger.info("Bitrix task delivery skipped: BITRIX_WEBHOOK_URL not set")
@@ -268,24 +325,20 @@ async def deliver_outline_pdf_to_bitrix_task(
     except Exception:
         logger.exception("Bitrix task PDF upload/attach failed | task_id=%s", task_id)
 
-    msg_template = (settings.BITRIX_TASK_CHAT_MESSAGE or "").strip()
-    if not msg_template:
-        msg_template = (
-            "Course outline generated successfully.\n"
-            "Course: {course_name}\n"
-            "PDF attached to this task."
-        )
-    if pdf_url:
-        msg_template += "\nPublic link: {pdf_url}"
     try:
-        message = msg_template.format(
-            course_name=course_name or "course",
-            pdf_url=pdf_url or "",
-            task_id=task_id,
-        ).strip()
-        await send_task_chat_message(task_id, message)
-        out["chat_sent"] = True
+        await send_task_comment(
+            task_id,
+            f"""Course outline generated.
+
+Course: {course_name or "course"}
+
+PDF:
+{pdf_url or "(attached to this task)"}
+
+Uploaded to Bitrix Drive.""",
+        )
+        out["comment_sent"] = True
     except Exception:
-        logger.exception("Bitrix task chat message failed | task_id=%s", task_id)
+        logger.exception("Bitrix task comment failed | task_id=%s", task_id)
 
     return out

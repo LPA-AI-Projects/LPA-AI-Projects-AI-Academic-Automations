@@ -76,8 +76,10 @@ class Settings(BaseSettings):
     # Optional HTTP callback when job completes (Bitrix automation handler URL)
     BITRIX_CALLBACK_URL: str = ""
     BITRIX_CALLBACK_BODY_FORMAT: str = "json"
-    # Bitrix24 Disk folder id for course outline PDFs (disk.folder.uploadfile)
+    # Bitrix24 Disk folder id for course outline PDFs (optional; auto-created if empty)
     BITRIX_DRIVE_FOLDER_ID: str = ""
+    # Folder name under default storage when BITRIX_DRIVE_FOLDER_ID is not set
+    BITRIX_DRIVE_FOLDER_NAME: str = "CourseOutlines"
     # After outline job: upload PDF to Drive, attach to task, post task chat message
     BITRIX_TASK_ATTACH_ENABLED: bool = True
     BITRIX_TASK_CHAT_MESSAGE: str = ""
@@ -206,6 +208,7 @@ class Settings(BaseSettings):
         "BITRIX_CALLBACK_URL",
         "BITRIX_CALLBACK_BODY_FORMAT",
         "BITRIX_DRIVE_FOLDER_ID",
+        "BITRIX_DRIVE_FOLDER_NAME",
         "BITRIX_TASK_CHAT_MESSAGE",
         "BITRIX_LOG_INCOMING_REQUESTS",
         "BITRIX_REFINE_COMMENT_PREFIX",

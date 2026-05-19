@@ -267,7 +267,7 @@ async def refine_course_for_record(
 
     if crm_source == "bitrix":
         try:
-            from app.services.bitrix_tasks import deliver_outline_pdf_to_bitrix_task, send_task_chat_message
+            from app.services.bitrix_tasks import deliver_outline_pdf_to_bitrix_task, send_task_comment
 
             await deliver_outline_pdf_to_bitrix_task(
                 task_id=rid,
@@ -275,9 +275,16 @@ async def refine_course_for_record(
                 pdf_url=saved_pdf_url,
                 course_name=f"{name_for_file} v{new_version_number}",
             )
-            await send_task_chat_message(
+            await send_task_comment(
                 rid,
-                f"Outline refined to v{new_version_number} for {name_for_file}.",
+                f"""Course outline refined to v{new_version_number}.
+
+Course: {name_for_file}
+
+PDF:
+{saved_pdf_url or "(attached to this task)"}
+
+Uploaded to Bitrix Drive.""",
             )
         except Exception:
             logger.exception("Bitrix refine delivery failed | task_id=%s", rid)

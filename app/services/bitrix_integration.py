@@ -42,7 +42,10 @@ def get_bitrix_course_outline_integration_status() -> dict[str, bool]:
         "bitrix_task_attach_configured": bool(
             settings.BITRIX_TASK_ATTACH_ENABLED
             and bitrix_configured()
-            and (settings.BITRIX_DRIVE_FOLDER_ID or "").strip()
+            and (
+                (settings.BITRIX_DRIVE_FOLDER_ID or "").strip()
+                or (settings.BITRIX_DRIVE_FOLDER_NAME or "").strip()
+            )
         ),
         "bitrix_completion_callback_configured": bitrix_completion_webhook_is_configured(),
     }
