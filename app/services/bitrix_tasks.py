@@ -345,11 +345,15 @@ async def deliver_outline_pdf_to_bitrix_task(
 
     if file_id is not None:
         try:
+            msg = f"""Course outline generated successfully.
+
+Google Drive:
+{pdf_url or "(link not available)"}
+
+PDF uploaded and attached to this task."""
             await send_task_comment(
                 task_id,
-                """Course outline generated successfully.
-
-PDF uploaded and attached to task.""",
+                msg,
                 drive_file_id=file_id,
             )
             out["comment_sent"] = True
