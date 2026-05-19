@@ -164,17 +164,34 @@ async def attach_file_to_task(task_id: str | int, file_id: int) -> dict[str, Any
     return result if isinstance(result, dict) else {"result": result}
 
 
-async def send_task_comment(task_id: str | int, message: str) -> Any:
+async def send_task_comment(
+    task_id: str | int,
+    message: str,
+    drive_file_id: int | None = None,
+) -> Any:
+    """
+    Add a task comment per Bitrix docs: TASKID + FIELDS.POST_MESSAGE.
+
+    Optional ``UF_FORUM_MESSAGE_DOC`` with Drive file ids prefixed by ``n`` (e.g. ``n7167800``).
+    See https://apidocs.bitrix24.com/api-reference/tasks/comment-item/task-comment-item-add.html
+    """
     text = (message or "").strip()
     if not text:
         return None
-    return await bitrix_call(
+
+    fields: dict[str, Any] = {"POST_MESSAGE": text}
+    if drive_file_id is not None:
+        fields["UF_FORUM_MESSAGE_DOC"] = [f"n{int(drive_file_id)}"]
+
+    result = await bitrix_call(
         "task.commentitem.add",
         {
             "TASKID": int(task_id),
-            "POST_MESSAGE": text,
+            "FIELDS": fields,
         },
     )
+    logger.info("Bitrix task comment added | task_id=%s drive_file_id=%s", task_id, drive_file_id)
+    return result
 
 
 async def fetch_task_item_data(task_id: str | int) -> dict[str, Any]:
@@ -316,6 +333,7 @@ async def deliver_outline_pdf_to_bitrix_task(
         logger.warning("Bitrix task delivery skipped: PDF path missing | task_id=%s", task_id)
         return out
 
+    file_id: int | None = None
     try:
         file_id = await upload_pdf_to_drive_folder(pdf_path)
         out["drive_file_id"] = file_id
@@ -325,20 +343,17 @@ async def deliver_outline_pdf_to_bitrix_task(
     except Exception:
         logger.exception("Bitrix task PDF upload/attach failed | task_id=%s", task_id)
 
-    try:
-        await send_task_comment(
-            task_id,
-            f"""Course outline generated.
+    if file_id is not None:
+        try:
+            await send_task_comment(
+                task_id,
+                """Course outline generated successfully.
 
-Course: {course_name or "course"}
-
-PDF:
-{pdf_url or "(attached to this task)"}
-
-Uploaded to Bitrix Drive.""",
-        )
-        out["comment_sent"] = True
-    except Exception:
-        logger.exception("Bitrix task comment failed | task_id=%s", task_id)
+PDF uploaded and attached to task.""",
+                drive_file_id=file_id,
+            )
+            out["comment_sent"] = True
+        except Exception:
+            logger.exception("Bitrix task comment failed | task_id=%s", task_id)
 
     return out
