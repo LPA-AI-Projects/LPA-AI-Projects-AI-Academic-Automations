@@ -15,6 +15,7 @@ class BitrixCourseOutlineIntegrationStatus(BaseModel):
 
     bitrix_webhook_configured: bool
     bitrix_application_token_configured: bool
+    bitrix_refine_application_token_configured: bool = False
     bitrix_crm_attach_configured: bool
     bitrix_task_attach_configured: bool
     bitrix_completion_callback_configured: bool

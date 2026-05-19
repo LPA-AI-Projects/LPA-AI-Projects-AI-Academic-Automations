@@ -94,6 +94,21 @@ def bitrix_application_token_is_valid(token: str | None) -> bool:
     return token.strip() == expected
 
 
+def bitrix_refine_application_token_configured() -> bool:
+    return bool(
+        (settings.BITRIX_REFINE_APPLICATION_TOKEN or settings.BITRIX_APPLICATION_TOKEN or "").strip()
+    )
+
+
+def bitrix_refine_application_token_is_valid(token: str | None) -> bool:
+    if not token:
+        return False
+    refine_expected = (settings.BITRIX_REFINE_APPLICATION_TOKEN or "").strip()
+    if refine_expected and token.strip() == refine_expected:
+        return True
+    return bitrix_application_token_is_valid(token)
+
+
 def reinject_request_body(request: Request, body_bytes: bytes) -> None:
     async def receive():
         return {"type": "http.request", "body": body_bytes, "more_body": False}
@@ -202,5 +217,59 @@ async def verify_bitrix_api_key(
     )
 
 
+async def verify_bitrix_refine_api_key(
+    request: Request,
+    x_api_key: Optional[str] = Header(
+        None,
+        alias="X-API-Key",
+        description="Optional; Bitrix refine webhook uses auth[application_token]",
+    ),
+) -> None:
+    """
+    Authenticate Bitrix ``/bitrix/courses/refine``:
+
+    1. ``auth[application_token]`` == ``BITRIX_REFINE_APPLICATION_TOKEN`` (or BITRIX_APPLICATION_TOKEN)
+    2. Otherwise: global API key
+    """
+    key = resolve_api_key(request, header_key=x_api_key)
+    if api_key_is_valid(key):
+        return
+
+    body_bytes = await request.body()
+    content_type = request.headers.get("content-type")
+    reinject_request_body(request, body_bytes)
+    log_bitrix_incoming_request(request, body_bytes)
+
+    ct = (content_type or "").lower()
+    if "application/x-www-form-urlencoded" in ct or "multipart/form-data" in ct:
+        form_data = parse_urlencoded_form(body_bytes)
+        app_token = extract_bitrix_application_token(form_data)
+        if bitrix_refine_application_token_is_valid(app_token):
+            event = str(form_data.get("event") or "").strip()
+            logger.info(
+                "Bitrix refine webhook authenticated via application_token | event=%s",
+                event or "-",
+            )
+            return
+
+    key = extract_api_key_from_body(body_bytes, content_type)
+    if api_key_is_valid(key):
+        return
+
+    logger.warning(
+        "Bitrix refine auth failed | path=%s refine_token_configured=%s",
+        request.url.path,
+        bitrix_refine_application_token_configured(),
+    )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=(
+            "Unauthorized. Set BITRIX_REFINE_APPLICATION_TOKEN (or BITRIX_APPLICATION_TOKEN) "
+            "to match auth[application_token] from the Course Outline Refine outgoing webhook."
+        ),
+    )
+
+
 auth = Depends(verify_api_key)
 bitrix_auth = Depends(verify_bitrix_api_key)
+bitrix_refine_auth = Depends(verify_bitrix_refine_api_key)

@@ -202,6 +202,73 @@ async def fetch_task_item_data(task_id: str | int) -> dict[str, Any]:
     raise RuntimeError(f"task.item.getdata returned unexpected type: {type(result)}")
 
 
+def _merge_task_fields(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for key, value in extra.items():
+        if value is None:
+            continue
+        if str(value).strip() in ("", "0", "null", "undefined"):
+            continue
+        if key not in out or str(out.get(key) or "").strip() in ("", "0", "null"):
+            out[key] = value
+    return out
+
+
+async def fetch_task_for_outline(task_id: str | int) -> dict[str, Any]:
+    """
+    task.item.getdata plus tasks.task.get when GROUP_ID/FLOW_ID are empty (common on new tasks).
+    """
+    task_body = await fetch_task_item_data(task_id)
+    group_id = str(task_body.get("GROUP_ID") or task_body.get("groupId") or "").strip()
+    flow_id = str(
+        task_body.get("FLOW_ID")
+        or task_body.get("flowId")
+        or task_body.get("flow")
+        or ""
+    ).strip()
+    if group_id not in ("", "0") and flow_id not in ("", "0"):
+        return task_body
+
+    try:
+        result = await bitrix_call(
+            "tasks.task.get",
+            {
+                "taskId": int(task_id),
+                "select": ["ID", "groupId", "GROUP_ID", "flowId", "FLOW_ID", "title", "TITLE"],
+            },
+        )
+    except Exception:
+        logger.warning("tasks.task.get enrichment failed | task_id=%s", task_id)
+        return task_body
+
+    if not isinstance(result, dict):
+        return task_body
+
+    item = result.get("task") if isinstance(result.get("task"), dict) else result
+    if not isinstance(item, dict):
+        return task_body
+
+    extra: dict[str, Any] = {}
+    for src, dst in (
+        ("groupId", "GROUP_ID"),
+        ("flowId", "FLOW_ID"),
+        ("id", "ID"),
+        ("title", "TITLE"),
+    ):
+        if item.get(src) is not None:
+            extra[dst] = item.get(src)
+        if item.get(dst) is not None:
+            extra[dst] = item.get(dst)
+    if item.get("flow") is not None:
+        extra["flow"] = item.get("flow")
+    return _merge_task_fields(task_body, extra)
+
+
+async def get_task_comment(task_id: str | int, message_id: str | int) -> str | None:
+    """Fetch task chat / comment text for refine webhooks."""
+    return await fetch_task_comment_text(task_id, message_id)
+
+
 def _message_text_from_im_row(row: dict[str, Any]) -> str:
     for key in ("text", "message", "MESSAGE", "TEXT"):
         v = row.get(key)

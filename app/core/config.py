@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     BITRIX_WEBHOOK_URL: str = ""
     # Outgoing webhook: auth[application_token] from Bitrix (Business process / automation)
     BITRIX_APPLICATION_TOKEN: str = ""
+    # Outgoing webhook token for POST /api/v1/bitrix/courses/refine (falls back to BITRIX_APPLICATION_TOKEN)
+    BITRIX_REFINE_APPLICATION_TOKEN: str = ""
     # deal | lead | dynamic (uses crm.item.update + BITRIX_CRM_ENTITY_TYPE_ID)
     BITRIX_CRM_ENTITY: str = "deal"
     # entityTypeId for crm.item.update (2 = deal in universal CRM API)
@@ -200,6 +202,7 @@ class Settings(BaseSettings):
         "ZOHO_CRM_PUBLIC_FINAL_CURRICULUM_FIELD_API_NAME",
         "BITRIX_WEBHOOK_URL",
         "BITRIX_APPLICATION_TOKEN",
+        "BITRIX_REFINE_APPLICATION_TOKEN",
         "BITRIX_CRM_ENTITY",
         "BITRIX_OUTLINE_PDF_FIELD",
         "BITRIX_OUTLINE_STATUS_FIELD",

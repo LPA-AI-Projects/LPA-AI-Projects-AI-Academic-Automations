@@ -34,6 +34,9 @@ def get_bitrix_course_outline_integration_status() -> dict[str, bool]:
     return {
         "bitrix_webhook_configured": bitrix_configured(),
         "bitrix_application_token_configured": bitrix_application_token_configured(),
+        "bitrix_refine_application_token_configured": bool(
+            (settings.BITRIX_REFINE_APPLICATION_TOKEN or settings.BITRIX_APPLICATION_TOKEN or "").strip()
+        ),
         "bitrix_crm_attach_configured": bool(
             settings.BITRIX_ATTACH_PDF_TO_CRM
             and bitrix_configured()

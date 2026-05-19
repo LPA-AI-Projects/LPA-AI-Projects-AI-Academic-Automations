@@ -120,10 +120,11 @@ async def log_raw_course_requests(request: Request, call_next):
     if request.method == "POST" and request.url.path in (
         "/api/v1/courses",
         "/api/v1/bitrix/courses",
+        "/api/v1/bitrix/courses/refine",
     ):
         body_bytes = await request.body()
         raw_body = body_bytes.decode("utf-8", errors="replace")
-        if request.url.path == "/api/v1/bitrix/courses" or getattr(
+        if request.url.path.startswith("/api/v1/bitrix/courses") or getattr(
             app_settings, "BITRIX_LOG_INCOMING_REQUESTS", False
         ):
             logger.info(
