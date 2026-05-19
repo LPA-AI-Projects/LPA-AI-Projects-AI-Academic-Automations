@@ -51,37 +51,55 @@ router = APIRouter(prefix="/api/v1/bitrix", tags=["bitrix"])
 BITRIX_GENERATE_EVENTS = frozenset({"ONTASKADD"})
 
 
-def _allowed_bitrix_group_ids() -> frozenset[str]:
-    raw = (settings.BITRIX_ALLOWED_GROUP_IDS or "25,28").strip()
+def _allowed_bitrix_project_ids() -> frozenset[str]:
+    """GROUP_ID and/or Bitrix task flow id (UI field ``flow`` → often FLOW_ID in API)."""
+    raw = (settings.BITRIX_ALLOWED_GROUP_IDS or "34,36").strip()
     return frozenset(part.strip() for part in raw.split(",") if part.strip())
 
 
 def _enforce_task_project_allowed(task_body: dict[str, Any], task_id: str) -> None:
-    """Raise HTTP 200 when task is outside allowed Bitrix project (group) IDs."""
+    """Raise HTTP 200 when task is outside allowed Bitrix project / flow IDs."""
     group_id = str(
         task_body.get("GROUP_ID") or task_body.get("groupId") or ""
     ).strip()
     group_name = str(
         task_body.get("GROUP_NAME") or task_body.get("GROUP") or ""
     ).strip()
+    flow_id = str(
+        task_body.get("FLOW_ID")
+        or task_body.get("flowId")
+        or task_body.get("flow")
+        or task_body.get("FLOW")
+        or ""
+    ).strip()
+    flow_name = str(
+        task_body.get("FLOW_NAME") or task_body.get("flowName") or ""
+    ).strip()
 
     logger.info(
-        "BITRIX PROJECT CHECK | task=%s group_id=%s group=%s",
+        "BITRIX PROJECT CHECK | task=%s group_id=%s group=%s flow_id=%s flow=%s",
         task_id,
         group_id,
         group_name,
+        flow_id,
+        flow_name,
     )
 
-    allowed = _allowed_bitrix_group_ids()
-    if group_id not in allowed:
-        logger.info(
-            "Ignoring task outside outline projects | task=%s group_id=%s group=%s allowed=%s",
-            task_id,
-            group_id,
-            group_name,
-            sorted(allowed),
-        )
-        raise HTTPException(status_code=status.HTTP_200_OK, detail="project_ignored")
+    allowed = _allowed_bitrix_project_ids()
+    if group_id in allowed or flow_id in allowed:
+        return
+
+    logger.info(
+        "Ignoring task outside outline projects | task=%s group_id=%s flow_id=%s "
+        "group=%s flow=%s allowed=%s",
+        task_id,
+        group_id,
+        flow_id,
+        group_name,
+        flow_name,
+        sorted(allowed),
+    )
+    raise HTTPException(status_code=status.HTTP_200_OK, detail="project_ignored")
 
 
 class BitrixWebhookKind(str, Enum):
@@ -303,7 +321,7 @@ def bitrix_course_outline_integration_status():
     dependencies=[bitrix_auth],
     summary="Create course outline from Bitrix24 new task (ONTASKADD)",
     description=(
-        "ONTASKADD only: generate outline when task GROUP_ID is in BITRIX_ALLOWED_GROUP_IDS. "
+        "ONTASKADD only: generate when task GROUP_ID or flow id is in BITRIX_ALLOWED_GROUP_IDS (default 34,36). "
         "ONTASKUPDATE / ONTASKCOMMENTADD are ignored. Auth: auth[application_token] or X-API-Key."
     ),
 )
