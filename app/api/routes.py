@@ -65,16 +65,20 @@ def _input_data_dict_for_job(data: CourseInputData) -> dict:
     # - days only -> show days only
     td = out.get("training_days")
     ph = out.get("per_day_duration_in_hours")
+    existing_duration = str(out.get("duration") or "").strip()
     try:
         if td is not None and ph is not None:
             td_i = int(td)
-            out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
+            if not existing_duration:
+                out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
         elif td is not None:
             td_i = int(td)
-            out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
+            if not existing_duration:
+                out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
         elif ph is not None:
-            ph_f = float(ph)
-            out["duration"] = f"{ph_f:g} Hour" if ph_f == 1 else f"{ph_f:g} Hours"
+            if not existing_duration:
+                ph_f = float(ph)
+                out["duration"] = f"{ph_f:g} Hour" if ph_f == 1 else f"{ph_f:g} Hours"
     except Exception:
         # Keep original free-text duration as-is when numeric coercion fails.
         pass
@@ -590,6 +594,10 @@ async def process_course_job(
                     timeout=600,
                 )
                 _enforce_regions_served_constant(outline_payload)
+                if crm_source == "bitrix":
+                    from app.services.bitrix_task_parser import apply_bitrix_client_duration_to_outline
+
+                    apply_bitrix_client_duration_to_outline(outline_payload, input_data)
                 outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
             except RuntimeError:
                 outline = await wait_for(

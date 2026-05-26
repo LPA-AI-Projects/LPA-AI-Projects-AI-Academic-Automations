@@ -1,8 +1,10 @@
 """Unit tests for Bitrix task webhook parsing."""
 from app.services.bitrix_task_parser import (
+    _map_parsed_to_input_data,
     extract_message_id,
     extract_task_id,
     parse_refine_feedback_from_comment,
+    parse_task_description_table,
 )
 
 
@@ -51,6 +53,31 @@ def test_parse_refine_variants():
 def test_parse_refine_multiline():
     text = "Refine :\nchange it to 24 hours"
     assert parse_refine_feedback_from_comment(text) == "change it to 24 hours"
+
+
+def test_total_and_course_duration_mapping():
+    desc = (
+        "[table][tr][td]Product / Course Name: Blockchain[/td][/tr]"
+        "[tr][td]Total Duration: 6 to 8 Weeks[/td][/tr]"
+        "[tr][td]Course Duration 6 to 8 Weeks (16 Sessions, 90 Minutes Each)[/td][/tr]"
+        "[tr][td]Duration in hours: 30[/td][/tr][/table]"
+    )
+    parsed = parse_task_description_table(desc)
+    mapped = _map_parsed_to_input_data(parsed)
+    assert mapped["duration"] == "6 to 8 Weeks"
+    assert mapped["course_duration"] == "6 to 8 Weeks (16 Sessions, 90 Minutes Each)"
+    assert mapped["per_day_duration_in_hours"] == "30"
+
+
+def test_duration_in_hours_maps_to_per_day_hours():
+    desc = (
+        "[table][tr][td]Product / Course Name: Excel Basics[/td][/tr]"
+        "[tr][td]Duration in hours: 8[/td][/tr][/table]"
+    )
+    parsed = parse_task_description_table(desc)
+    mapped = _map_parsed_to_input_data(parsed)
+    assert mapped["course_name"] == "Excel Basics"
+    assert mapped["per_day_duration_in_hours"] == "8"
 
 
 def test_parse_refine_rejects_non_refine():

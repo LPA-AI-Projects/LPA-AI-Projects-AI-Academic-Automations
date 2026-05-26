@@ -19,6 +19,30 @@ logger = get_logger(__name__)
 
 _NA_VALUES = frozenset({"na", "n/a", "none", "-", ""})
 
+# "Total Duration: 6 to 8 Weeks" or "Course Duration 6 to 8 Weeks (...)" in one table cell
+_DURATION_LABEL_PREFIX = re.compile(
+    r"^(total duration|course duration)\s*:?\s*(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_labeled_cell(cell: str) -> tuple[str, str] | None:
+    """Return (normalized_key, value) from a BBCode table cell."""
+    cell = re.sub(r"\[/?[bi]\]", "", cell, flags=re.IGNORECASE).strip()
+    if not cell:
+        return None
+    if ":" in cell:
+        label, _, value = cell.partition(":")
+        label_k = _normalize_label(label)
+        if label_k:
+            return label_k, _clean_value(value)
+    m = _DURATION_LABEL_PREFIX.match(cell)
+    if m:
+        label_k = _normalize_label(m.group(1))
+        if label_k:
+            return label_k, _clean_value(m.group(2))
+    return None
+
 
 def _clean_value(raw: str | None) -> str:
     s = str(raw or "").strip()
@@ -45,24 +69,21 @@ def parse_task_description_table(description: str | None) -> dict[str, Any]:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     ):
-        cell = m.group(1)
-        cell = re.sub(r"\[/?[bi]\]", "", cell, flags=re.IGNORECASE)
-        if ":" in cell:
-            label, _, value = cell.partition(":")
-            label_k = _normalize_label(label)
-            if label_k:
-                out[label_k] = _clean_value(value)
+        parsed_cell = _parse_labeled_cell(m.group(1))
+        if parsed_cell:
+            label_k, value = parsed_cell
+            if value:
+                out[label_k] = value
 
     # Plain lines: "Label: value"
     if not out:
         for line in text.splitlines():
             line = re.sub(r"\[/?[^\]]+\]", "", line).strip()
-            if ":" not in line:
-                continue
-            label, _, value = line.partition(":")
-            label_k = _normalize_label(label)
-            if label_k:
-                out[label_k] = _clean_value(value)
+            parsed_line = _parse_labeled_cell(line)
+            if parsed_line:
+                label_k, value = parsed_line
+                if value:
+                    out[label_k] = value
 
     return out
 
@@ -88,6 +109,9 @@ def _normalize_label(label: str) -> str:
         "focus area of training": "topics_to_include",
         "referral course links if any": "referral_course_links",
         "is this course meant for certification skill development or any other details": "additional_notes",
+        "duration in hours": "per_day_duration_in_hours",
+        "total duration": "duration",
+        "course duration": "course_duration",
     }
     if s in aliases:
         return aliases[s]
@@ -109,6 +133,12 @@ def _normalize_label(label: str) -> str:
         return "designation"
     if "referral" in s and "link" in s:
         return "referral_course_links"
+    if "duration" in s and "hour" in s:
+        return "per_day_duration_in_hours"
+    if "total" in s and "duration" in s:
+        return "duration"
+    if "course" in s and "duration" in s:
+        return "course_duration"
     return s.replace(" ", "_")[:80]
 
 
@@ -152,7 +182,15 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
         if v:
             notes_parts.append(f"{key}: {v}")
 
-    return {
+    per_day_hours = (
+        parsed.get("per_day_duration_in_hours")
+        or parsed.get("duration_in_hours")
+        or ""
+    )
+    duration_text = parsed.get("duration") or parsed.get("total_duration") or ""
+    course_duration = parsed.get("course_duration") or ""
+
+    result: dict[str, Any] = {
         "company_name": company_name or "NA",
         "course_name": course_name,
         "department": department or "NA",
@@ -167,7 +205,33 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
         "topics_to_include": parsed.get("topics_to_include") or "",
         "referral_course_links": parsed.get("referral_course_links") or "",
         "additional_notes": "\n".join(notes_parts) if notes_parts else "",
+        "per_day_duration_in_hours": per_day_hours or None,
     }
+    if duration_text:
+        result["duration"] = duration_text
+    if course_duration:
+        result["course_duration"] = course_duration
+    return result
+
+
+def apply_bitrix_client_duration_to_outline(outline_payload: Any, input_data: dict[str, Any] | None) -> None:
+    """
+    Bitrix-only: put CRM duration strings on the brochure as-is (cover + Course Details row).
+
+    Cover HTML shows ``Total Duration: {duration}``. The program-insights details table uses
+    ``course_details.course_duration`` (falls back to ``duration`` in PDF injection).
+    """
+    if outline_payload is None or not isinstance(input_data, dict):
+        return
+    dur = str(input_data.get("duration") or "").strip()
+    if dur:
+        outline_payload.duration = dur
+    cd = str(input_data.get("course_duration") or "").strip()
+    if cd:
+        try:
+            outline_payload.course_details.course_duration = cd
+        except Exception:
+            pass
 
 
 def _positive_task_id(value: Any) -> str | None:
