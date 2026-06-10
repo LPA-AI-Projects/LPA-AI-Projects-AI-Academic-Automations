@@ -53,6 +53,17 @@ Return ONLY valid JSON:
 }
 """
 
+VALIDATOR_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "approved": {"type": "boolean"},
+        "issues": {"type": "array", "items": {"type": "string"}},
+        "fix_instructions": {"type": "string"},
+    },
+    "required": ["approved", "issues", "fix_instructions"],
+    "additionalProperties": False,
+}
+
 _STOPWORDS = {
     "the",
     "and",
@@ -85,17 +96,30 @@ def _safe_json(text: str) -> dict[str, Any]:
     last = raw.rfind("}")
     if first >= 0 and last > first:
         raw = raw[first : last + 1]
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("Validator returned non-object JSON.")
-    approved = bool(data.get("approved"))
-    issues = data.get("issues")
-    if not isinstance(issues, list):
-        issues = []
-    fix = data.get("fix_instructions")
-    if not isinstance(fix, str):
-        fix = ""
-    return {"approved": approved, "issues": [str(i) for i in issues if str(i).strip()], "fix_instructions": fix}
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("Validator returned non-object JSON.")
+        approved = bool(data.get("approved"))
+        issues = data.get("issues")
+        if not isinstance(issues, list):
+            issues = []
+        fix = data.get("fix_instructions")
+        if not isinstance(fix, str):
+            fix = ""
+        return {
+            "approved": approved,
+            "issues": [str(i) for i in issues if str(i).strip()],
+            "fix_instructions": fix,
+        }
+    except Exception:
+        logger.exception("Invalid validator JSON")
+        logger.error("RAW RESPONSE: %s", raw)
+        return {
+            "approved": False,
+            "issues": ["validator_json_error"],
+            "fix_instructions": "",
+        }
 
 
 async def validate_slides_ai(
@@ -122,6 +146,7 @@ async def validate_slides_ai(
         user_prompt=user_prompt,
         timeout_s=120.0,
         model_override=model,
+        json_schema=VALIDATOR_RESPONSE_SCHEMA,
     )
     return _safe_json(raw)
 
@@ -184,6 +209,7 @@ async def validate_module_body_ai(
         user_prompt=user_prompt,
         timeout_s=180.0,
         model_override=model,
+        json_schema=VALIDATOR_RESPONSE_SCHEMA,
     )
     return _safe_json(raw)
 

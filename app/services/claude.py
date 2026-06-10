@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -766,6 +766,7 @@ class ClaudeService:
         user_prompt: str,
         timeout_s: float = 180.0,
         model_override: str | None = None,
+        json_schema: dict[str, Any] | None = None,
     ) -> str:
         """Generic completion for auxiliary flows (e.g. assessments). Uses configured AI_PROVIDER."""
         return await self._call_messages_api(
@@ -774,6 +775,7 @@ class ClaudeService:
             timeout_s=timeout_s,
             max_attempts=DEFAULT_MAX_ATTEMPTS,
             model_override=model_override,
+            json_schema=json_schema,
         )
 
     async def _call_messages_api(
@@ -784,6 +786,7 @@ class ClaudeService:
         timeout_s: float,
         max_attempts: int,
         model_override: str | None = None,
+        json_schema: dict[str, Any] | None = None,
     ) -> str:
         if self.provider == "openai":
             return await self._call_openai_chat_api(
@@ -792,6 +795,7 @@ class ClaudeService:
                 timeout_s=timeout_s,
                 max_attempts=max_attempts,
                 model_override=model_override,
+                json_schema=json_schema,
             )
 
         url = f"{self.base_url}/v1/messages"
@@ -800,14 +804,22 @@ class ClaudeService:
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "max_tokens": 8192,
             "temperature": 0.4,
             "system": system_prompt,
-            "tools":[{"type": "web_search_20250305","name": "web_search"}],
             "messages": [{"role": "user", "content": user_prompt}],
         }
+        if json_schema:
+            payload["output_config"] = {
+                "format": {
+                    "type": "json_schema",
+                    "schema": json_schema,
+                }
+            }
+        else:
+            payload["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
 
         timeout = httpx.Timeout(timeout_s, connect=10.0)
         last_error: Optional[BaseException] = None
@@ -929,6 +941,7 @@ class ClaudeService:
         timeout_s: float,
         max_attempts: int,
         model_override: str | None = None,
+        json_schema: dict[str, Any] | None = None,
     ) -> str:
         url = f"{self.openai_base_url}/v1/chat/completions"
         active_model = (model_override or "").strip() or self.openai_model
@@ -936,7 +949,7 @@ class ClaudeService:
             "Authorization": f"Bearer {self.openai_api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
+        payload: dict[str, Any] = {
             "model": active_model,
             "temperature": 0.2,
             "messages": [
@@ -944,6 +957,8 @@ class ClaudeService:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if json_schema:
+            payload["response_format"] = {"type": "json_object"}
         timeout = httpx.Timeout(timeout_s, connect=10.0)
         last_error: Optional[BaseException] = None
 
