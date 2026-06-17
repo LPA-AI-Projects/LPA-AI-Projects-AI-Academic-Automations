@@ -65,20 +65,16 @@ def _input_data_dict_for_job(data: CourseInputData) -> dict:
     # - days only -> show days only
     td = out.get("training_days")
     ph = out.get("per_day_duration_in_hours")
-    existing_duration = str(out.get("duration") or "").strip()
     try:
         if td is not None and ph is not None:
             td_i = int(td)
-            if not existing_duration:
-                out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
+            out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
         elif td is not None:
             td_i = int(td)
-            if not existing_duration:
-                out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
+            out["duration"] = f"{td_i:g} Day" if td_i == 1 else f"{td_i:g} Days"
         elif ph is not None:
-            if not existing_duration:
-                ph_f = float(ph)
-                out["duration"] = f"{ph_f:g} Hour" if ph_f == 1 else f"{ph_f:g} Hours"
+            ph_f = float(ph)
+            out["duration"] = f"{ph_f:g} Hour" if ph_f == 1 else f"{ph_f:g} Hours"
     except Exception:
         # Keep original free-text duration as-is when numeric coercion fails.
         pass

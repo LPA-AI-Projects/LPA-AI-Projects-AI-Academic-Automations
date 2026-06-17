@@ -53,6 +53,21 @@ def _clean_value(raw: str | None) -> str:
     return s
 
 
+def _parse_two_column_row(label_cell: str, value_cell: str) -> tuple[str, str] | None:
+    """Return (normalized_key, value) from a two-cell BBCode table row."""
+    parsed_label = _parse_labeled_cell(label_cell)
+    if parsed_label:
+        label_k, inline_value = parsed_label
+        value = inline_value or _clean_value(value_cell)
+    else:
+        label_raw = re.sub(r"\[/?[bi]\]", "", label_cell, flags=re.IGNORECASE).strip()
+        label_k = _normalize_label(label_raw.rstrip(":").strip())
+        value = _clean_value(value_cell)
+    if label_k and value:
+        return label_k, value
+    return None
+
+
 def parse_task_description_table(description: str | None) -> dict[str, Any]:
     """
     Extract label → value pairs from Bitrix task DESCRIPTION (BBCode table or plain text).
@@ -63,7 +78,18 @@ def parse_task_description_table(description: str | None) -> dict[str, Any]:
 
     out: dict[str, str] = {}
 
-    # BBCode rows: [tr][td]Label: value[/td][/tr]
+    # BBCode rows: [tr][td]Label[/td][td]value[/td][/tr] (two-column CRM template)
+    for m in re.finditer(
+        r"\[tr\]\s*\[td\](.*?)\[/td\]\s*\[td\](.*?)\[/td\]\s*\[/tr\]",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        parsed_row = _parse_two_column_row(m.group(1), m.group(2))
+        if parsed_row:
+            label_k, value = parsed_row
+            out[label_k] = value
+
+    # BBCode rows: [tr][td]Label: value[/td][/tr] (single-column)
     for m in re.finditer(
         r"\[tr\]\s*\[td\](.*?)\[/td\]\s*\[/tr\]",
         text,
@@ -72,7 +98,7 @@ def parse_task_description_table(description: str | None) -> dict[str, Any]:
         parsed_cell = _parse_labeled_cell(m.group(1))
         if parsed_cell:
             label_k, value = parsed_cell
-            if value:
+            if value and label_k not in out:
                 out[label_k] = value
 
     # Plain lines: "Label: value"
@@ -110,7 +136,6 @@ def _normalize_label(label: str) -> str:
         "referral course links if any": "referral_course_links",
         "is this course meant for certification skill development or any other details": "additional_notes",
         "duration in hours": "per_day_duration_in_hours",
-        "total duration": "duration",
         "course duration": "course_duration",
     }
     if s in aliases:
@@ -135,10 +160,10 @@ def _normalize_label(label: str) -> str:
         return "referral_course_links"
     if "duration" in s and "hour" in s:
         return "per_day_duration_in_hours"
-    if "total" in s and "duration" in s:
-        return "duration"
     if "course" in s and "duration" in s:
         return "course_duration"
+    if "total" in s and "duration" in s:
+        return "bitrix_total_duration_note"
     return s.replace(" ", "_")[:80]
 
 
@@ -187,8 +212,8 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
         or parsed.get("duration_in_hours")
         or ""
     )
-    duration_text = parsed.get("duration") or parsed.get("total_duration") or ""
     course_duration = parsed.get("course_duration") or ""
+    total_duration_note = parsed.get("bitrix_total_duration_note") or ""
 
     result: dict[str, Any] = {
         "company_name": company_name or "NA",
@@ -207,25 +232,48 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
         "additional_notes": "\n".join(notes_parts) if notes_parts else "",
         "per_day_duration_in_hours": per_day_hours or None,
     }
-    if duration_text:
-        result["duration"] = duration_text
     if course_duration:
         result["course_duration"] = course_duration
+    if total_duration_note:
+        extra = f"Total duration (CRM): {total_duration_note}"
+        result["additional_notes"] = (
+            f"{result['additional_notes']}\n{extra}".strip()
+            if result.get("additional_notes")
+            else extra
+        )
     return result
+
+
+def format_bitrix_cover_duration_hours(raw_hours: Any) -> str | None:
+    """
+    Format Bitrix ``Duration in hours`` (e.g. ``8``, ``8hr``, ``8 hours``) for the cover line.
+
+    Cover template renders: ``Total Duration: {value}``.
+    """
+    s = str(raw_hours or "").strip()
+    if not s:
+        return None
+    try:
+        m = re.search(r"([\d.]+)", s.replace(",", ""))
+        if m:
+            ph_f = float(m.group(1))
+            return f"{ph_f:g} Hour" if ph_f == 1 else f"{ph_f:g} Hours"
+    except ValueError:
+        pass
+    return s
 
 
 def apply_bitrix_client_duration_to_outline(outline_payload: Any, input_data: dict[str, Any] | None) -> None:
     """
-    Bitrix-only: put CRM duration strings on the brochure as-is (cover + Course Details row).
+    Bitrix-only: cover ``Total Duration`` uses **Duration in hours** from the task, not AI days/weeks.
 
-    Cover HTML shows ``Total Duration: {duration}``. The program-insights details table uses
-    ``course_details.course_duration`` (falls back to ``duration`` in PDF injection).
+    Optional ``course_duration`` from the task still updates the Course Details table row when present.
     """
     if outline_payload is None or not isinstance(input_data, dict):
         return
-    dur = str(input_data.get("duration") or "").strip()
-    if dur:
-        outline_payload.duration = dur
+    cover = format_bitrix_cover_duration_hours(input_data.get("per_day_duration_in_hours"))
+    if cover:
+        outline_payload.duration = cover
     cd = str(input_data.get("course_duration") or "").strip()
     if cd:
         try:
@@ -345,6 +393,12 @@ def extract_task_id(payload: dict[str, Any]) -> str | None:
 
     result = payload.get("result")
     if isinstance(result, dict):
+        nested_task = result.get("task")
+        if isinstance(nested_task, dict):
+            tid = _positive_task_id(nested_task.get("ID") or nested_task.get("id"))
+            if tid:
+                _log_task_id_resolution(payload, event, tid)
+                return tid
         tid = _positive_task_id(result.get("ID") or result.get("id"))
         if tid:
             _log_task_id_resolution(payload, event, tid)
@@ -352,6 +406,21 @@ def extract_task_id(payload: dict[str, Any]) -> str | None:
 
     _log_task_id_resolution(payload, event, None)
     return None
+
+
+def _normalize_task_field_dict(task: dict[str, Any]) -> dict[str, Any]:
+    """Promote lowercase tasks.task.get keys to the uppercase shape used elsewhere."""
+    out = dict(task)
+    for low, up in (
+        ("description", "DESCRIPTION"),
+        ("title", "TITLE"),
+        ("id", "ID"),
+        ("groupId", "GROUP_ID"),
+        ("flowId", "FLOW_ID"),
+    ):
+        if task.get(low) is not None and not str(out.get(up) or "").strip():
+            out[up] = task[low]
+    return out
 
 
 def parse_refine_feedback_from_comment(
@@ -378,10 +447,15 @@ def extract_task_fields(payload: dict[str, Any]) -> dict[str, Any]:
     """Get task field dict from nested webhook or flat task.getdata result."""
     if not isinstance(payload, dict):
         return {}
-    if isinstance(payload.get("result"), dict) and payload["result"].get("DESCRIPTION") is not None:
-        return payload["result"]
-    if payload.get("DESCRIPTION") is not None:
-        return payload
+    result = payload.get("result")
+    if isinstance(result, dict):
+        nested_task = result.get("task")
+        if isinstance(nested_task, dict):
+            return _normalize_task_field_dict(nested_task)
+        if result.get("DESCRIPTION") is not None or result.get("description") is not None:
+            return _normalize_task_field_dict(result)
+    if payload.get("DESCRIPTION") is not None or payload.get("description") is not None:
+        return _normalize_task_field_dict(payload)
     data = payload.get("data")
     if isinstance(data, dict) and isinstance(data.get("FIELDS"), dict):
         return data["FIELDS"]
@@ -413,11 +487,25 @@ def resolve_bitrix_task_request(payload: dict[str, Any]) -> tuple[str, dict[str,
         out["bitrix_task_id"] = task_id
         return task_id, out
 
-    description = str(task_fields.get("DESCRIPTION") or payload.get("DESCRIPTION") or "")
+    description = str(
+        task_fields.get("DESCRIPTION")
+        or task_fields.get("description")
+        or payload.get("DESCRIPTION")
+        or payload.get("description")
+        or ""
+    )
     parsed = parse_task_description_table(description)
     input_data = _map_parsed_to_input_data(parsed)
 
-    title = _clean_value(str(task_fields.get("TITLE") or payload.get("TITLE") or ""))
+    title = _clean_value(
+        str(
+            task_fields.get("TITLE")
+            or task_fields.get("title")
+            or payload.get("TITLE")
+            or payload.get("title")
+            or ""
+        )
+    )
     if not input_data.get("course_name") and title:
         input_data["course_name"] = title
 

@@ -3,8 +3,10 @@ from app.services.bitrix_task_parser import (
     _map_parsed_to_input_data,
     extract_message_id,
     extract_task_id,
+    format_bitrix_cover_duration_hours,
     parse_refine_feedback_from_comment,
     parse_task_description_table,
+    resolve_bitrix_task_request,
 )
 
 
@@ -55,7 +57,7 @@ def test_parse_refine_multiline():
     assert parse_refine_feedback_from_comment(text) == "change it to 24 hours"
 
 
-def test_total_and_course_duration_mapping():
+def test_bitrix_cover_uses_hours_not_weeks_on_total_duration_row():
     desc = (
         "[table][tr][td]Product / Course Name: Blockchain[/td][/tr]"
         "[tr][td]Total Duration: 6 to 8 Weeks[/td][/tr]"
@@ -64,9 +66,12 @@ def test_total_and_course_duration_mapping():
     )
     parsed = parse_task_description_table(desc)
     mapped = _map_parsed_to_input_data(parsed)
-    assert mapped["duration"] == "6 to 8 Weeks"
+    assert "duration" not in mapped
     assert mapped["course_duration"] == "6 to 8 Weeks (16 Sessions, 90 Minutes Each)"
     assert mapped["per_day_duration_in_hours"] == "30"
+    assert "6 to 8 Weeks" in mapped.get("additional_notes", "")
+    assert format_bitrix_cover_duration_hours("30") == "30 Hours"
+    assert format_bitrix_cover_duration_hours("8hr") == "8 Hours"
 
 
 def test_duration_in_hours_maps_to_per_day_hours():
@@ -78,6 +83,43 @@ def test_duration_in_hours_maps_to_per_day_hours():
     mapped = _map_parsed_to_input_data(parsed)
     assert mapped["course_name"] == "Excel Basics"
     assert mapped["per_day_duration_in_hours"] == "8"
+
+
+def test_parse_two_column_b2c_task_table():
+    """Bitrix B2C template puts labels in column 1 and values in column 2."""
+    desc = (
+        "[table][tr][td]For B2C[/td][td][/td][/tr]"
+        "[tr][td]Product / Course Name:[/td][td] Public Relationship Officer[/td][/tr]"
+        "[tr][td]Level Of Training ( beginner, intermediate or Expert ) :[/td][td] Expert[/td][/tr]"
+        "[tr][td]Mode of Training ( Online/ Offline ):[/td][td] Online[/td][/tr]"
+        "[tr][td]Focus Area of Training ( Theory, Practical, Role Play, Simulations, Games and activities ) :"
+        "[/td][td] End to End[/td][/tr][/table]"
+    )
+    parsed = parse_task_description_table(desc)
+    mapped = _map_parsed_to_input_data(parsed)
+    assert mapped["course_name"] == "Public Relationship Officer"
+    assert mapped["level_of_training"] == "Advanced"
+    assert mapped["mode_of_training"] == "Online"
+    assert mapped["topics_to_include"] == "End to End"
+
+
+def test_resolve_bitrix_task_request_nested_tasks_task_get():
+    payload = {
+        "result": {
+            "task": {
+                "id": "79566",
+                "title": "Course Outline + Trainer requirement Task",
+                "description": (
+                    "[table][tr][td]Product / Course Name:[/td]"
+                    "[td]Public Relationship Officer[/td][/tr][/table]"
+                ),
+            }
+        }
+    }
+    task_id, input_data = resolve_bitrix_task_request(payload)
+    assert task_id == "79566"
+    assert input_data["course_name"] == "Public Relationship Officer"
+    assert input_data["bitrix_task_id"] == "79566"
 
 
 def test_parse_refine_rejects_non_refine():
