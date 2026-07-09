@@ -41,6 +41,7 @@ from app.schemas.integration import BitrixCourseOutlineIntegrationStatus
 from app.schemas.job import CourseOutlineQueuedResponse
 from app.services.bitrix_integration import get_bitrix_course_outline_integration_status
 from app.services.bitrix_task_parser import (
+    extract_comment_from_webhook_payload,
     extract_message_id,
     extract_task_id,
     parse_refine_feedback_from_comment,
@@ -396,21 +397,23 @@ async def dispatch_bitrix_refine_webhook(payload: dict[str, Any]) -> BitrixWebho
         )
 
     logger.info("REFINE message_id=%s task_id=%s", message_id, task_id)
-    try:
-        comment_text = await get_refine_text(task_id, message_id)
-    except Exception as e:
-        logger.warning(
-            "Bitrix refine comment fetch failed | taskId=%s messageId=%s error=%s",
-            task_id,
-            message_id,
-            e,
-        )
-        return BitrixWebhookDispatch(
-            kind=BitrixWebhookKind.IGNORED,
-            ignore_reason="comment_fetch_failed",
-        )
-
-    comment = (comment_text or "").strip()
+    comment = extract_comment_from_webhook_payload(payload)
+    if not comment:
+        try:
+            comment = (await get_refine_text(task_id, message_id) or "").strip()
+        except Exception as e:
+            logger.warning(
+                "Bitrix refine comment fetch failed | taskId=%s messageId=%s error=%s",
+                task_id,
+                message_id,
+                e,
+            )
+            return BitrixWebhookDispatch(
+                kind=BitrixWebhookKind.IGNORED,
+                ignore_reason="comment_fetch_failed",
+            )
+    else:
+        logger.info("REFINE comment source=webhook payload | task_id=%s", task_id)
     logger.info("REFINE COMMENT=%s", comment)
 
     feedback = parse_refine_feedback_from_comment(comment)

@@ -677,11 +677,12 @@ The modules array has one object per training module; include as many as the cou
 
 REFINE_OUTLINE_PROMPT = """
 You are refining an existing course outline JSON based on stakeholder feedback.
+Apply the feedback directly. When feedback asks to add new modules (for example "Add Module 13" / "Add Module 14"), append those modules to the modules array with full brochure structure: module_title, overview, topics (4-8 words each), and three activity lines (exercises/case_studies/simulations). Do not ignore or merge requested new modules into existing ones unless feedback explicitly says to replace or remove content.
 Preserve: brochure tone; do NOT use em dashes or en dashes in any field; 3 program_insight paragraphs (~38-58 words each, max 2 sentences, **bold** phrases allowed) + exactly 6 bullets (original Program Insight rules); course_details.details_page_intro (one paragraph, plain text no **bold**, short crisp how-this-course-helps-participants, about six to eight lines above the table);
 Never include the client/company/organization name in course_title (including anything after a colon tagline). Avoid "at <Company>" / "for <Company>" in the cover title/subtitle.
 exactly 7 learning objectives: compact brochure titles (no colon), 8-16 word descriptions; intro 4 sentences (max 18 words each); closing **two paragraphs** with **\\n\\n**, **exactly 4 sentences each** (max 16 words per sentence), short **bold** spans;
 capability impact: intro 2 sentences (max 22 words each); each of 6 rows one sentence (16-24 words); closing **three paragraphs** with **\\n\\n**, each **exactly 3 sentences** (max 16 words per sentence);
-module count from context (duration, hours, scope): for **two-day** programs prefer **6–8** modules unless feedback says to keep five; module titles without "Module N:" prefix;
+module count from context (duration, hours, scope): for **two-day** programs prefer **6–8** modules unless feedback says to keep five; module titles without "Module N:" prefix in module_title (use descriptive titles only, even when feedback mentions Module 13/14);
 topics: 4 to 8 words per line; modules: three activity lines per module; at most 6 words after each activity label; progression: first module Exercise/Case study/Simulation only (no Hands-on, no Role-play), middle modules Hands-on and Simulation, Role-play in late modules when course length allows, last module business application;
 key_benefits and value_addition: each exactly TWO sentences, about 38 to 52 words; brochure table style, not four-sentence technical deep dives.
 Return the same strict JSON schema as in STRICT_JSON_OUTPUT_RULES.

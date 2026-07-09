@@ -139,6 +139,14 @@ async def refine_course_for_record(
             if jname and jname.strip().lower() == requested_course_name.strip().lower():
                 target_course_id = job.course_id
                 break
+        if target_course_id is None and crm_source == "bitrix" and len(jobs) == 1:
+            target_course_id = jobs[0].course_id
+            logger.info(
+                "Bitrix refine using sole completed job | record_id=%s requested=%s stored=%s",
+                rid,
+                requested_course_name,
+                _job_payload_course_name(jobs[0]),
+            )
         if target_course_id is None:
             logger.warning(
                 "Refine skipped: no matching course_name | record_id=%s requested=%s",

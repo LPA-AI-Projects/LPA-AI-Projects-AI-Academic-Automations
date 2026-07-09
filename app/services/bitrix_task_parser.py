@@ -12,6 +12,8 @@ from typing import Any
 
 # Refine: / refine : / Refine : (case-insensitive); instruction may continue on next lines
 REFINE_COMMENT_PATTERN = re.compile(r"^\s*refine\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
+_REFINE_ANYWHERE_PATTERN = re.compile(r"refine\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
+_BITRIX_USER_TAG_PREFIX = re.compile(r"^\[USER=\d+\][^\[]*\[/USER\]\s*", re.IGNORECASE)
 
 from app.utils.logger import get_logger
 
@@ -24,6 +26,11 @@ _DURATION_LABEL_PREFIX = re.compile(
     r"^(total duration|course duration)\s*:?\s*(.+)$",
     re.IGNORECASE | re.DOTALL,
 )
+_BITRIX_URL_TAG = re.compile(
+    r"\[url(?:=([^\]]+))?\](.*?)\[/url\]",
+    re.IGNORECASE | re.DOTALL,
+)
+_HTTP_URL = re.compile(r"https?://[^\s\]<>\",']+", re.IGNORECASE)
 
 
 def _parse_labeled_cell(cell: str) -> tuple[str, str] | None:
@@ -51,6 +58,42 @@ def _clean_value(raw: str | None) -> str:
     if s.lower() in _NA_VALUES:
         return ""
     return s
+
+
+def _extract_referral_course_links(raw: str | None) -> str:
+    """
+    Normalize Bitrix referral link cells to plain URL text for ``referral_course_links``.
+
+    Handles BBCode ``[url=...]...[/url]``, multiple URLs, and plain https links — same field Zoho sends.
+    """
+    text = str(raw or "").strip()
+    if not text or text.lower() in _NA_VALUES:
+        return ""
+
+    urls: list[str] = []
+    for match in _BITRIX_URL_TAG.finditer(text):
+        href = (match.group(1) or match.group(2) or "").strip()
+        if href.lower().startswith(("http://", "https://")):
+            urls.append(href.rstrip(".,;"))
+
+    if not urls:
+        plain = re.sub(r"\[/?[^\]]+\]", " ", text)
+        for match in _HTTP_URL.finditer(plain):
+            urls.append(match.group(0).rstrip(".,;"))
+
+    if urls:
+        seen: set[str] = set()
+        unique: list[str] = []
+        for url in urls:
+            if url not in seen:
+                seen.add(url)
+                unique.append(url)
+        return "\n".join(unique)
+
+    cleaned = _clean_value(text)
+    if "http://" in cleaned.lower() or "https://" in cleaned.lower():
+        return cleaned
+    return ""
 
 
 def _parse_two_column_row(label_cell: str, value_cell: str) -> tuple[str, str] | None:
@@ -89,9 +132,9 @@ def parse_task_description_table(description: str | None) -> dict[str, Any]:
             label_k, value = parsed_row
             out[label_k] = value
 
-    # BBCode rows: [tr][td]Label: value[/td][/tr] (single-column)
+    # BBCode rows: [tr][td]Label: value[/td][/tr] (single-column; skip two-column rows)
     for m in re.finditer(
-        r"\[tr\]\s*\[td\](.*?)\[/td\]\s*\[/tr\]",
+        r"\[tr\]\s*\[td\](.*?)\[/td\](?!\s*\[td\])\s*\[/tr\]",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     ):
@@ -214,6 +257,7 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
     )
     course_duration = parsed.get("course_duration") or ""
     total_duration_note = parsed.get("bitrix_total_duration_note") or ""
+    referral_course_links = _extract_referral_course_links(parsed.get("referral_course_links"))
 
     result: dict[str, Any] = {
         "company_name": company_name or "NA",
@@ -228,10 +272,11 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
         "no_of_pax": parsed.get("no_of_pax") or "",
         "languages_preferred": parsed.get("languages_preferred") or "",
         "topics_to_include": parsed.get("topics_to_include") or "",
-        "referral_course_links": parsed.get("referral_course_links") or "",
         "additional_notes": "\n".join(notes_parts) if notes_parts else "",
         "per_day_duration_in_hours": per_day_hours or None,
     }
+    if referral_course_links:
+        result["referral_course_links"] = referral_course_links
     if course_duration:
         result["course_duration"] = course_duration
     if total_duration_note:
@@ -423,6 +468,14 @@ def _normalize_task_field_dict(task: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def normalize_bitrix_comment_text(raw: str | None) -> str:
+    """Normalize Bitrix task chat / comment text before refine parsing."""
+    text = str(raw or "")
+    text = re.sub(r"\[BR\]", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[/?[bi]\]", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
 def parse_refine_feedback_from_comment(
     comment_text: str | None,
     *,
@@ -432,15 +485,45 @@ def parse_refine_feedback_from_comment(
     Extract refine instruction when comment matches ``Refine:`` (flexible spacing/case).
 
     Accepts single-line and multi-line, e.g. ``Refine :\\nchange it to 24 hours``.
+    Also handles Bitrix chat prefixes such as ``[USER=123]Name[/USER] refine: ...``.
     """
-    comment = str(comment_text or "").strip()
+    comment = normalize_bitrix_comment_text(comment_text)
     if not comment:
         return None
+    comment = _BITRIX_USER_TAG_PREFIX.sub("", comment)
     match = REFINE_COMMENT_PATTERN.match(comment)
-    if not match:
-        return None
-    instruction = match.group(1).strip()
-    return instruction or None
+    if match:
+        instruction = match.group(1).strip()
+        return instruction or None
+    match = _REFINE_ANYWHERE_PATTERN.search(comment)
+    if match:
+        instruction = match.group(1).strip()
+        return instruction or None
+    return None
+
+
+def extract_comment_from_webhook_payload(payload: dict[str, Any]) -> str:
+    """Best-effort comment body from ONTASKCOMMENTADD webhook (when Bitrix includes it)."""
+    if not isinstance(payload, dict):
+        return ""
+    for key in (
+        "data[FIELDS_AFTER][POST_MESSAGE]",
+        "POST_MESSAGE",
+        "post_message",
+        "postMessage",
+    ):
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return normalize_bitrix_comment_text(str(value))
+    data = payload.get("data")
+    if isinstance(data, dict):
+        after = data.get("FIELDS_AFTER")
+        if isinstance(after, dict):
+            for key in ("POST_MESSAGE", "postMessage", "MESSAGE", "TEXT", "text"):
+                value = after.get(key)
+                if value is not None and str(value).strip():
+                    return normalize_bitrix_comment_text(str(value))
+    return ""
 
 
 def extract_task_fields(payload: dict[str, Any]) -> dict[str, Any]:
@@ -518,9 +601,10 @@ def resolve_bitrix_task_request(payload: dict[str, Any]) -> tuple[str, dict[str,
     input_data["bitrix_task_id"] = task_id
     input_data["bitrix_task_title"] = title
     logger.info(
-        "Bitrix task resolved | task_id=%s course_name=%s company=%s",
+        "Bitrix task resolved | task_id=%s course_name=%s company=%s referral_links=%s",
         task_id,
         input_data.get("course_name"),
         input_data.get("company_name"),
+        bool(input_data.get("referral_course_links")),
     )
     return task_id, input_data

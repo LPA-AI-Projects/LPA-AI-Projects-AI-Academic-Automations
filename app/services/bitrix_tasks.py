@@ -8,12 +8,17 @@ Workflow:
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 from typing import Any
 
 from app.core.config import settings
 from app.services.bitrix_crm import bitrix_call, bitrix_configured
+from app.services.bitrix_task_parser import (
+    normalize_bitrix_comment_text,
+    parse_refine_feedback_from_comment,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -309,54 +314,72 @@ async def get_refine_text(task_id: str | int, message_id: str | int) -> str:
     mid = int(message_id)
     logger.info("REFINE fetch comment | task_id=%s message_id=%s", tid, mid)
 
-    # 1) Task chat (IM) — primary for new task card per Bitrix docs
-    chat_id = await _fetch_task_chat_id(tid)
+    # Bitrix may fire the webhook before the chat message is readable; retry briefly.
+    for attempt in range(1, 4):
+        text = await _fetch_refine_text_once(tid, mid)
+        if text:
+            return text
+        if attempt < 3:
+            logger.info(
+                "REFINE comment not ready yet | task_id=%s message_id=%s attempt=%s",
+                tid,
+                mid,
+                attempt,
+            )
+            await asyncio.sleep(1.5)
+
+    logger.warning("REFINE comment empty | task_id=%s message_id=%s", tid, mid)
+    return ""
+
+
+async def _fetch_refine_text_once(task_id: int, message_id: int) -> str:
+    chat_id = await _fetch_task_chat_id(task_id)
     dialog_candidates: list[str] = []
     if chat_id is not None:
         dialog_candidates.append(f"chat{chat_id}")
-    dialog_candidates.extend((f"TASKS_TASK_{tid}", f"TASK_{tid}"))
+    dialog_candidates.extend((f"TASKS_TASK_{task_id}", f"TASK_{task_id}"))
 
     for dialog_id in dialog_candidates:
-        messages = await _im_dialog_messages(dialog_id, message_id=mid)
-        text = _find_im_message_text(messages, mid)
+        messages = await _im_dialog_messages(dialog_id, message_id=message_id)
+        text = _find_im_message_text(messages, message_id)
+        if not text:
+            text = _find_refine_text_in_messages(messages, message_id=message_id)
         if text:
             logger.info(
                 "REFINE comment source=im.dialog.messages.get | dialog=%s message_id=%s",
                 dialog_id,
-                mid,
+                message_id,
             )
             return text
         logger.info(
             "REFINE im.dialog.messages.get no match | dialog=%s message_id=%s count=%s",
             dialog_id,
-            mid,
+            message_id,
             len(messages),
         )
 
-    # 2) Legacy task comment storage
-    if mid > 0:
+    if message_id > 0:
         try:
             result = await bitrix_call(
                 "task.commentitem.get",
-                {"TASKID": tid, "ITEMID": mid},
+                {"TASKID": task_id, "ITEMID": message_id},
             )
-            text = _text_from_comment_api_result(result)
+            text = normalize_bitrix_comment_text(_text_from_comment_api_result(result))
             if text:
                 logger.info(
                     "REFINE comment source=task.commentitem.get | task_id=%s item_id=%s",
-                    tid,
-                    mid,
+                    task_id,
+                    message_id,
                 )
                 return text
         except Exception as e:
             logger.warning(
                 "task.commentitem.get failed | task_id=%s item_id=%s error=%s",
-                tid,
-                mid,
+                task_id,
+                message_id,
                 e,
             )
 
-    logger.warning("REFINE comment empty | task_id=%s message_id=%s", tid, mid)
     return ""
 
 
@@ -368,10 +391,39 @@ async def get_task_comment(task_id: str | int, message_id: str | int) -> str | N
 
 def _message_text_from_im_row(row: dict[str, Any]) -> str:
     for key in ("text", "message", "MESSAGE", "TEXT"):
-        v = row.get(key)
-        if v is not None and str(v).strip():
-            return str(v).strip()
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return normalize_bitrix_comment_text(str(value))
+    params = row.get("params")
+    if isinstance(params, dict):
+        for key in ("TEXT", "text", "MESSAGE", "message"):
+            value = params.get(key)
+            if value is not None and str(value).strip():
+                return normalize_bitrix_comment_text(str(value))
     return ""
+
+
+def _find_refine_text_in_messages(messages: list[dict[str, Any]], *, message_id: int) -> str:
+    """Prefer the webhook message id; otherwise use the newest chat row that contains Refine:."""
+    exact = ""
+    newest_refine = ""
+    newest_refine_id = -1
+    for row in messages:
+        row_id_raw = row.get("id") or row.get("ID")
+        try:
+            row_id = int(row_id_raw) if row_id_raw is not None else None
+        except (TypeError, ValueError):
+            row_id = None
+        text = _message_text_from_im_row(row)
+        if not text:
+            continue
+        if row_id is not None and row_id == message_id:
+            exact = text
+        if parse_refine_feedback_from_comment(text):
+            if row_id is not None and row_id > newest_refine_id:
+                newest_refine_id = row_id
+                newest_refine = text
+    return exact or newest_refine
 
 
 def _text_from_comment_api_result(result: Any) -> str:
@@ -414,11 +466,14 @@ async def _fetch_task_chat_id(task_id: str | int) -> int | None:
     try:
         result = await bitrix_call_api(
             "tasks.task.get",
-            {"id": tid, "select": ["id", "chat.id", "chatId"]},
+            {"id": tid, "select": ["id", "chat.id", "chatId", "CHAT_ID"]},
         )
     except Exception:
         logger.warning("tasks.task.get via /rest/api/ failed; trying standard /rest/")
-        result = await bitrix_call("tasks.task.get", {"taskId": tid, "select": ["CHAT_ID", "chatId"]})
+        result = await bitrix_call(
+            "tasks.task.get",
+            {"taskId": tid, "select": ["CHAT_ID", "chatId", "chat.id"]},
+        )
 
     if isinstance(result, dict):
         item = result.get("item") if isinstance(result.get("item"), dict) else result.get("task")
