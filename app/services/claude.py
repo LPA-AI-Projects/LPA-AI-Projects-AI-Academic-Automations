@@ -543,6 +543,10 @@ INPUT JSON — LEVEL AND DELIVERY MODE
 - **level_of_training**: optional. If absent or blank, assume **Intermediate** for objective wording and difficulty unless context implies otherwise.
 - **mode_of_training** (or **delivery_mode**, **training_mode**): optional. Expect Online, Onsite (offline/classroom), or Hybrid. If absent or blank, assume **Hybrid** for examples and facilitator notes. Reflect the mode in exercises (e.g. breakout rooms and polls for Online; room setup for Onsite; both for Hybrid).
 
+INPUT JSON — OPTIONAL CLIENT PROFILE (use only when present in input JSON)
+- **course_purpose**, **schedule_proposed**, **industry_domain**, **professional_experience**, **current_skill_level**, **focus_area_of_training**, **location_of_training**, **target_job_role**, **pain_points**, **expected_outcome**: reflect these in program_insight, objectives, and module design where they add specificity.
+- Delivery constraints when present: **specific_requirements**, **preferred_schedule**, **topic_attachment** — use for credible context only; do not invent missing values.
+
 COURSE TITLE (course_title)
 - Use one string for the full program name. Hyphens between parts of the name are normal (e.g. "Data Analytics - Power BI for HR."). The brochure cover shows this as a single main heading; hyphens are NOT treated as a split between title and subtitle.
 - If you want a separate cover tagline below the name, use exactly one colon after the full name: "Data Analytics - Power BI for HR: Drive Smarter Workforce Decisions with Advanced Power BI Insights". Text after the colon becomes the subtitle; text before stays the main title.

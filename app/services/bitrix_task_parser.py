@@ -164,35 +164,88 @@ def _normalize_label(label: str) -> str:
         "company name": "company_name",
         "product course name": "course_name",
         "product / course name": "course_name",
+        "level of training": "level_of_training",
         "level training beginner intermediate or expert": "level_of_training",
         "level training": "level_of_training",
-        "sector of the company": "sector",
+        "sector of the company": "industry_domain",
+        "industry / domain": "industry_domain",
+        "industry domain": "industry_domain",
         "size of the company": "size_of_company",
         "learning objective of the training": "goal_of_training",
+        "goal of training": "goal_of_training",
         "language of the candidates": "languages_preferred",
-        "location of the training": "mode_of_training",
+        "location of the training": "location_of_training",
+        "mode of training": "mode_of_training",
         "no of pax": "no_of_pax",
         "department": "department",
+        "department of product": "department",
         "designation": "designation",
-        "focus area of training theory practical role play simulations games and activities": "topics_to_include",
-        "focus area of training": "topics_to_include",
+        "designation of learnerlearners": "designation",
+        "designation of learner/learners": "designation",
+        "focus area of training theory practical role play simulations games and activities": (
+            "focus_area_of_training"
+        ),
+        "focus area of training": "focus_area_of_training",
+        "suggested topics by the client / trainer": "suggested_topics",
+        "suggested topics by the client trainer": "suggested_topics",
         "referral course links if any": "referral_course_links",
-        "is this course meant for certification skill development or any other details": "additional_notes",
+        "referral course links": "referral_course_links",
+        "is this course meant for certification skill development or any other details": (
+            "course_purpose"
+        ),
+        "is this course meant for": "course_purpose",
         "duration in hours": "per_day_duration_in_hours",
         "course duration": "course_duration",
+        "current challenges / pain points": "pain_points",
+        "current challenges pain points": "pain_points",
+        "expected outcome after training": "expected_outcome",
+        "expected outcome after training participants should be able to": "expected_outcome",
+        "target job role after training": "target_job_role",
+        "professional experience": "professional_experience",
+        "current skill level": "current_skill_level",
+        "schedule proposed": "schedule_proposed",
+        "preferred schedule for trainer finalization": "preferred_schedule",
+        "any specific requirements": "specific_requirements",
+        "topic attachment from the client": "topic_attachment",
     }
     if s in aliases:
         return aliases[s]
-    if "course name" in s or "product" in s and "course" in s:
+    if "course name" in s or ("product" in s and "course" in s):
         return "course_name"
-    if "company" in s:
+    if "company" in s and "name" in s:
         return "company_name"
-    if "learning objective" in s or "objective" in s:
+    if "meant for" in s:
+        return "course_purpose"
+    if "pain" in s or "challenge" in s:
+        return "pain_points"
+    if "expected outcome" in s:
+        return "expected_outcome"
+    if "target job" in s or "job role" in s:
+        return "target_job_role"
+    if "goal" in s and "training" in s:
         return "goal_of_training"
+    if "learning objective" in s:
+        return "goal_of_training"
+    if "suggested topic" in s:
+        return "suggested_topics"
+    if "focus area" in s:
+        return "focus_area_of_training"
     if "level" in s and "training" in s:
         return "level_of_training"
-    if "location" in s or "online" in s and "training" in s:
+    if "mode" in s and "training" in s:
         return "mode_of_training"
+    if "location" in s and "training" in s:
+        return "location_of_training"
+    if "industry" in s or "domain" in s:
+        return "industry_domain"
+    if "professional experience" in s:
+        return "professional_experience"
+    if "skill level" in s:
+        return "current_skill_level"
+    if "schedule proposed" in s or (s.startswith("schedule") and "preferred" not in s):
+        return "schedule_proposed"
+    if "preferred schedule" in s:
+        return "preferred_schedule"
     if "pax" in s or "participants" in s:
         return "no_of_pax"
     if "department" in s:
@@ -207,7 +260,66 @@ def _normalize_label(label: str) -> str:
         return "course_duration"
     if "total" in s and "duration" in s:
         return "bitrix_total_duration_note"
+    if "specific requirement" in s:
+        return "specific_requirements"
+    # Trainer experience / pricing / CV / nationality are not used in outline input.
+    if (
+        "trainer experience" in s
+        or "certified trainer" in s
+        or "pricing" in s
+        or "customer cv" in s
+        or "nationality" in s
+        or "asian/arab" in s
+    ):
+        return "_ignored"
     return s.replace(" ", "_")[:80]
+
+
+def _append_note(notes_parts: list[str], label: str, value: str | None) -> None:
+    v = _clean_value(value)
+    if v:
+        notes_parts.append(f"{label}: {v}")
+
+
+def _combine_text(*parts: str) -> str:
+    cleaned = [_clean_value(p) for p in parts]
+    return " | ".join(p for p in cleaned if p)
+
+
+def _structured_bitrix_fields(parsed: dict[str, str]) -> dict[str, str]:
+    """Top-level optional fields from Bitrix B2C template (not dumped into additional_notes)."""
+    out: dict[str, str] = {}
+    for key in (
+        "course_purpose",
+        "schedule_proposed",
+        "industry_domain",
+        "professional_experience",
+        "current_skill_level",
+        "focus_area_of_training",
+        "location_of_training",
+        "target_job_role",
+        "pain_points",
+        "expected_outcome",
+        "specific_requirements",
+        "preferred_schedule",
+        "topic_attachment",
+    ):
+        value = _clean_value(parsed.get(key))
+        if value:
+            out[key] = value
+    return out
+
+
+def _normalize_mode(raw: str) -> str:
+    mode = (raw or "").strip()
+    lower = mode.lower()
+    if "hybrid" in lower:
+        return "Hybrid"
+    if "online" in lower:
+        return "Online"
+    if "onsite" in lower or "offline" in lower or "classroom" in lower:
+        return "Onsite"
+    return mode
 
 
 def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
@@ -225,30 +337,42 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
     elif level.lower().startswith("expert") or level.lower().startswith("advanced"):
         level = "Advanced"
 
-    mode = parsed.get("mode_of_training") or ""
-    if "online" in mode.lower():
-        mode = "Online"
-    elif "onsite" in mode.lower() or "classroom" in mode.lower():
-        mode = "Onsite"
-    elif "hybrid" in mode.lower():
-        mode = "Hybrid"
+    mode = _normalize_mode(parsed.get("mode_of_training") or "")
+    location = _clean_value(parsed.get("location_of_training"))
+    if not mode and location:
+        mode = _normalize_mode(location)
 
+    # Prefer explicit suggested topics; keep legacy focus-area → topics for older templates.
+    suggested_topics = _clean_value(parsed.get("suggested_topics"))
+    focus_area = _clean_value(
+        parsed.get("focus_area_of_training") or parsed.get("topics_to_include")
+    )
+    topics_to_include = suggested_topics or focus_area
+
+    pain_points = _clean_value(parsed.get("pain_points"))
+    target_job_role = _clean_value(parsed.get("target_job_role"))
+    goal = _clean_value(parsed.get("goal_of_training"))
+    expected_outcome = _clean_value(parsed.get("expected_outcome"))
+
+    need_of_training = _combine_text(pain_points, target_job_role) or goal
+    goal_of_training = _combine_text(goal, expected_outcome) or need_of_training
+
+    # Only legacy / miscellaneous CRM lines belong in additional_notes.
     notes_parts: list[str] = []
-    for key in (
-        "sector",
-        "additional_notes",
-        "language of the trainer",
-        "nationality of the trainer if anything specific",
-        "training material",
-        "proposed pricing in aed",
-        "trainer asian/arab/ european",
-        "any specific requirement if any please specify",
-        "yrs of experience of trainers if any specific",
-        "certified trainer mandatory or not",
+    for label, key in (
+        ("Sector", "sector"),
+        ("Language of the trainer", "language_of_the_trainer"),
+        ("Training material", "training_material"),
+        ("Yrs of experience of trainers", "yrs_of_experience_of_trainers_if_any_specific"),
     ):
-        v = parsed.get(key.replace(" ", "_")) or parsed.get(key) or ""
-        if v:
-            notes_parts.append(f"{key}: {v}")
+        _append_note(notes_parts, label, parsed.get(key) or "")
+
+    # Legacy free-form keys from older Bitrix templates.
+    for key in (
+        "additional_notes",
+        "any_specific_requirement_if_any_please_specify",
+    ):
+        _append_note(notes_parts, key.replace("_", " "), parsed.get(key))
 
     per_day_hours = (
         parsed.get("per_day_duration_in_hours")
@@ -266,15 +390,16 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
         "designation": designation or "NA",
         "level_of_training": level or None,
         "mode_of_training": mode or None,
-        "goal_of_training": parsed.get("goal_of_training") or "",
-        "need_of_training": parsed.get("goal_of_training") or "",
+        "goal_of_training": goal_of_training,
+        "need_of_training": need_of_training,
         "size_of_company": parsed.get("size_of_company") or "",
         "no_of_pax": parsed.get("no_of_pax") or "",
         "languages_preferred": parsed.get("languages_preferred") or "",
-        "topics_to_include": parsed.get("topics_to_include") or "",
+        "topics_to_include": topics_to_include or "",
         "additional_notes": "\n".join(notes_parts) if notes_parts else "",
         "per_day_duration_in_hours": per_day_hours or None,
     }
+    result.update(_structured_bitrix_fields(parsed))
     if referral_course_links:
         result["referral_course_links"] = referral_course_links
     if course_duration:

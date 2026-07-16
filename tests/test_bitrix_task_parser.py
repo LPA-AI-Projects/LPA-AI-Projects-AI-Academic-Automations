@@ -126,7 +126,88 @@ def test_parse_two_column_b2c_task_table():
     assert mapped["course_name"] == "Public Relationship Officer"
     assert mapped["level_of_training"] == "Advanced"
     assert mapped["mode_of_training"] == "Online"
+    # Legacy templates used Focus Area as topic scope when Suggested Topics is absent.
     assert mapped["topics_to_include"] == "End to End"
+
+
+def test_map_new_bitrix_b2c_template_to_course_input():
+    """Current Bitrix B2C table fields map into CourseInputData for better outlines."""
+    desc = (
+        "[table]\n"
+        "[tr][td][b]Product / Course Name[/b]\n[/td][td]SAP HCM Payroll Process\n[/td][/tr]"
+        "[tr][td][b]Department of Product[/b]\n[/td][td]HR\n[/td][/tr]"
+        "[tr][td][b]Is this course meant for? ([/b]Certification / Skill Development[b])[/b]\n"
+        "[/td][td]Skill Development\n[/td][/tr]"
+        "[tr][td][b]Level of Training ([/b]Beginner / Intermediate[b])[/b]\n[/td][td]Intermediate\n[/td][/tr]"
+        "[tr][td][b]Schedule Proposed ([/b]Weekdays / Weekends[b])[/b]\n[/td][td]Weekdays\n[/td][/tr]"
+        "[tr][td][b]Mode of Training ([/b]Online / Offline / Hybrid)\n[/td][td]Online\n[/td][/tr]"
+        "[tr][td][b]Duration in Hours[/b]\n[/td][td]18Hours\n[/td][/tr]"
+        "[tr][td][b]Location of the Training[/b]\n[/td][td]online\n[/td][/tr]"
+        "[tr][td][b]Designation of Learner/Learners[/b]\n[/td][td]HR\n[/td][/tr]"
+        "[tr][td][b]Target Job Role (After Training)[/b]\n[/td][td]She has newly joined  the  company\n[/td][/tr]"
+        "[tr][td][b]Professional Experience ([/b]2–5 Years[b])[/b]\n[/td][td]2-5 years\n[/td][/tr]"
+        "[tr][td][b]Industry / Domain[/b]\n[/td][td]Project Management\n[/td][/tr]"
+        "[tr][td][b]Current Skill Level ([/b]Basic Awareness[b])[/b]\n[/td][td]Basic Awarness\n[/td][/tr]"
+        "[tr][td][b]Current Challenges / Pain Points[/b]\n"
+        "[/td][td]Wanted to understand SAP HCM tool for payroll process\n[/td][/tr]"
+        "[tr][td][b]Goal of Training[/b]\n[/td][td]Upskill\n[/td][/tr]"
+        "[tr][td][b]Expected Outcome After Training ([/b]Participants should be able to...[b])[/b]\n"
+        "[/td][td]She should understand how to use the tool\n[/td][/tr]"
+        "[tr][td][b]Focus Area of Training ([/b]Theory / Practical[b])[/b]\n[/td][td]Practical\n[/td][/tr]"
+        "[tr][td][b]Suggested Topics by the Client / Trainer[/b]\n[/td][td]Payroll schemas\n[/td][/tr]"
+        "[tr][td][b]Referral Course Links (If Any)[/b]\n[/td][td]NA\n[/td][/tr]"
+        "[/table]"
+    )
+    parsed = parse_task_description_table(desc)
+    mapped = _map_parsed_to_input_data(parsed)
+
+    assert mapped["course_name"] == "SAP HCM Payroll Process"
+    assert mapped["department"] == "HR"
+    assert mapped["designation"] == "HR"
+    assert mapped["level_of_training"] == "Intermediate"
+    assert mapped["mode_of_training"] == "Online"
+    assert mapped["per_day_duration_in_hours"] == "18Hours"
+    assert mapped["topics_to_include"] == "Payroll schemas"
+    assert mapped["course_purpose"] == "Skill Development"
+    assert mapped["schedule_proposed"] == "Weekdays"
+    assert mapped["industry_domain"] == "Project Management"
+    assert mapped["professional_experience"] == "2-5 years"
+    assert mapped["current_skill_level"] == "Basic Awarness"
+    assert mapped["focus_area_of_training"] == "Practical"
+    assert mapped["location_of_training"] == "online"
+    assert mapped["target_job_role"] == "She has newly joined the company"
+    assert mapped["pain_points"] == "Wanted to understand SAP HCM tool for payroll process"
+    assert mapped["expected_outcome"] == "She should understand how to use the tool"
+    assert "Wanted to understand SAP HCM tool for payroll process" in mapped["need_of_training"]
+    assert "She has newly joined" in mapped["need_of_training"]
+    assert "Upskill" in mapped["goal_of_training"]
+    assert "She should understand how to use the tool" in mapped["goal_of_training"]
+    assert "Skill Development" not in (mapped.get("additional_notes") or "")
+    assert "Weekdays" not in (mapped.get("additional_notes") or "")
+    assert "Project Management" not in (mapped.get("additional_notes") or "")
+    assert "referral_course_links" not in mapped
+
+
+def test_map_bitrix_ignores_trainer_pricing_cv_fields():
+    desc = (
+        "[table]"
+        "[tr][td][b]Preferred Trainer Experience[/b][/td][td]10-15 Years[/td][/tr]"
+        "[tr][td][b]Certified Trainer Mandatory[/b][/td][td]Yes[/td][/tr]"
+        "[tr][td][b]Any Specific Requirements[/b][/td][td]Female trainer preferred[/td][/tr]"
+        "[tr][td][b]Proposed Pricing[/b][/td][td]5000 AED[/td][/tr]"
+        "[tr][td][b]Preferred Trainer Nationality[/b][/td][td]Asian[/td][/tr]"
+        "[tr][td][b]Customer CV Available[/b][/td][td]Yes[/td][/tr]"
+        "[tr][td][b]Preferred Schedule (For Trainer Finalization)[/b][/td][td]Mon-Wed 6pm[/td][/tr]"
+        "[/table]"
+    )
+    mapped = _map_parsed_to_input_data(parse_task_description_table(desc))
+    assert "preferred_trainer_experience" not in mapped
+    assert "certified_trainer_mandatory" not in mapped
+    assert "proposed_pricing" not in mapped
+    assert "preferred_trainer_nationality" not in mapped
+    assert "customer_cv_available" not in mapped
+    assert mapped["specific_requirements"] == "Female trainer preferred"
+    assert mapped["preferred_schedule"] == "Mon-Wed 6pm"
 
 
 def test_referral_course_links_two_column_plain_url():

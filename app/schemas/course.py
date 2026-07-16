@@ -95,6 +95,59 @@ class CourseInputData(BaseModel):
             "with their content where appropriate, in addition to the client's brief."
         ),
     )
+    # Optional Bitrix B2C task-table fields (Zoho may omit; populated by bitrix_task_parser).
+    course_purpose: Optional[str] = Field(
+        None,
+        description="Why the course is needed (e.g. Skill Development, Certification).",
+    )
+    schedule_proposed: Optional[str] = Field(
+        None,
+        description="Preferred training schedule (e.g. Weekdays, Weekends).",
+    )
+    industry_domain: Optional[str] = Field(
+        None,
+        description="Client industry or business domain.",
+    )
+    professional_experience: Optional[str] = Field(
+        None,
+        description="Learner professional experience band.",
+    )
+    current_skill_level: Optional[str] = Field(
+        None,
+        description="Learner current skill level before training.",
+    )
+    focus_area_of_training: Optional[str] = Field(
+        None,
+        description="Delivery emphasis (Theory, Practical, Role Play, etc.).",
+    )
+    location_of_training: Optional[str] = Field(
+        None,
+        description="Training location when distinct from delivery mode.",
+    )
+    target_job_role: Optional[str] = Field(
+        None,
+        description="Target job role after training.",
+    )
+    pain_points: Optional[str] = Field(
+        None,
+        description="Current challenges or pain points the training should address.",
+    )
+    expected_outcome: Optional[str] = Field(
+        None,
+        description="Expected outcome after training completes.",
+    )
+    specific_requirements: Optional[str] = Field(
+        None,
+        description="Any specific client requirements for the program or trainer.",
+    )
+    preferred_schedule: Optional[str] = Field(
+        None,
+        description="Preferred schedule for trainer finalization.",
+    )
+    topic_attachment: Optional[str] = Field(
+        None,
+        description="Whether the client attached topic materials.",
+    )
 
     @field_validator(
         "no_of_pax",
@@ -104,6 +157,19 @@ class CourseInputData(BaseModel):
         "topics_to_include",
         "level_of_training",
         "mode_of_training",
+        "course_purpose",
+        "schedule_proposed",
+        "industry_domain",
+        "professional_experience",
+        "current_skill_level",
+        "focus_area_of_training",
+        "location_of_training",
+        "target_job_role",
+        "pain_points",
+        "expected_outcome",
+        "specific_requirements",
+        "preferred_schedule",
+        "topic_attachment",
         mode="before",
     )
     @classmethod
