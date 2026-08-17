@@ -938,14 +938,15 @@ def _collect_payload_module_exercises(module: dict[str, object]) -> list[str]:
 
 
 def _build_dynamic_module_pages_from_payload(modules: list[dict[str, object]]) -> str:
+    """Render every module from the outline (no hard 12-module cut). Pagination handles overflow."""
     records: list[dict[str, list[str] | str]] = []
-    for module in modules[:12]:
+    for module in modules:
         title = _compress_text(_clean_module_title_for_table(str(module.get("module_title", ""))), 16)
         topics = [
             _compress_text(_brochure_strip_dashes(str(t)), 8)
             for t in (module.get("topics", []) or [])
             if str(t).strip()
-        ][:8]
+        ][:10]
         activity_pool = _collect_payload_module_exercises(module)
         records.append({"name": title or "Module", "topics": topics, "exercises": activity_pool})
     return _build_dynamic_module_pages(records)

@@ -680,16 +680,43 @@ The modules array has one object per training module; include as many as the cou
 """
 
 REFINE_OUTLINE_PROMPT = """
-You are refining an existing course outline JSON based on stakeholder feedback.
-Apply the feedback directly. When feedback asks to add new modules (for example "Add Module 13" / "Add Module 14"), append those modules to the modules array with full brochure structure: module_title, overview, topics (4-8 words each), and three activity lines (exercises/case_studies/simulations). Do not ignore or merge requested new modules into existing ones unless feedback explicitly says to replace or remove content.
-Preserve: brochure tone; do NOT use em dashes or en dashes in any field; 3 program_insight paragraphs (~38-58 words each, max 2 sentences, **bold** phrases allowed) + exactly 6 bullets (original Program Insight rules); course_details.details_page_intro (one paragraph, plain text no **bold**, short crisp how-this-course-helps-participants, about six to eight lines above the table);
-Never include the client/company/organization name in course_title (including anything after a colon tagline). Avoid "at <Company>" / "for <Company>" in the cover title/subtitle.
-exactly 7 learning objectives: compact brochure titles (no colon), 8-16 word descriptions; intro 4 sentences (max 18 words each); closing **two paragraphs** with **\\n\\n**, **exactly 4 sentences each** (max 16 words per sentence), short **bold** spans;
-capability impact: intro 2 sentences (max 22 words each); each of 6 rows one sentence (16-24 words); closing **three paragraphs** with **\\n\\n**, each **exactly 3 sentences** (max 16 words per sentence);
-module count from context (duration, hours, scope): for **two-day** programs prefer **6–8** modules unless feedback says to keep five; module titles without "Module N:" prefix in module_title (use descriptive titles only, even when feedback mentions Module 13/14);
-topics: 4 to 8 words per line; modules: three activity lines per module; at most 6 words after each activity label; progression: first module Exercise/Case study/Simulation only (no Hands-on, no Role-play), middle modules Hands-on and Simulation, Role-play in late modules when course length allows, last module business application;
-key_benefits and value_addition: each exactly TWO sentences, about 38 to 52 words; brochure table style, not four-sentence technical deep dives.
-Return the same strict JSON schema as in STRICT_JSON_OUTPUT_RULES.
+You are surgically refining an EXISTING course outline JSON from stakeholder feedback.
+
+PRIORITY (highest first):
+1. Apply EVERY instruction in the feedback exactly.
+2. Keep all modules/topics/content that the feedback does not ask to change.
+3. Brochure style rules (tone, sentence limits, activity labels) apply only where they do not conflict with (1).
+
+FEEDBACK OVERRIDES MODULE-COUNT RULES:
+- Stakeholder feedback ALWAYS wins over duration-based module counts (e.g. "2-day → 6–8 modules").
+- If feedback says "Add Module 13" / "Add Module 14" / "add a module named …", APPEND a new object to the modules array. Do NOT merge it into an existing module. Do NOT drop older modules to stay under 6–8 / 12.
+- If the previous outline already has 10–12+ modules and feedback adds more, keep the previous modules AND append the new ones.
+- Module titles in JSON: descriptive names only (no "Module N:" prefix). Feedback numbering (Module 5, Module 7, Module 13) refers to position in the modules array (1-based index).
+
+TOPIC EDITS:
+- "Add X to Module N" means INSERT topic X into modules[N-1].topics (append unless feedback says "after Y").
+- Allow more than 5–6 topics when feedback adds them; keep existing topics unless feedback removes them.
+- Topic lines: prefer 4–8 words; if a requested topic is longer, shorten lightly without dropping the meaning.
+- "Add Purchasing after Suppliers in Module 10" means place Purchasing immediately after the Suppliers topic in that module.
+
+NEW MODULE STRUCTURE (when adding):
+- Full brochure object: module_title, overview, topics, exercises, case_studies, simulations.
+- If feedback lists topics "in exact sequence", use that exact order in topics[].
+- Provide three activity lines (exercises / case_studies / simulations) for new modules.
+
+PRESERVE UNCHANGED FIELDS:
+- Do not rewrite program_insight, learning objectives, or capability impact unless feedback asks.
+- Never invent removals. Never regenerate the whole syllabus when a patch is enough.
+- No em/en dashes. No client/company name in course_title.
+
+Return ONLY valid JSON matching STRICT_JSON_OUTPUT_RULES shape. For refine, modules array length = previous length ± feedback adds/removes (not the brochure day-count guide).
+"""
+
+REFINE_JSON_OVERRIDE_RULES = """
+REFINE OVERRIDE (takes precedence over brochure MODULE COUNT lines above):
+- modules.length MUST follow the previous outline plus stakeholder feedback adds/removes.
+- Do NOT shrink modules back to 6–8 for a two-day course when feedback keeps or adds modules.
+- Append requested new modules; insert/append requested topics into the named module index.
 """
 
 CONTEXT_PROFILE_PROMPT = """You are a training-context profiler.
@@ -1229,12 +1256,22 @@ class ClaudeService:
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     ) -> CourseOutlinePayload:
         user_prompt = (
+            "Apply the stakeholder feedback as a surgical patch to the previous outline JSON.\n"
+            "Keep every module and topic that feedback does not change.\n"
+            "If feedback adds Module N or new topics, those must appear in the output modules array.\n"
+            "Feedback overrides brochure module-count limits.\n\n"
             "Previous course outline:\n"
             f"{previous_outline_json_or_text}\n\n"
             "User feedback to apply:\n"
             f"{feedback}\n"
         )
-        system_prompt = REFINE_OUTLINE_PROMPT + "\n\n" + STRICT_JSON_OUTPUT_RULES
+        system_prompt = (
+            REFINE_OUTLINE_PROMPT
+            + "\n\n"
+            + STRICT_JSON_OUTPUT_RULES
+            + "\n\n"
+            + REFINE_JSON_OVERRIDE_RULES
+        )
 
         for attempt in range(1, max_attempts + 1):
             raw = await self._call_messages_api(
@@ -1252,7 +1289,8 @@ class ClaudeService:
                 if attempt < max_attempts:
                     user_prompt = (
                         "Your previous refine output was invalid JSON for the required schema. "
-                        "Return corrected JSON only.\n\n"
+                        "Return corrected JSON only. Still apply the feedback as a surgical patch "
+                        "(append new modules / insert topics; do not regenerate from scratch).\n\n"
                         f"Previous outline:\n{previous_outline_json_or_text}\n\n"
                         f"Feedback:\n{feedback}\n"
                     )

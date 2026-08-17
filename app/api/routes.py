@@ -962,21 +962,24 @@ async def refine_course(
             updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
             logger.info("Refine AI structured mode completed | zoho_record_id=%s", rid)
         except RuntimeError:
-            logger.warning("Refine AI structured mode failed, using fallback | zoho_record_id=%s", rid)
-            context_text = json.dumps(
-                {
-                    "previous_outline": base_outline,
-                    "feedback": req.feedback,
-                },
-                ensure_ascii=False,
-                indent=2,
+            logger.warning(
+                "Refine AI structured mode failed; retrying with reinforced feedback | zoho_record_id=%s",
+                rid,
             )
-            updated_outline = await wait_for(
-                ai.build_roi_course_outline(context_text, base_outline),
+            reinforced = (
+                "CRITICAL: Apply this feedback as a surgical patch to the previous outline. "
+                "Keep all existing modules/topics unless feedback removes them. "
+                "Append any new modules and insert any named topics into the correct module index. "
+                "Feedback overrides brochure module-count limits.\n\n"
+                f"{req.feedback}"
+            )
+            refined_payload = await wait_for(
+                ai.refine_course_outline_json(base_outline, reinforced),
                 timeout=600,
             )
-            refined_payload = None
-            logger.info("Refine AI fallback completed | zoho_record_id=%s", rid)
+            _enforce_regions_served_constant(refined_payload)
+            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            logger.info("Refine AI reinforced retry completed | zoho_record_id=%s", rid)
     except AsyncTimeoutError:
         logger.warning("AI refine timed out for zoho_record_id=%s", rid)
         raise HTTPException(status_code=504, detail="AI service timed out.")
@@ -1165,21 +1168,23 @@ async def refine_course_by_zoho(
             updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
             logger.info("Refine AI structured mode completed | zoho_record_id=%s", zoho_record_id)
         except RuntimeError:
-            logger.warning("Refine AI structured mode failed, using fallback | zoho_record_id=%s", zoho_record_id)
-            context_text = json.dumps(
-                {
-                    "previous_outline": base_outline,
-                    "feedback": req.feedback,
-                },
-                ensure_ascii=False,
-                indent=2,
+            logger.warning(
+                "Refine AI structured mode failed; retrying with reinforced feedback | zoho_record_id=%s",
+                zoho_record_id,
             )
-            updated_outline = await wait_for(
-                ai.build_roi_course_outline(context_text, base_outline),
+            reinforced = (
+                "CRITICAL: Apply this feedback as a surgical patch to the previous outline. "
+                "Keep all existing modules/topics unless feedback removes them. "
+                "Append any new modules and insert any named topics into the correct module index. "
+                "Feedback overrides brochure module-count limits.\n\n"
+                f"{req.feedback}"
+            )
+            refined_payload = await wait_for(
+                ai.refine_course_outline_json(base_outline, reinforced),
                 timeout=310,
             )
-            refined_payload = None
-            logger.info("Refine AI fallback completed | zoho_record_id=%s", zoho_record_id)
+            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            logger.info("Refine AI reinforced retry completed | zoho_record_id=%s", zoho_record_id)
     except AsyncTimeoutError:
         logger.warning("AI refine timed out for zoho_record_id=%s", zoho_record_id)
         raise HTTPException(status_code=504, detail="AI service timed out.")

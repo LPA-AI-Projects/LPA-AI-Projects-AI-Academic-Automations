@@ -186,17 +186,24 @@ async def refine_course_for_record(
             _enforce_regions_served_constant(refined_payload)
             updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
         except RuntimeError:
-            logger.warning("Refine AI structured mode failed, using fallback | record_id=%s", rid)
-            context_text = json.dumps(
-                {"previous_outline": base_outline, "feedback": feedback},
-                ensure_ascii=False,
-                indent=2,
+            # Do NOT fall back to full ROI regeneration — that ignores surgical refine edits.
+            logger.warning(
+                "Refine AI structured mode failed; retrying with reinforced feedback | record_id=%s",
+                rid,
             )
-            updated_outline = await wait_for(
-                ai.build_roi_course_outline(context_text, base_outline),
+            reinforced = (
+                "CRITICAL: Apply this feedback as a surgical patch to the previous outline. "
+                "Keep all existing modules/topics unless feedback removes them. "
+                "Append any new modules (e.g. Module 13) and insert any named topics into the "
+                "correct module index. Feedback overrides brochure module-count limits.\n\n"
+                f"{feedback}"
+            )
+            refined_payload = await wait_for(
+                ai.refine_course_outline_json(base_outline, reinforced),
                 timeout=600,
             )
-            refined_payload = None
+            _enforce_regions_served_constant(refined_payload)
+            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
     except AsyncTimeoutError:
         logger.warning("Refine AI timed out | record_id=%s", rid)
         return None
