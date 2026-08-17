@@ -15,6 +15,7 @@ from app.api.assessments import router as assessments_router
 from app.api.courseware_assessments import router as courseware_assessments_router
 from app.core.database import Base, engine
 from app.core.storage_paths import ensure_storage_dirs, pdfs_dir, ppts_dir
+from app.services.pdf_browser import pdf_browser
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -74,8 +75,13 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables ready.")
     except Exception:
         logger.exception("Database unavailable at startup; continuing without migrations")
+    try:
+        await pdf_browser.start()
+    except Exception:
+        logger.exception("PDF Chromium failed to start; will retry on first PDF job")
     yield
-    logger.info("Shutting down — disposing DB engine.")
+    logger.info("Shutting down — stopping PDF Chromium and disposing DB engine.")
+    await pdf_browser.stop()
     await engine.dispose()
 
 

@@ -13,6 +13,7 @@ from typing import Iterable
 
 from app.core.storage_paths import pdfs_dir
 from app.schemas.outline_payload import CourseOutlinePayload
+from app.services.pdf_browser import pdf_browser
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -1177,41 +1178,25 @@ def _strip_scripts_for_pdf(html: str) -> str:
     return re.sub(r"<script\b[^>]*>.*?</script>", "", html, flags=re.IGNORECASE | re.DOTALL)
 
 
-def _generate_pdf_with_playwright_sync(html_content: str, file_path: str) -> None:
-    """
-    Render HTML -> PDF using Playwright (sync API).
+def _write_temp_html(html_content: str) -> Path:
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".html",
+        prefix="render_",
+        dir=str(TEMPLATE_DIR),
+        delete=False,
+    ) as temp_file:
+        temp_file.write(html_content)
+        return Path(temp_file.name)
 
-    Note: Python 3.14 on Windows can raise NotImplementedError for asyncio subprocess
-    transports. The sync API avoids that path and is more reliable here.
-    """
-    from playwright.sync_api import sync_playwright
-    temp_html_path: Path | None = None
-    try:
-        # Use a real file URL so all local assets from templates resolve reliably.
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            suffix=".html",
-            prefix="render_",
-            dir=str(TEMPLATE_DIR),
-            delete=False,
-        ) as temp_file:
-            temp_file.write(html_content)
-            temp_html_path = Path(temp_file.name)
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page()
-            page.goto(temp_html_path.resolve().as_uri(), wait_until="networkidle")
-            page.pdf(path=file_path, format="A4", print_background=True)
-            browser.close()
-    finally:
-        if temp_html_path and temp_html_path.exists():
-            try:
-                temp_html_path.unlink()
-            except OSError:
-                # Non-fatal cleanup failure.
-                pass
+def _cleanup_temp_html(temp_html_path: Path | None) -> None:
+    if temp_html_path and temp_html_path.exists():
+        try:
+            temp_html_path.unlink()
+        except OSError:
+            pass
 
 
 async def generate_pdf_path_async(outline_text: str | CourseOutlinePayload, version: int = 1) -> str:
@@ -1240,7 +1225,11 @@ async def generate_pdf_path_async(outline_text: str | CourseOutlinePayload, vers
     file_name = f"{uuid.uuid4()}.pdf"
     file_path = os.path.join(OUTPUT_DIR, file_name)
 
-    await asyncio.to_thread(_generate_pdf_with_playwright_sync, final_html, file_path)
+    temp_html_path = _write_temp_html(final_html)
+    try:
+        await pdf_browser.html_file_to_pdf(temp_html_path, file_path)
+    finally:
+        _cleanup_temp_html(temp_html_path)
     logger.info(f"PDF generated: {file_path}")
     return file_path
 
