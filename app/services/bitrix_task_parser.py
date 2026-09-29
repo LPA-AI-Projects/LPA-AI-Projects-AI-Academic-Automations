@@ -207,6 +207,9 @@ def _normalize_label(label: str) -> str:
         "preferred schedule for trainer finalization": "preferred_schedule",
         "any specific requirements": "specific_requirements",
         "topic attachment from the client": "topic_attachment",
+        "ai integration": "ai_integration",
+        "ai integration yes/no": "ai_integration",
+        "ai integrationyes/no": "ai_integration",
     }
     if s in aliases:
         return aliases[s]
@@ -260,6 +263,8 @@ def _normalize_label(label: str) -> str:
         return "course_duration"
     if "total" in s and "duration" in s:
         return "bitrix_total_duration_note"
+    if "ai integration" in s:
+        return "ai_integration"
     if "specific requirement" in s:
         return "specific_requirements"
     # Trainer experience / pricing / CV / nationality are not used in outline input.
@@ -320,6 +325,18 @@ def _normalize_mode(raw: str) -> str:
     if "onsite" in lower or "offline" in lower or "classroom" in lower:
         return "Onsite"
     return mode
+
+
+def _normalize_ai_integration_flag(raw: str | None) -> str:
+    """Return ``Yes`` or ``No``. Anything else is treated as blank (outline stays unchanged)."""
+    v = _clean_value(raw).lower()
+    if not v:
+        return ""
+    if v in {"yes", "y", "true"} or v.startswith("yes"):
+        return "Yes"
+    if v in {"no", "n", "false"} or v.startswith("no"):
+        return "No"
+    return ""
 
 
 def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
@@ -402,6 +419,10 @@ def _map_parsed_to_input_data(parsed: dict[str, str]) -> dict[str, Any]:
     result.update(_structured_bitrix_fields(parsed))
     if referral_course_links:
         result["referral_course_links"] = referral_course_links
+    ai_flag = _normalize_ai_integration_flag(parsed.get("ai_integration"))
+    if ai_flag == "Yes":
+        # Only Yes is forwarded. No or blank must not change the outline prompt.
+        result["ai_integration"] = "Yes"
     if course_duration:
         result["course_duration"] = course_duration
     if total_duration_note:

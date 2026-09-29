@@ -8,6 +8,10 @@ import httpx
 
 from app.core.config import settings
 from app.schemas.outline_payload import CourseOutlinePayload
+from app.services.outline_ai_addons import (
+    context_requests_ai_integration,
+    outline_text_has_ai_addons,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -712,6 +716,47 @@ PRESERVE UNCHANGED FIELDS:
 Return ONLY valid JSON matching STRICT_JSON_OUTPUT_RULES shape. For refine, modules array length = previous length ± feedback adds/removes (not the brochure day-count guide).
 """
 
+AI_INTEGRATION_OUTLINE_ADDON = """
+AI INTEGRATION ADD-ON (input ai_integration is Yes — required; do not apply this block otherwise)
+Keep every existing brochure rule for exercises, case studies, and simulations. Do NOT put the new copy inside those three lines.
+
+For EVERY object in modules, add:
+- ai_integration: exactly 2 strings. Each is one sentence, 8 to 16 words, starting with a verb such as Analyze or Support. Specific to that module. No "AI Integration:" label inside the string.
+- skills_achieved: exactly 1 string. Three concrete skills separated by commas, about 12 to 22 words total. No "Skills Achieved:" label inside the string.
+
+Also add two course-level boxes, printed after the modules table. industry_simulation comes first, then automation_sandbox.
+
+industry_simulation:
+{
+  "title": "Industry Simulation",
+  "subtitle": "one simulation name in title case, 6 to 14 words, no period",
+  "paragraphs": [
+    "paragraph 1: who the participants are, the scenario, and what they must manage. 3 to 5 sentences, about 70 to 110 words.",
+    "paragraph 2: how they work through the simulation and the business outcome. 3 to 5 sentences, about 70 to 110 words."
+  ]
+}
+
+automation_sandbox:
+{
+  "title": "Automation Sandbox",
+  "subtitle": "one sandbox name in title case, 6 to 14 words, no period. Name the automation practice, not the client company.",
+  "paragraphs": [
+    "paragraph 1: participants work in a simulated environment for this course, design automated workflows with the real tools of the subject, and see what they must streamline. 3 to 5 sentences, about 70 to 110 words.",
+    "paragraph 2: how they use generative AI and automation to build those workflows, what they produce, and how governance and quality stay in place. 3 to 5 sentences, about 70 to 110 words."
+  ]
+}
+Use tools and tasks that belong to this course. Do not copy a business-analysis example onto a different subject.
+No em dash. No client company name in either subtitle.
+"""
+
+AI_INTEGRATION_REFINE_PRESERVE = """
+AI ADD-ON PRESERVE
+The previous outline already has per-module ai_integration (2 bullets) and skills_achieved (1 line), plus industry_simulation and automation_sandbox.
+- Keep them on existing modules unless feedback explicitly removes AI integration.
+- Any new module added by feedback must also include ai_integration (exactly 2 bullets) and skills_achieved (exactly 1 comma-separated line).
+- Keep industry_simulation and automation_sandbox unless feedback explicitly removes AI integration.
+"""
+
 REFINE_JSON_OVERRIDE_RULES = """
 REFINE OVERRIDE (takes precedence over brochure MODULE COUNT lines above):
 - modules.length MUST follow the previous outline plus stakeholder feedback adds/removes.
@@ -1130,6 +1175,8 @@ class ClaudeService:
         if (research_notes_text or "").strip():
             user_prompt += f"\nResearch Notes:\n{research_notes_text}\n"
         system_prompt = COURSE_OUTLINE_JSON_BROCHURE + "\n\n" + STRICT_JSON_OUTPUT_RULES
+        if context_requests_ai_integration(context_text):
+            system_prompt += "\n\n" + AI_INTEGRATION_OUTLINE_ADDON
 
         for attempt in range(1, max_attempts + 1):
             raw = await self._call_messages_api(
@@ -1272,6 +1319,8 @@ class ClaudeService:
             + "\n\n"
             + REFINE_JSON_OVERRIDE_RULES
         )
+        if outline_text_has_ai_addons(previous_outline_json_or_text):
+            system_prompt += "\n\n" + AI_INTEGRATION_REFINE_PRESERVE
 
         for attempt in range(1, max_attempts + 1):
             raw = await self._call_messages_api(

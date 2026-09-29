@@ -188,6 +188,30 @@ def test_map_new_bitrix_b2c_template_to_course_input():
     assert "referral_course_links" not in mapped
 
 
+def test_ai_integration_yes_is_forwarded():
+    desc = (
+        "[table]"
+        "[tr][td][b]Product / Course Name[/b][/td][td]PMP 2026[/td][/tr]"
+        "[tr][td][b]AI integration(yes/No)[/b][/td][td]Yes[/td][/tr]"
+        "[/table]"
+    )
+    mapped = _map_parsed_to_input_data(parse_task_description_table(desc))
+    assert mapped["course_name"] == "PMP 2026"
+    assert mapped["ai_integration"] == "Yes"
+
+
+def test_ai_integration_no_or_blank_is_omitted():
+    for value in ("No", "no", "", "NA"):
+        desc = (
+            "[table]"
+            "[tr][td][b]Product / Course Name[/b][/td][td]Excel[/td][/tr]"
+            f"[tr][td][b]AI integration(yes/No)[/b][/td][td]{value}[/td][/tr]"
+            "[/table]"
+        )
+        mapped = _map_parsed_to_input_data(parse_task_description_table(desc))
+        assert "ai_integration" not in mapped
+
+
 def test_map_bitrix_ignores_trainer_pricing_cv_fields():
     desc = (
         "[table]"

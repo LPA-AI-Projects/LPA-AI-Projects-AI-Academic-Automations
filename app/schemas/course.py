@@ -148,6 +148,14 @@ class CourseInputData(BaseModel):
         None,
         description="Whether the client attached topic materials.",
     )
+    ai_integration: Optional[str] = Field(
+        None,
+        description=(
+            "Bitrix only. Yes adds AI Integration and Skills Achieved under each module's "
+            "exercises, plus one Industry Simulation box after the modules table. "
+            "No or blank leaves the outline unchanged."
+        ),
+    )
 
     @field_validator(
         "no_of_pax",
@@ -170,6 +178,7 @@ class CourseInputData(BaseModel):
         "specific_requirements",
         "preferred_schedule",
         "topic_attachment",
+        "ai_integration",
         mode="before",
     )
     @classmethod

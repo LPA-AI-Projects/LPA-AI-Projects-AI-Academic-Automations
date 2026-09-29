@@ -42,6 +42,12 @@ from app.schemas.job import CourseOutlineJobResponse, CourseOutlineQueuedRespons
 from app.models.course import Course, CourseVersion
 from app.models.job import CourseJob
 from app.services.claude import ClaudeService
+from app.services.outline_ai_addons import (
+    ai_integration_enabled,
+    clear_ai_outline_addons,
+    dump_outline_dict,
+    restore_ai_addons_if_dropped,
+)
 from app.services.pdf_service import generate_pdf_path_async
 from app.services.google_drive import GoogleDriveUploadError, upload_course_outline_pdf_to_drive
 from app.services.zoho_integration import (
@@ -594,7 +600,9 @@ async def process_course_job(
                     from app.services.bitrix_task_parser import apply_bitrix_client_duration_to_outline
 
                     apply_bitrix_client_duration_to_outline(outline_payload, input_data)
-                outline = json.dumps(outline_payload.model_dump(), ensure_ascii=False, indent=2)
+                if not ai_integration_enabled(input_data):
+                    clear_ai_outline_addons(outline_payload)
+                outline = json.dumps(dump_outline_dict(outline_payload), ensure_ascii=False, indent=2)
             except RuntimeError:
                 outline = await wait_for(
                     ai.build_roi_course_outline(context_text, learning_objectives),
@@ -959,7 +967,8 @@ async def refine_course(
                 timeout=600,
             )
             _enforce_regions_served_constant(refined_payload)
-            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            restore_ai_addons_if_dropped(base_outline, refined_payload, req.feedback)
+            updated_outline = json.dumps(dump_outline_dict(refined_payload), ensure_ascii=False, indent=2)
             logger.info("Refine AI structured mode completed | zoho_record_id=%s", rid)
         except RuntimeError:
             logger.warning(
@@ -978,7 +987,8 @@ async def refine_course(
                 timeout=600,
             )
             _enforce_regions_served_constant(refined_payload)
-            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            restore_ai_addons_if_dropped(base_outline, refined_payload, req.feedback)
+            updated_outline = json.dumps(dump_outline_dict(refined_payload), ensure_ascii=False, indent=2)
             logger.info("Refine AI reinforced retry completed | zoho_record_id=%s", rid)
     except AsyncTimeoutError:
         logger.warning("AI refine timed out for zoho_record_id=%s", rid)
@@ -1165,7 +1175,8 @@ async def refine_course_by_zoho(
                 ai.refine_course_outline_json(base_outline, req.feedback),
                 timeout=310,
             )
-            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            restore_ai_addons_if_dropped(base_outline, refined_payload, req.feedback)
+            updated_outline = json.dumps(dump_outline_dict(refined_payload), ensure_ascii=False, indent=2)
             logger.info("Refine AI structured mode completed | zoho_record_id=%s", zoho_record_id)
         except RuntimeError:
             logger.warning(
@@ -1183,7 +1194,8 @@ async def refine_course_by_zoho(
                 ai.refine_course_outline_json(base_outline, reinforced),
                 timeout=310,
             )
-            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            restore_ai_addons_if_dropped(base_outline, refined_payload, req.feedback)
+            updated_outline = json.dumps(dump_outline_dict(refined_payload), ensure_ascii=False, indent=2)
             logger.info("Refine AI reinforced retry completed | zoho_record_id=%s", zoho_record_id)
     except AsyncTimeoutError:
         logger.warning("AI refine timed out for zoho_record_id=%s", zoho_record_id)

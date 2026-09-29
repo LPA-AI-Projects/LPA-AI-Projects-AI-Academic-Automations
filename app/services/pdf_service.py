@@ -799,7 +799,88 @@ def _build_impact_html(items: list[tuple[str, str]], intro: str, closing: str) -
     return "".join(rows)
 
 
-def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> str:
+def _addon_lines(raw: object, *, limit: int) -> list[str]:
+    if isinstance(raw, str):
+        raw_items: list[object] = [raw]
+    elif isinstance(raw, list):
+        raw_items = raw
+    else:
+        return []
+    out: list[str] = []
+    for item in raw_items:
+        text = _brochure_strip_dashes(str(item).strip())
+        if text:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _render_exercise_addon_html(rec: dict[str, list[str] | str]) -> str:
+    """
+    Extra Exercises-column blocks. Empty string when the outline has no AI add-on,
+    so the existing Activity / Case study / Simulation list is unchanged.
+    """
+    ai_lines = _addon_lines(rec.get("ai_integration"), limit=2)
+    skill_lines = _addon_lines(rec.get("skills_achieved"), limit=1)
+    if not ai_lines and not skill_lines:
+        return ""
+    parts: list[str] = []
+    if ai_lines:
+        items = "".join(f"<li>{escape(line)}</li>" for line in ai_lines)
+        parts.append(f'<div class="ex-addon-title">AI Integration</div><ul>{items}</ul>')
+    if skill_lines:
+        items = "".join(f"<li>{escape(line)}</li>" for line in skill_lines)
+        parts.append(f'<div class="ex-addon-title">Skills Achieved</div><ul>{items}</ul>')
+    return "".join(parts)
+
+
+def _cap_words(text: str, max_words: int) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]).rstrip(".,;") + "."
+
+
+def _render_addon_box(box: object | None, heading: str) -> str:
+    paragraphs = _addon_lines(getattr(box, "paragraphs", None), limit=2)
+    if not paragraphs:
+        return ""
+    subtitle = _brochure_strip_dashes(str(getattr(box, "subtitle", "") or "").strip())
+    body = "".join(
+        f'<p class="industry-sim-para">{escape(_cap_words(para, 130))}</p>' for para in paragraphs
+    )
+    subtitle_html = f'<p class="industry-sim-sub">{escape(subtitle)}</p>' if subtitle else ""
+    return (
+        '<div class="industry-sim">'
+        f'<div class="industry-sim-title">{escape(heading)}</div>'
+        f"{subtitle_html}{body}"
+        "</div>"
+    )
+
+
+def _render_industry_simulation_page(
+    simulation: object | None,
+    page_number: int,
+    automation_sandbox: object | None = None,
+) -> str:
+    boxes = _render_addon_box(simulation, "Industry Simulation") + _render_addon_box(
+        automation_sandbox, "Automation Sandbox"
+    )
+    if not boxes:
+        return ""
+    return (
+        '<section class="page page-fixed bg-modules">'
+        f'<div class="modules-wrap">{boxes}</div>'
+        f'<div class="page-num-overlay">Page {page_number:02d}</div></section>'
+    )
+
+
+def _build_dynamic_module_pages(
+    records: list[dict[str, list[str] | str]],
+    industry_simulation: object | None = None,
+    automation_sandbox: object | None = None,
+) -> str:
     if not records:
         return ""
     pages: list[str] = []
@@ -832,6 +913,13 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
             units += line_units(str(t), 42) + 1  # +1 bullet padding
         for e in exercises_list:
             units += line_units(str(e), 42) + 1
+        for extra_key in ("ai_integration", "skills_achieved"):
+            extras = rec.get(extra_key, [])
+            extra_list = extras if isinstance(extras, list) else []
+            if extra_list:
+                units += 2  # bold heading
+            for line in extra_list:
+                units += line_units(str(line), 42) + 1
 
         # Moderately conservative baseline + per-line height
         return 68 + (units * 8)
@@ -853,12 +941,13 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
                 for e in (exercises if isinstance(exercises, list) else [])
                 if str(e).strip()
             )
+            addon_html = _render_exercise_addon_html(rec)
             rows.append(
                 "<tr>"
                 f'<td class="col-sno">{idx:02d}</td>'
                 f'<td class="col-mod">{name}</td>'
                 f'<td class="col-top"><ul>{topics_html}</ul></td>'
-                f'<td class="col-ex"><ul>{ex_html}</ul></td>'
+                f'<td class="col-ex"><ul>{ex_html}</ul>{addon_html}</td>'
                 "</tr>"
             )
         return "".join(rows)
@@ -887,7 +976,12 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
         row_h = estimate_row_height(rec)
         if current_chunk and (used_height + row_h > usable_height):
             # Prefer at least 2 rows/page when feasible; avoid one-row pages.
-            if len(current_chunk) < min_rows_per_page and used_height < usable_height + 40:
+            # Tall AI-integration rows must not be forced onto a full page.
+            if (
+                len(current_chunk) < min_rows_per_page
+                and used_height < usable_height + 40
+                and row_h < 340
+            ):
                 current_chunk.append(rec)
                 used_height += row_h
                 continue
@@ -900,6 +994,11 @@ def _build_dynamic_module_pages(records: list[dict[str, list[str] | str]]) -> st
         used_height += row_h
 
     flush_chunk(current_chunk, current_start_idx)
+    sim_html = _render_industry_simulation_page(
+        industry_simulation, page_number, automation_sandbox
+    )
+    if sim_html:
+        pages.append(sim_html)
 
     return "".join(pages)
 
@@ -937,7 +1036,11 @@ def _collect_payload_module_exercises(module: dict[str, object]) -> list[str]:
     return out[:8]
 
 
-def _build_dynamic_module_pages_from_payload(modules: list[dict[str, object]]) -> str:
+def _build_dynamic_module_pages_from_payload(
+    modules: list[dict[str, object]],
+    industry_simulation: object | None = None,
+    automation_sandbox: object | None = None,
+) -> str:
     """Render every module from the outline (no hard 12-module cut). Pagination handles overflow."""
     records: list[dict[str, list[str] | str]] = []
     for module in modules:
@@ -948,8 +1051,16 @@ def _build_dynamic_module_pages_from_payload(modules: list[dict[str, object]]) -
             if str(t).strip()
         ][:10]
         activity_pool = _collect_payload_module_exercises(module)
-        records.append({"name": title or "Module", "topics": topics, "exercises": activity_pool})
-    return _build_dynamic_module_pages(records)
+        records.append(
+            {
+                "name": title or "Module",
+                "topics": topics,
+                "exercises": activity_pool,
+                "ai_integration": _addon_lines(module.get("ai_integration"), limit=2),
+                "skills_achieved": _addon_lines(module.get("skills_achieved"), limit=1),
+            }
+        )
+    return _build_dynamic_module_pages(records, industry_simulation, automation_sandbox)
 
 
 def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayload) -> str:
@@ -1029,9 +1140,13 @@ def inject_content_from_structured_payload(html: str, payload: CourseOutlinePayl
                 "case_studies": m.case_studies,
                 "simulations": m.simulations,
                 "activities": m.activities,
+                "ai_integration": m.ai_integration,
+                "skills_achieved": m.skills_achieved,
             }
             for m in payload.modules
-        ]
+        ],
+        payload.industry_simulation,
+        payload.automation_sandbox,
     )
 
     display_title = _build_cover_title_text(payload.course_title)

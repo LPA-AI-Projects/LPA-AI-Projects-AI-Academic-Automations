@@ -19,6 +19,7 @@ from app.models.course import Course, CourseVersion
 from app.models.job import CourseJob
 from app.schemas.course import CourseVersionResponse
 from app.services.claude import ClaudeService
+from app.services.outline_ai_addons import dump_outline_dict, restore_ai_addons_if_dropped
 from app.services.crm_outline_hooks import CrmSource
 from app.services.google_drive import GoogleDriveUploadError, upload_course_outline_pdf_to_drive
 from app.services.pdf_service import generate_pdf_path_async
@@ -184,7 +185,8 @@ async def refine_course_for_record(
                 timeout=600,
             )
             _enforce_regions_served_constant(refined_payload)
-            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            restore_ai_addons_if_dropped(base_outline, refined_payload, feedback)
+            updated_outline = json.dumps(dump_outline_dict(refined_payload), ensure_ascii=False, indent=2)
         except RuntimeError:
             # Do NOT fall back to full ROI regeneration — that ignores surgical refine edits.
             logger.warning(
@@ -203,7 +205,8 @@ async def refine_course_for_record(
                 timeout=600,
             )
             _enforce_regions_served_constant(refined_payload)
-            updated_outline = json.dumps(refined_payload.model_dump(), ensure_ascii=False, indent=2)
+            restore_ai_addons_if_dropped(base_outline, refined_payload, feedback)
+            updated_outline = json.dumps(dump_outline_dict(refined_payload), ensure_ascii=False, indent=2)
     except AsyncTimeoutError:
         logger.warning("Refine AI timed out | record_id=%s", rid)
         return None
