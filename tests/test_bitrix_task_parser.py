@@ -188,6 +188,51 @@ def test_map_new_bitrix_b2c_template_to_course_input():
     assert "referral_course_links" not in mapped
 
 
+def test_parse_bbcode_table_with_th_header_row_for_course_name():
+    """Bitrix task 82460 style: first row uses th/th for Product / Course Name."""
+    desc = (
+        "[table][tr][td][table]"
+        "[tr][th]Product / Course Name[/th][th]Strategic Talent Management Professional (HRCI Pre-Approved | CPD)[/th][/tr]"
+        "[tr][td]Department of Product[/td][td]Human Resource & Talent Management[/td][/tr]"
+        "[tr][td]AI integration(yes/No)[/td][td]Yes[/td][/tr]"
+        "[/table][/td][/tr][/table]"
+    )
+    parsed = parse_task_description_table(desc)
+    assert parsed["course_name"] == "Strategic Talent Management Professional (HRCI Pre-Approved | CPD)"
+    assert parsed["department"] == "Human Resource & Talent Management"
+    assert parsed.get("ai_integration") == "Yes"
+
+
+def test_parse_tab_separated_b2c_task_table():
+    desc = (
+        "Product / Course Name\tStrategic Talent Management Professional (HRCI Pre-Approved | CPD)\n"
+        "Department of Product\tHuman Resource & Talent Management\n"
+        "Duration in Hours\t24 Hours (3 days × 8 instructional hours)\n"
+        "AI integration(yes/No)\tYes\n"
+    )
+    parsed = parse_task_description_table(desc)
+    mapped = _map_parsed_to_input_data(parsed)
+    assert parsed["course_name"] == "Strategic Talent Management Professional (HRCI Pre-Approved | CPD)"
+    assert parsed["department"] == "Human Resource & Talent Management"
+    assert mapped["course_name"] == parsed["course_name"]
+    assert mapped["department"] == "Human Resource & Talent Management"
+    assert mapped.get("ai_integration") == "Yes"
+
+
+def test_parse_runon_chat_block_distinguishes_course_name_and_department():
+    desc = (
+        "Product / Course Name Strategic Talent Management Professional (HRCI Pre-Approved | CPD) "
+        "Department of Product Human Resource & Talent Management "
+        "Level of Training (Beginner / Intermediate / Advanced / Expert) Advanced "
+        "AI integration(yes/No) Yes"
+    )
+    parsed = parse_task_description_table(desc)
+    assert parsed.get("course_name", "").startswith("Strategic Talent Management Professional")
+    assert parsed.get("department") == "Human Resource & Talent Management"
+    assert "Advanced" in (parsed.get("level_of_training") or "")
+    assert parsed.get("ai_integration") == "Yes"
+
+
 def test_ai_integration_yes_is_forwarded():
     desc = (
         "[table]"

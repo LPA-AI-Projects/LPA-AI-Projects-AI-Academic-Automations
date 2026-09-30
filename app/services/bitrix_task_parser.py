@@ -96,19 +96,174 @@ def _extract_referral_course_links(raw: str | None) -> str:
     return ""
 
 
+_STRUCTURED_BITRIX_KEYS = frozenset(
+    {
+        "course_name",
+        "company_name",
+        "department",
+        "designation",
+        "course_purpose",
+        "level_of_training",
+        "schedule_proposed",
+        "mode_of_training",
+        "per_day_duration_in_hours",
+        "course_duration",
+        "location_of_training",
+        "target_job_role",
+        "professional_experience",
+        "industry_domain",
+        "current_skill_level",
+        "pain_points",
+        "goal_of_training",
+        "expected_outcome",
+        "focus_area_of_training",
+        "suggested_topics",
+        "topic_attachment",
+        "referral_course_links",
+        "specific_requirements",
+        "preferred_schedule",
+        "ai_integration",
+        "_ignored",
+    }
+)
+
+
+def _merge_parsed(out: dict[str, str], key: str, value: str) -> None:
+    if not key or key == "_ignored":
+        return
+    cleaned = _clean_value(value)
+    if cleaned:
+        out[key] = cleaned
+
+
+def _parse_label_value_pair(label_raw: str, value_raw: str) -> tuple[str, str] | None:
+    label_raw = re.sub(r"\[/?[bi]\]", "", label_raw, flags=re.IGNORECASE).strip()
+    value = _clean_value(value_raw)
+    if not label_raw or not value:
+        return None
+    parsed_label = _parse_labeled_cell(f"{label_raw}: {value}")
+    if parsed_label:
+        label_k, inline_value = parsed_label
+        return label_k, inline_value or value
+    label_k = _normalize_label(label_raw.rstrip(":").strip())
+    if label_k:
+        return label_k, value
+    return None
+
+
 def _parse_two_column_row(label_cell: str, value_cell: str) -> tuple[str, str] | None:
     """Return (normalized_key, value) from a two-cell BBCode table row."""
+    label_raw = re.sub(r"\[/?[bi]\]", "", label_cell, flags=re.IGNORECASE).strip()
+    value_raw = re.sub(r"\[/?[bi]\]", "", value_cell, flags=re.IGNORECASE).strip()
+    left_key = _normalize_label(label_raw.rstrip(":").strip()) if label_raw else ""
+    right_key = _normalize_label(value_raw.rstrip(":").strip()) if value_raw else ""
+
+    # Some Bitrix templates swap label/value columns.
+    if right_key in _STRUCTURED_BITRIX_KEYS and left_key not in _STRUCTURED_BITRIX_KEYS:
+        swapped = _parse_label_value_pair(value_raw, label_raw)
+        if swapped:
+            return swapped
+
     parsed_label = _parse_labeled_cell(label_cell)
     if parsed_label:
         label_k, inline_value = parsed_label
         value = inline_value or _clean_value(value_cell)
     else:
-        label_raw = re.sub(r"\[/?[bi]\]", "", label_cell, flags=re.IGNORECASE).strip()
-        label_k = _normalize_label(label_raw.rstrip(":").strip())
+        label_k = left_key
         value = _clean_value(value_cell)
     if label_k and value:
         return label_k, value
     return None
+
+
+# B2C task form labels in display order (for run-on chat / description text).
+_B2C_RUNON_MARKERS: list[tuple[str, str]] = [
+    (r"Product\s*/\s*Course\s*Name", "course_name"),
+    (r"Department\s+of\s+Product", "department"),
+    (r"Is\s+this\s+course\s+meant\s+for\?", "course_purpose"),
+    (r"Level\s+of\s+Training\s*\(", "level_of_training"),
+    (r"Schedule\s+Proposed\s*\(", "schedule_proposed"),
+    (r"Mode\s+of\s+Training\s*\(", "mode_of_training"),
+    (r"Duration\s+in\s+Hours", "per_day_duration_in_hours"),
+    (r"Location\s+of\s+the\s+Training", "location_of_training"),
+    (r"Designation\s+of\s+Learner/Learners", "designation"),
+    (r"Target\s+Job\s+Role\s*\(After\s+Training\)", "target_job_role"),
+    (r"Professional\s+Experience\s*\(", "professional_experience"),
+    (r"Industry\s*/\s*Domain", "industry_domain"),
+    (r"Current\s+Skill\s+Level\s*\(", "current_skill_level"),
+    (r"Current\s+Challenges\s*/\s*Pain\s+Points", "pain_points"),
+    (r"Goal\s+of\s+Training", "goal_of_training"),
+    (r"Expected\s+Outcome\s+After\s+Training\s*\(", "expected_outcome"),
+    (r"Focus\s+Area\s+of\s+Training\s*\(", "focus_area_of_training"),
+    (r"Suggested\s+Topics\s+by\s+the\s+Client\s*/\s*Trainer", "suggested_topics"),
+    (r"Topic\s+Attachment\s+from\s+the\s+Client", "topic_attachment"),
+    (r"Referral\s+Course\s+Links\s*\(If\s+Any\)", "referral_course_links"),
+    (r"Preferred\s+Trainer\s+Experience", "_ignored"),
+    (r"Certified\s+Trainer\s+Mandatory", "_ignored"),
+    (r"Any\s+Specific\s+Requirements", "specific_requirements"),
+    (r"Proposed\s+Pricing", "_ignored"),
+    (r"Preferred\s+Trainer\s+Nationality", "_ignored"),
+    (r"Customer\s+CV\s+Available", "_ignored"),
+    (r"Preferred\s+Schedule\s*\(For\s+Trainer\s+Finalization\)", "preferred_schedule"),
+    (r"AI\s+integration\s*\(\s*yes/No\s*\)", "ai_integration"),
+    (r"AI\s+integration\s*\(\s*yes\s*/\s*No\s*\)", "ai_integration"),
+    (r"AI\s+integration\s*\(yes/No\)", "ai_integration"),
+    (r"AI\s+integration\s*\(yes/no\)", "ai_integration"),
+]
+
+
+def _parse_plain_delimited_lines(text: str) -> dict[str, str]:
+    """Tab-, colon-, or two-column plain lines (Excel / chat paste)."""
+    out: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = re.sub(r"\[/?[^\]]+\]", "", raw_line).strip()
+        if not line:
+            continue
+        if "\t" in line:
+            label_part, _, value_part = line.partition("\t")
+            parsed = _parse_label_value_pair(label_part, value_part)
+            if parsed:
+                _merge_parsed(out, parsed[0], parsed[1])
+            continue
+        parsed_line = _parse_labeled_cell(line)
+        if parsed_line:
+            _merge_parsed(out, parsed_line[0], parsed_line[1])
+    return out
+
+
+def _parse_runon_b2c_text(text: str) -> dict[str, str]:
+    """
+    Parse concatenated B2C form text where labels and values are not on separate lines.
+    Common when task chat copies the table into one block.
+    """
+    plain = re.sub(r"\[/?[^\]]+\]", " ", text or "")
+    plain = plain.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" in plain and plain.count("\n") >= 3:
+        # Multi-line paste: prefer line-based parsers first.
+        return {}
+
+    matches: list[tuple[int, int, str]] = []
+    for pattern, key in _B2C_RUNON_MARKERS:
+        for match in re.finditer(pattern, plain, flags=re.IGNORECASE):
+            matches.append((match.start(), match.end(), key))
+    if not matches:
+        return {}
+
+    matches.sort(key=lambda item: item[0])
+    deduped: list[tuple[int, int, str]] = []
+    last_start = -1
+    for start, end, key in matches:
+        if start <= last_start:
+            continue
+        deduped.append((start, end, key))
+        last_start = start
+
+    out: dict[str, str] = {}
+    for idx, (_start, end, key) in enumerate(deduped):
+        next_start = deduped[idx + 1][0] if idx + 1 < len(deduped) else len(plain)
+        value = plain[end:next_start].strip(" \t:-–—|")
+        _merge_parsed(out, key, value)
+    return out
 
 
 def parse_task_description_table(description: str | None) -> dict[str, Any]:
@@ -121,9 +276,9 @@ def parse_task_description_table(description: str | None) -> dict[str, Any]:
 
     out: dict[str, str] = {}
 
-    # BBCode rows: [tr][td]Label[/td][td]value[/td][/tr] (two-column CRM template)
+    # BBCode rows: [tr][td|th]Label[/td|th][td|th]value[/td|th][/tr] (two-column CRM template)
     for m in re.finditer(
-        r"\[tr\]\s*\[td\](.*?)\[/td\]\s*\[td\](.*?)\[/td\]\s*\[/tr\]",
+        r"\[tr\]\s*\[(?:td|th)\](.*?)\[/(?:td|th)\]\s*\[(?:td|th)\](.*?)\[/(?:td|th)\]\s*\[/tr\]",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     ):
@@ -144,15 +299,19 @@ def parse_task_description_table(description: str | None) -> dict[str, Any]:
             if value and label_k not in out:
                 out[label_k] = value
 
-    # Plain lines: "Label: value"
-    if not out:
-        for line in text.splitlines():
-            line = re.sub(r"\[/?[^\]]+\]", "", line).strip()
-            parsed_line = _parse_labeled_cell(line)
-            if parsed_line:
-                label_k, value = parsed_line
-                if value:
-                    out[label_k] = value
+    # Plain / pasted lines: tab-separated, "Label: value", etc.
+    for key, value in _parse_plain_delimited_lines(text).items():
+        if key not in out or not str(out.get(key) or "").strip():
+            out[key] = value
+
+    # Run-on chat paste fallback when course name is still missing.
+    # Skip when a BBCode table already parsed (avoid breaking suggested-topics cells).
+    has_bbcode_table = "[table]" in text.lower()
+    structured_count = sum(1 for key in out if key in _STRUCTURED_BITRIX_KEYS)
+    if not str(out.get("course_name") or "").strip() and not (has_bbcode_table and structured_count >= 2):
+        for key, value in _parse_runon_b2c_text(text).items():
+            if key not in out or not str(out.get(key) or "").strip():
+                out[key] = value
 
     return out
 
@@ -213,7 +372,9 @@ def _normalize_label(label: str) -> str:
     }
     if s in aliases:
         return aliases[s]
-    if "course name" in s or ("product" in s and "course" in s):
+    if s.startswith("department") or "department of product" in s:
+        return "department"
+    if "course name" in s or ("product" in s and "course" in s and "department" not in s):
         return "course_name"
     if "company" in s and "name" in s:
         return "company_name"
