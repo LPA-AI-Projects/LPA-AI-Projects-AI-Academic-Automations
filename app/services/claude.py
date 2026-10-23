@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Optional
 
 import httpx
@@ -28,6 +29,12 @@ class OpenAIConfigurationError(RuntimeError):
 
 
 DEFAULT_MAX_ATTEMPTS = 3
+ANTHROPIC_TEMPERATURE = 0.4
+
+
+def _model_accepts_temperature(model_name: str) -> bool:
+    """Claude 5-generation models (e.g. claude-sonnet-5-5) reject `temperature` with a 400."""
+    return re.search(r"claude-[a-z]+-5", (model_name or "").lower()) is None
 
 LEARNING_OBJECTIVES_PROMPT = """You are a Training Objectives Expert for Learners Point Academy. Your ONLY job is to identify the true learning objectives from training requests.
 
@@ -909,6 +916,10 @@ class ClaudeService:
 
         for model_idx, model_name in enumerate(candidate_models, start=1):
             payload["model"] = model_name
+            if _model_accepts_temperature(model_name):
+                payload["temperature"] = ANTHROPIC_TEMPERATURE
+            else:
+                payload.pop("temperature", None)
             for attempt in range(1, max_attempts + 1):
                 try:
                     async with httpx.AsyncClient(timeout=timeout) as client:
