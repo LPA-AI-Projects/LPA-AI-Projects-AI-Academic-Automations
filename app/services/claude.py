@@ -891,7 +891,6 @@ class ClaudeService:
         payload = {
             "model": self.model,
             "max_tokens": 8192,
-            "temperature": 0.4,
             "system": system_prompt,
             "tools":[{"type": "web_search_20250305","name": "web_search"}],
             "messages": [{"role": "user", "content": user_prompt}],
@@ -1064,6 +1063,14 @@ class ClaudeService:
                     raise OpenAIConfigurationError("OpenAI authentication failed. Check OPENAI_API_KEY.")
 
                 if response.status_code >= 500:
+                    logger.warning(
+                        "OpenAI returned %s | model=%s attempt=%s/%s body=%s",
+                        response.status_code,
+                        active_model,
+                        attempt,
+                        max_attempts,
+                        (response.text or "")[:1200],
+                    )
                     raise httpx.HTTPStatusError(
                         "OpenAI server error", request=response.request, response=response
                     )
