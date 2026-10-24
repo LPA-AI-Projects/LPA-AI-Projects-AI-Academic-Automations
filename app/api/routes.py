@@ -578,7 +578,10 @@ async def process_course_job(
             try:
                 context_profile_text, research_notes_text = await asyncio.gather(
                     wait_for(ai.build_context_profile(context_text), timeout=180),
-                    wait_for(ai.research_support_data(context_text, learning_objectives), timeout=220),
+                    wait_for(
+                        ai.research_support_data(context_text, learning_objectives, timeout_s=240.0),
+                        timeout=500,
+                    ),
                 )
             except Exception:
                 logger.exception(
