@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Optional
+from functools import lru_cache
+from typing import Any, Optional
 
 import httpx
 
@@ -18,6 +19,8 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_TIMEOUT_S = 120.0
+# Full-outline JSON generations can run 60-120s+; a shorter read timeout discards a billed response and retries.
+JSON_OUTLINE_TIMEOUT_S = 240.0
 
 
 class AnthropicConfigurationError(RuntimeError):
@@ -35,6 +38,96 @@ ANTHROPIC_TEMPERATURE = 0.4
 def _model_accepts_temperature(model_name: str) -> bool:
     """Claude 5-generation models (e.g. claude-sonnet-5-5) reject `temperature` with a 400."""
     return re.search(r"claude-[a-z]+-5", (model_name or "").lower()) is None
+
+
+# JSON Schema keywords the structured-output grammar rejects (or that only add noise).
+_SCHEMA_STRIP_KEYS = frozenset(
+    {
+        "title",
+        "default",
+        "examples",
+        "minLength",
+        "maxLength",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "maxItems",
+        "uniqueItems",
+    }
+)
+# Mapping keys here are names chosen by the schema author (e.g. a field called "title"), not keywords.
+_SCHEMA_NAME_MAPS = frozenset({"properties", "$defs", "definitions"})
+
+
+def _strictify_schema(node: Any) -> Any:
+    """
+    Make a Pydantic JSON schema acceptable for ``output_config.format``: every object is closed
+    (``additionalProperties: false``) and lists all of its properties as required, so the optional-field
+    limits do not apply. Pydantic defaults still fill anything the model leaves empty.
+    """
+    if isinstance(node, list):
+        return [_strictify_schema(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key in _SCHEMA_STRIP_KEYS:
+            continue
+        if key in _SCHEMA_NAME_MAPS and isinstance(value, dict):
+            out[key] = {name: _strictify_schema(sub) for name, sub in value.items()}
+        else:
+            out[key] = _strictify_schema(value)
+    props = out.get("properties")
+    if isinstance(props, dict):
+        out["additionalProperties"] = False
+        out["required"] = list(props.keys())
+    return out
+
+
+@lru_cache(maxsize=1)
+def _outline_json_schema() -> dict[str, Any]:
+    return _strictify_schema(CourseOutlinePayload.model_json_schema())
+
+
+def _outline_schema_if_enabled() -> dict[str, Any] | None:
+    return _outline_json_schema() if getattr(settings, "ANTHROPIC_STRUCTURED_OUTPUT", False) else None
+
+
+def _system_param(system_prompt: str) -> Any:
+    """System prompt as a cacheable block (cache covers tools + system) unless caching is disabled."""
+    if getattr(settings, "ANTHROPIC_PROMPT_CACHING", True):
+        return [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+    return system_prompt
+
+
+def _is_structured_output_error(body: str) -> bool:
+    low = (body or "").lower()
+    return any(k in low for k in ("output_config", "json_schema", "schema", "structured", "citation"))
+
+
+def _log_anthropic_usage(label: str, model_name: str, data: dict[str, Any], *, structured: bool) -> None:
+    usage = data.get("usage") if isinstance(data, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    tool_use = usage.get("server_tool_use")
+    tool_use = tool_use if isinstance(tool_use, dict) else {}
+    stop_reason = data.get("stop_reason") if isinstance(data, dict) else None
+    logger.info(
+        "Anthropic usage | label=%s model=%s input=%s output=%s cache_write=%s cache_read=%s "
+        "web_searches=%s stop=%s structured=%s",
+        label or "unlabeled",
+        model_name,
+        usage.get("input_tokens"),
+        usage.get("output_tokens"),
+        usage.get("cache_creation_input_tokens"),
+        usage.get("cache_read_input_tokens"),
+        tool_use.get("web_search_requests"),
+        stop_reason,
+        structured,
+    )
+    if stop_reason == "max_tokens":
+        logger.warning("Anthropic output hit max_tokens (may be truncated) | label=%s model=%s", label, model_name)
 
 LEARNING_OBJECTIVES_PROMPT = """You are a Training Objectives Expert for Learners Point Academy. Your ONLY job is to identify the true learning objectives from training requests.
 
@@ -869,6 +962,7 @@ class ClaudeService:
             timeout_s=timeout_s,
             max_attempts=DEFAULT_MAX_ATTEMPTS,
             model_override=model_override,
+            label="completion",
         )
 
     async def _call_messages_api(
@@ -879,6 +973,8 @@ class ClaudeService:
         timeout_s: float,
         max_attempts: int,
         model_override: str | None = None,
+        label: str = "",
+        json_schema: dict[str, Any] | None = None,
     ) -> str:
         if self.provider == "openai":
             return await self._call_openai_chat_api(
@@ -895,13 +991,15 @@ class ClaudeService:
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "max_tokens": 8192,
-            "system": system_prompt,
+            "system": _system_param(system_prompt),
             "tools":[{"type": "web_search_20250305","name": "web_search"}],
             "messages": [{"role": "user", "content": user_prompt}],
         }
+        if json_schema:
+            payload["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
 
         timeout = httpx.Timeout(timeout_s, connect=10.0)
         last_error: Optional[BaseException] = None
@@ -924,6 +1022,19 @@ class ClaudeService:
                 try:
                     async with httpx.AsyncClient(timeout=timeout) as client:
                         response = await client.post(url, headers=headers, json=payload)
+                        if (
+                            response.status_code == 400
+                            and "output_config" in payload
+                            and _is_structured_output_error(response.text)
+                        ):
+                            logger.warning(
+                                "Structured output rejected; retrying this call without it | label=%s model=%s body=%s",
+                                label or "unlabeled",
+                                model_name,
+                                (response.text or "")[:600],
+                            )
+                            payload.pop("output_config", None)
+                            response = await client.post(url, headers=headers, json=payload)
 
                     if response.status_code == 404:
                         body_preview = (response.text or "")[:500]
@@ -975,6 +1086,7 @@ class ClaudeService:
                     response.raise_for_status()
 
                     data = response.json()
+                    _log_anthropic_usage(label, model_name, data, structured="output_config" in payload)
                     content_blocks = data.get("content", [])
                     if not isinstance(content_blocks, list) or not content_blocks:
                         raise RuntimeError("Claude returned empty content.")
@@ -1148,6 +1260,7 @@ class ClaudeService:
             user_prompt=context_text,
             timeout_s=timeout_s,
             max_attempts=max_attempts,
+            label="learning_objectives",
         )
 
     async def build_roi_course_outline(
@@ -1169,6 +1282,7 @@ class ClaudeService:
             user_prompt=user_prompt,
             timeout_s=timeout_s,
             max_attempts=max_attempts,
+            label="outline_text_fallback",
         )
 
     async def build_roi_course_outline_json(
@@ -1178,7 +1292,7 @@ class ClaudeService:
         research_notes_text: str = "",
         context_profile_text: str = "",
         *,
-        timeout_s: float = DEFAULT_TIMEOUT_S,
+        timeout_s: float = JSON_OUTLINE_TIMEOUT_S,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     ) -> CourseOutlinePayload:
         """Brochure PDF payload: system prompt is ONLY brochure JSON rules + schema (never ROI_OUTLINE_PROMPT)."""
@@ -1202,6 +1316,8 @@ class ClaudeService:
                 user_prompt=user_prompt,
                 timeout_s=timeout_s,
                 max_attempts=1,
+                label="outline_json",
+                json_schema=_outline_schema_if_enabled(),
             )
             try:
                 json_candidate = self._extract_json_candidate(raw)
@@ -1232,6 +1348,7 @@ class ClaudeService:
             user_prompt=context_text,
             timeout_s=timeout_s,
             max_attempts=max_attempts,
+            label="context_profile",
         )
 
     async def research_support_data(
@@ -1253,6 +1370,7 @@ class ClaudeService:
             user_prompt=user_prompt,
             timeout_s=timeout_s,
             max_attempts=max_attempts,
+            label="research",
         )
 
     async def build_roi_outline_with_research(
@@ -1280,13 +1398,14 @@ class ClaudeService:
             user_prompt=user_prompt,
             timeout_s=timeout_s,
             max_attempts=max_attempts,
+            label="outline_with_research",
         )
 
     async def normalize_to_payload(
         self,
         outline_text: str,
         *,
-        timeout_s: float = DEFAULT_TIMEOUT_S,
+        timeout_s: float = JSON_OUTLINE_TIMEOUT_S,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     ) -> CourseOutlinePayload:
         user_prompt = (
@@ -1300,6 +1419,8 @@ class ClaudeService:
                 user_prompt=user_prompt,
                 timeout_s=timeout_s,
                 max_attempts=1,
+                label="normalize_outline",
+                json_schema=_outline_schema_if_enabled(),
             )
             try:
                 json_candidate = self._extract_json_candidate(raw)
@@ -1317,7 +1438,7 @@ class ClaudeService:
         previous_outline_json_or_text: str,
         feedback: str,
         *,
-        timeout_s: float = DEFAULT_TIMEOUT_S,
+        timeout_s: float = JSON_OUTLINE_TIMEOUT_S,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     ) -> CourseOutlinePayload:
         user_prompt = (
@@ -1346,6 +1467,8 @@ class ClaudeService:
                 user_prompt=user_prompt,
                 timeout_s=timeout_s,
                 max_attempts=1,
+                label="refine_outline",
+                json_schema=_outline_schema_if_enabled(),
             )
             try:
                 json_candidate = self._extract_json_candidate(raw)

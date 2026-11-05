@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     # httpx read timeout for Anthropic model calls.
     ANTHROPIC_READ_TIMEOUT_S: float = 310.0
+    # Mark system prompts as cacheable so repeat calls within ~5 min bill the cached part at a discount.
+    ANTHROPIC_PROMPT_CACHING: bool = True
+    # Constrain outline/refine JSON with a schema (output_config.format) to avoid invalid-JSON retries.
+    ANTHROPIC_STRUCTURED_OUTPUT: bool = False
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com"
@@ -273,6 +277,8 @@ class Settings(BaseSettings):
         "ASSESSMENT_LINK_REQUIRE_TOKEN",
         "COURSEWARE_VALIDATED_BLOB_IN_PAYLOAD",
         "AI_FALLBACK_TO_OPENAI",
+        "ANTHROPIC_PROMPT_CACHING",
+        "ANTHROPIC_STRUCTURED_OUTPUT",
         mode="before",
     )
     @classmethod
