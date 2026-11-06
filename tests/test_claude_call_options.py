@@ -212,3 +212,15 @@ def test_outline_and_refine_pass_schema_only_when_enabled(monkeypatch, flag):
     for kwargs in seen:
         assert kwargs["timeout_s"] == 240.0
         assert (kwargs["json_schema"] is not None) is flag
+
+
+def test_usage_is_recorded_only_when_a_context_is_given(fake_http, monkeypatch):
+    calls = []
+    monkeypatch.setattr(claude_mod, "record_usage_in_background", lambda ctx, **kw: calls.append((ctx, kw)))
+    fake_http.queue = [(200, _OK_BODY), (200, _OK_BODY)]
+    ctx = {"kind": "outline", "job_id": "abc", "zoho_record_id": "7"}
+    ai = ClaudeService(usage_context=ctx)
+    asyncio.run(ai._call_messages_api(system_prompt="S", user_prompt="U", timeout_s=5.0, max_attempts=1, label="research"))
+    assert calls[0][0] == ctx and calls[0][1]["label"] == "research" and calls[0][1]["data"]["usage"]["input_tokens"] == 1200
+    _call(label="x")  # a plain ClaudeService() passes no context, so nothing is stored
+    assert calls[1][0] is None

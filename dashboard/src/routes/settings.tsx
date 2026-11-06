@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { TriangleAlert } from "lucide-react";
 import { PageHeader } from "@/components/app/AppShell";
 import { CallProfileEditor, FixedCostsEditor, PriceSheetEditor, ScenarioEditor } from "@/components/app/editors";
+import { DatabasePanel } from "@/components/app/connect";
 import { EmptyState, HowCalculated, Kpi, Panel, axisProps, tooltipStyle } from "@/components/app/bits";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,6 +47,8 @@ function Settings() {
   return (
     <>
       <PageHeader title="Data & Settings" desc="Import usage logs and edit every assumption in one place." />
+
+      <DatabasePanel />
 
       <Panel title="Log import" tip="Parses lines containing 'Anthropic usage | label=… model=… input=… output=… cache_write=… cache_read=… web_searches=… stop=… structured=…'. Text before it is ignored; None counts as 0."
         actions={<>

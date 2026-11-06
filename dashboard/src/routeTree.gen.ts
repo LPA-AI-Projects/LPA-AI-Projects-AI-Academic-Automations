@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CompareRouteImport } from './routes/compare'
+import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as TotalRouteImport } from './routes/total'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -23,40 +25,58 @@ const CompareRoute = CompareRouteImport.update({
   path: '/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RequestsRoute = RequestsRouteImport.update({
+  id: '/requests',
+  path: '/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TotalRoute = TotalRouteImport.update({
+  id: '/total',
+  path: '/total',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/compare': typeof CompareRoute
+  '/requests': typeof RequestsRoute
   '/settings': typeof SettingsRoute
+  '/total': typeof TotalRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/compare': typeof CompareRoute
+  '/requests': typeof RequestsRoute
   '/settings': typeof SettingsRoute
+  '/total': typeof TotalRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/compare': typeof CompareRoute
+  '/requests': typeof RequestsRoute
   '/settings': typeof SettingsRoute
+  '/total': typeof TotalRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/compare' | '/settings'
+  fullPaths: '/' | '/compare' | '/requests' | '/settings' | '/total'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/compare' | '/settings'
-  id: '__root__' | '/' | '/compare' | '/settings'
+  to: '/' | '/compare' | '/requests' | '/settings' | '/total'
+  id: '__root__' | '/' | '/compare' | '/requests' | '/settings' | '/total'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CompareRoute: typeof CompareRoute
+  RequestsRoute: typeof RequestsRoute
   SettingsRoute: typeof SettingsRoute
+  TotalRoute: typeof TotalRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,11 +95,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CompareRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/requests': {
+      id: '/requests'
+      path: '/requests'
+      fullPath: '/requests'
+      preLoaderRoute: typeof RequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/total': {
+      id: '/total'
+      path: '/total'
+      fullPath: '/total'
+      preLoaderRoute: typeof TotalRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -88,7 +122,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CompareRoute: CompareRoute,
+  RequestsRoute: RequestsRoute,
   SettingsRoute: SettingsRoute,
+  TotalRoute: TotalRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

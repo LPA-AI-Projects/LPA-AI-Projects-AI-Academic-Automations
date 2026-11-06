@@ -176,7 +176,7 @@ async def refine_course_for_record(
         course_uuid = target_course_id
 
     try:
-        ai = ClaudeService()
+        ai = ClaudeService(usage_context={"kind": "refine", "course_id": course_uuid, "zoho_record_id": rid})
         refined_payload = None
         try:
             logger.info("Refine AI started | record_id=%s crm=%s", rid, crm_source)

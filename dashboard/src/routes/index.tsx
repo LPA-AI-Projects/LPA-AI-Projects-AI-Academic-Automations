@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore } from "@/lib/cost/store";
+import { useData } from "@/lib/cost/data";
+import { monthlyCosts, sumMonths } from "@/lib/cost/dbcost";
 import { breakEvenHitRate, compute, ledger, monthlyActual, projectMonths, total, writeMult } from "@/lib/cost/calc";
 import { applyLogAverages, hitRate } from "@/lib/cost/logs";
 import { int, money, pct } from "@/lib/cost/format";
@@ -34,6 +36,7 @@ const C = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)
 
 function CostAnalysis() {
   const { state, setState, current, priced, byLabel, logs } = useStore();
+  const { summary, month } = useData();
   const sc = state.scenario;
   const u = (p: Partial<Scenario>) => setState((s) => ({ ...s, scenario: { ...s.scenario, ...p } }));
   const useLogs = sc.dataSource === "logs" && byLabel.length > 0;
@@ -47,18 +50,27 @@ function CostAnalysis() {
       </>
     );
 
-  const r = compute(state, current, { steps });
-  const on = compute(state, current, { steps, caching: true });
-  const off = compute(state, current, { steps, caching: false });
-  const structuredOn = compute(state, current, { steps, failRate: sc.structuredFailRate });
-  const structuredOff = compute(state, current, { steps, failRate: sc.failRate });
+  // Month filter: with the database connected, volumes become that month's real counts.
+  const monthRow = summary && month !== "all" ? summary.by_month.find((m) => m.month === month) : undefined;
+  const view = monthRow
+    ? { ...state, scenario: { ...sc, outlines: monthRow.zoho.completed + monthRow.bitrix.completed, refines: monthRow.zoho.refines + monthRow.bitrix.refines } }
+    : state;
+  const vsc = view.scenario;
+  const r = compute(view, current, { steps });
+  const on = compute(view, current, { steps, caching: true });
+  const off = compute(view, current, { steps, caching: false });
+  const structuredOn = compute(view, current, { steps, failRate: sc.structuredFailRate });
+  const structuredOff = compute(view, current, { steps, failRate: sc.failRate });
+  const dbRows = summary ? monthlyCosts(summary, priced, current, sc.window, compute(state, current, { steps }).perOutline, compute(state, current, { steps }).perRefine) : [];
+  const dbShown = monthRow ? dbRows.find((x) => x.month === month) : dbRows.length ? sumMonths(dbRows) : undefined;
+  const dbTotal = sumMonths(dbRows);
   const cacheNet = off.monthlyApi - on.monthlyApi;
   const be = breakEvenHitRate(current, sc.window);
   const allSpend = r.allIn || 1;
-  const lines = ledger(state, r);
+  const lines = ledger(view, r);
   const ledgerTotal = lines.reduce((a, l) => a + l.amount, 0);
   const outputShare = r.monthlyApi ? r.monthly.output / r.monthlyApi : 0;
-  const proj = projectMonths(state, r);
+  const proj = projectMonths(state, compute(state, current, { steps }));
   const projSum = proj.reduce(
     (a, x) => ({ outlines: a.outlines + x.outlines, refines: a.refines + x.refines, anthropic: a.anthropic + x.anthropic, fixed: a.fixed + x.fixed, total: a.total + x.total }),
     { outlines: 0, refines: 0, anthropic: 0, fixed: 0, total: 0 },
@@ -87,10 +99,10 @@ function CostAnalysis() {
     { name: "Supabase", value: fx("supabase") },
     { name: "Other", value: state.fixed.filter((f) => !known.some((k) => f.name.toLowerCase().includes(k))).reduce((a, f) => a + f.amount, 0) },
   ].filter((d) => d.value > 0);
-  const maxN = Math.max(400, sc.outlines * 2);
+  const maxN = Math.max(400, vsc.outlines * 2);
   const volData = Array.from({ length: 11 }, (_, i) => {
     const n = Math.round((maxN * i) / 10);
-    return { n, "Caching ON": on.allIn + (n - sc.outlines) * on.perOutline, "Caching OFF": off.allIn + (n - sc.outlines) * off.perOutline };
+    return { n, "Caching ON": on.allIn + (n - vsc.outlines) * on.perOutline, "Caching OFF": off.allIn + (n - vsc.outlines) * off.perOutline };
   });
   const wm = writeMult(current, sc.window);
   const impact = on.outline.rows.filter((x) => x.eligible).map((x) => {
@@ -104,7 +116,7 @@ function CostAnalysis() {
       ? `Caching saves ${money(cacheNet)}/month at a ${pct(sc.hitRate, 0)} hit rate; break-even is ${pct(be)}.`
       : `Caching costs an extra ${money(-cacheNet)}/month at a ${pct(sc.hitRate, 0)} hit rate — below the ${pct(be)} break-even.`,
     `Output tokens are ${pct(outputShare, 0)} of model spend.`,
-    `Failed JSON retries and fallback add ${money(r.wastePerOutline)} per outline (${money(r.wastePerOutline * sc.outlines)}/month).`,
+    `Failed JSON retries and fallback add ${money(r.wastePerOutline)} per outline (${money(r.wastePerOutline * vsc.outlines)}/month).`,
     `Web search is ${pct(r.monthlySearch / allSpend)} of all-in spend.`,
     `Fixed costs are ${pct(r.fixedTotal / allSpend, 0)} of the ${money(r.allIn)} monthly total.`,
   ];
@@ -126,7 +138,7 @@ function CostAnalysis() {
 
   return (
     <>
-      <PageHeader title="Cost Analysis" desc={`${current.model} · ${int(sc.outlines)} outlines, ${int(sc.refines)} refines / month`} actions={<AssumptionsDrawer />} />
+      <PageHeader title="Cost Analysis" desc={monthRow ? `${current.model} · ${month}: ${int(vsc.outlines)} outlines, ${int(vsc.refines)} refinements (actual counts from the database)` : `${current.model} · ${int(sc.outlines)} outlines, ${int(sc.refines)} refines / month`} actions={<AssumptionsDrawer />} />
 
       <div className="card-surface grid gap-4 p-4 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div className="flex items-start gap-3">
@@ -158,7 +170,11 @@ function CostAnalysis() {
         <Kpi label="Caching net effect / month" value={money(cacheNet, true)} tone={cacheNet >= 0 ? "success" : "danger"} sub={cacheNet >= 0 ? "saving" : "extra cost"} tip="Monthly Anthropic cost with caching OFF minus with caching ON." />
         <Kpi label="Web-search share" value={pct(r.monthlySearch / allSpend)} tip="Web-search fees ÷ all-in monthly spend." />
         <Kpi label="12-month total" value={money(projSum.total)} sub={`${money(projSum.anthropic)} Anthropic + ${money(projSum.fixed)} fixed`} tip="All-in cost over the next 12 months at the scenario volumes and monthly growth." />
-        <Kpi label={logs.records.length ? "Actual spend (imported logs)" : "Actual spend"} value={logs.records.length ? money(actualSum.cost) : "—"} sub={logs.records.length ? `${int(actualSum.outlines)} outlines, ${int(actualSum.refines)} refines` : "Import logs on Data & Settings"} tip="Real cost of all imported outline and refine calls, priced from their actual token counts." />
+        {dbShown ? (
+          <Kpi label={monthRow ? `Actual spend · ${month}` : "Actual spend · all months"} value={money(dbShown.total)} sub={`${money(dbShown.recorded)} recorded + ${money(dbShown.estimated)} estimated`} tip="From the live database: recorded token usage priced exactly, plus an estimate for requests that ran before usage recording started." />
+        ) : (
+          <Kpi label={logs.records.length ? "Actual spend (imported logs)" : "Actual spend"} value={logs.records.length ? money(actualSum.cost) : "—"} sub={logs.records.length ? `${int(actualSum.outlines)} outlines, ${int(actualSum.refines)} refines` : "Connect the database or import logs"} tip="Real cost of all imported outline and refine calls, priced from their actual token counts." />
+        )}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -178,8 +194,8 @@ function CostAnalysis() {
         </Panel>
         <Panel title="Retry and fallback waste" tip="Extra expected cost per outline from failed JSON attempts and the text fallback.">
           <div className="grid grid-cols-2 gap-4">
-            <div><div className="text-xs text-muted-foreground">Now (f = {pct(r.f, 0)})</div><div className="tabular text-2xl font-semibold text-warning">{money(r.wastePerOutline)}</div><div className="text-xs text-muted-foreground">per outline · {money(r.wastePerOutline * sc.outlines)}/mo</div></div>
-            <div><div className="text-xs text-muted-foreground">Structured OFF → ON</div><div className="tabular text-sm">{money(structuredOff.wastePerOutline)} → <span className="font-semibold text-success">{money(structuredOn.wastePerOutline)}</span></div><div className="text-xs text-muted-foreground">saves {money((structuredOff.perOutline - structuredOn.perOutline) * sc.outlines + (structuredOff.perRefine - structuredOn.perRefine) * sc.refines)}/mo</div></div>
+            <div><div className="text-xs text-muted-foreground">Now (f = {pct(r.f, 0)})</div><div className="tabular text-2xl font-semibold text-warning">{money(r.wastePerOutline)}</div><div className="text-xs text-muted-foreground">per outline · {money(r.wastePerOutline * vsc.outlines)}/mo</div></div>
+            <div><div className="text-xs text-muted-foreground">Structured OFF → ON</div><div className="tabular text-sm">{money(structuredOff.wastePerOutline)} → <span className="font-semibold text-success">{money(structuredOn.wastePerOutline)}</span></div><div className="text-xs text-muted-foreground">saves {money((structuredOff.perOutline - structuredOn.perOutline) * vsc.outlines + (structuredOff.perRefine - structuredOn.perRefine) * vsc.refines)}/mo</div></div>
           </div>
         </Panel>
         <Panel title="Break-even cache hit rate" tip="h* = (writeMult − 1) / (writeMult − readMult). Above it, caching saves money.">
@@ -199,6 +215,33 @@ function CostAnalysis() {
           <tbody>{proj.map((x) => <tr key={x.month} className="border-b last:border-0"><td className="whitespace-nowrap px-3 py-2 font-medium">{x.month}</td><td className="px-3">{int(Math.round(x.outlines))}</td><td className="px-3">{int(Math.round(x.refines))}</td><td className="px-3">{money(x.anthropic)}</td><td className="px-3">{money(x.fixed)}</td><td className="px-3 font-semibold">{money(x.total)}</td><td className="px-3 text-muted-foreground">{money(x.cumulative)}</td></tr>)}
             <tr className="bg-muted/40 font-semibold"><td className="px-3 py-2">12-month total</td><td className="px-3">{int(Math.round(projSum.outlines))}</td><td className="px-3">{int(Math.round(projSum.refines))}</td><td className="px-3">{money(projSum.anthropic)}</td><td className="px-3">{money(projSum.fixed)}</td><td className="px-3">{money(projSum.total)}</td><td className="px-3" /></tr></tbody></table></div>
       </Panel>
+
+      {summary && (
+        <Panel
+          title="Monthly spend from the database"
+          tip="Requests are counted from the live database. Recorded = priced from the real tokens Anthropic billed. Estimated = average unit cost for requests that ran before usage recording."
+          bodyClass="p-0 sm:p-0"
+        >
+          <div className="overflow-x-auto">
+            <table className="tabular w-full text-sm">
+              <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+                <tr>{["Month", "Requests", "Completed", "Failed", "Refinements", "Zoho", "Bitrix", "Recorded $", "Estimated $", "Total $"].map((h) => <th key={h} className="whitespace-nowrap px-3 py-2 text-left font-medium">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {[...dbRows].reverse().map((x) => (
+                  <tr key={x.month} className={`border-b ${x.month === month ? "bg-accent/60 font-medium" : ""}`}>
+                    <td className="whitespace-nowrap px-3 py-2 font-medium">{x.month}</td><td className="px-3">{int(x.outlines)}</td><td className="px-3">{int(x.completed)}</td><td className="px-3">{int(x.failed)}</td><td className="px-3">{int(x.refines)}</td><td className="px-3">{int(x.zoho.outlines)}</td><td className="px-3">{int(x.bitrix.outlines)}</td><td className="px-3">{money(x.recorded)}</td><td className="px-3">{money(x.estimated)}</td><td className="px-3 font-semibold">{money(x.total)}</td>
+                  </tr>
+                ))}
+                <tr className="bg-muted/40 font-semibold">
+                  <td className="px-3 py-2">Total</td><td className="px-3">{int(dbTotal.outlines)}</td><td className="px-3">{int(dbTotal.completed)}</td><td className="px-3">{int(dbTotal.failed)}</td><td className="px-3">{int(dbTotal.refines)}</td><td className="px-3">{int(dbTotal.zoho.outlines)}</td><td className="px-3">{int(dbTotal.bitrix.outlines)}</td><td className="px-3">{money(dbTotal.recorded)}</td><td className="px-3">{money(dbTotal.estimated)}</td><td className="px-3">{money(dbTotal.total)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="px-4 py-3 text-xs text-muted-foreground">Requests = every outline request (slides excluded); Zoho and Bitrix split all requests. Only completed outlines and refinements are priced; failed requests are not. Pick a month at the top to see that month's cost analysis.</p>
+        </Panel>
+      )}
 
       <Panel title="Actual monthly spend (imported logs)" tip="Real spend from imported usage logs, priced from actual token counts per call. Outlines = learning_objectives calls; refines = refine_outline calls (retries included)." bodyClass="p-0 sm:p-0">
         {actual.rows.length === 0 ? (

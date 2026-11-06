@@ -1,6 +1,7 @@
 import { Outlet, Link, HeadContent, createRootRoute } from "@tanstack/react-router";
 
 import { StoreProvider } from "@/lib/cost/store";
+import { DataProvider } from "@/lib/cost/data";
 import { AppShell } from "@/components/app/AppShell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -35,13 +36,15 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <StoreProvider>
-      <HeadContent />
-      <TooltipProvider delayDuration={150}>
-        <AppShell>
-          <Outlet />
-        </AppShell>
-        <Toaster />
-      </TooltipProvider>
+      <DataProvider>
+        <HeadContent />
+        <TooltipProvider delayDuration={150}>
+          <AppShell>
+            <Outlet />
+          </AppShell>
+          <Toaster />
+        </TooltipProvider>
+      </DataProvider>
     </StoreProvider>
   );
 }

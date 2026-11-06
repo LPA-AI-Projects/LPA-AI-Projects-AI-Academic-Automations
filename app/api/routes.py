@@ -569,7 +569,7 @@ async def process_course_job(
                 return
 
             context_text = json.dumps(input_data, ensure_ascii=False, indent=2)
-            ai = ClaudeService()
+            ai = ClaudeService(usage_context={"kind": "outline", "job_id": job_id, "zoho_record_id": zoho_record_id})
             # Outline pipeline with optional context profiling + research helper notes.
             logger.info("Outline generation started | job_id=%s", str(job_id))
             learning_objectives = await wait_for(ai.build_learning_objectives(context_text), timeout=600)
@@ -962,7 +962,7 @@ async def refine_course(
 
     # Call AI (structured refine first, fallback to text refine) — no DB session held here
     try:
-        ai = ClaudeService()
+        ai = ClaudeService(usage_context={"kind": "refine", "course_id": course_uuid, "zoho_record_id": rid})
         try:
             logger.info("Refine AI started with structured mode | zoho_record_id=%s", rid)
             refined_payload = await wait_for(
@@ -1171,7 +1171,7 @@ async def refine_course_by_zoho(
 
     # Call AI (structured refine first, fallback to text refine)
     try:
-        ai = ClaudeService()
+        ai = ClaudeService(usage_context={"kind": "refine", "course_id": course_uuid, "zoho_record_id": zoho_record_id})
         try:
             logger.info("Refine AI started with structured mode | zoho_record_id=%s", zoho_record_id)
             refined_payload = await wait_for(

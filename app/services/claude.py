@@ -10,6 +10,7 @@ import httpx
 
 from app.core.config import settings
 from app.schemas.outline_payload import CourseOutlinePayload
+from app.services.usage_log import record_usage_in_background
 from app.services.outline_ai_addons import (
     context_requests_ai_integration,
     outline_text_has_ai_addons,
@@ -920,7 +921,9 @@ Rules:
 
 
 class ClaudeService:
-    def __init__(self) -> None:
+    def __init__(self, usage_context: dict[str, Any] | None = None) -> None:
+        # When set (outline generation / refinement), each Anthropic call's token usage is stored in llm_usage.
+        self.usage_context = usage_context
         self.provider = str(getattr(settings, "AI_PROVIDER", "anthropic") or "anthropic").strip().lower()
         self.api_key = settings.ANTHROPIC_API_KEY
         self.base_url = settings.ANTHROPIC_BASE_URL.rstrip("/")
@@ -1087,6 +1090,13 @@ class ClaudeService:
 
                     data = response.json()
                     _log_anthropic_usage(label, model_name, data, structured="output_config" in payload)
+                    record_usage_in_background(
+                        self.usage_context,
+                        label=label,
+                        model=model_name,
+                        data=data,
+                        structured="output_config" in payload,
+                    )
                     content_blocks = data.get("content", [])
                     if not isinstance(content_blocks, list) or not content_blocks:
                         raise RuntimeError("Claude returned empty content.")

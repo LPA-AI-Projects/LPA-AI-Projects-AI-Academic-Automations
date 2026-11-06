@@ -14,6 +14,8 @@ from app.api.slides import router as slides_router
 from app.api.assessments import router as assessments_router
 from app.api.courseware_assessments import router as courseware_assessments_router
 from app.api.cost_dashboard import mount_cost_dashboard
+from app.api.cost_dashboard_api import router as cost_dashboard_router
+from app.models import usage as _usage_models  # noqa: F401  (registers the llm_usage table)
 from app.core.config import settings as _dashboard_settings
 from app.core.database import Base, engine
 from app.core.storage_paths import ensure_storage_dirs, pdfs_dir, ppts_dir
@@ -114,6 +116,7 @@ app.include_router(bitrix_router)
 app.include_router(slides_router)
 app.include_router(assessments_router)
 app.include_router(courseware_assessments_router)
+app.include_router(cost_dashboard_router)
 
 # ── Cost dashboard: built SPA served at /cost-dashboard (skipped when dashboard/dist is absent) ──
 if _dashboard_settings.COST_DASHBOARD_ENABLED:

@@ -1,14 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
-import { BarChart3, Database, Menu, Moon, RotateCcw, Scale, Sun, TriangleAlert } from "lucide-react";
+import { Link, useRouterState } from "@tanstack/react-router";
+import { BarChart3, CalendarDays, Database, ListChecks, Menu, Moon, RotateCcw, Scale, Sigma, Sun, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useData } from "@/lib/cost/data";
 import { useStore } from "@/lib/cost/store";
 import { toast } from "sonner";
 
 const NAV = [
   { to: "/", label: "Cost Analysis", icon: BarChart3 },
   { to: "/compare", label: "Price Comparison", icon: Scale },
+  { to: "/requests", label: "Requests", icon: ListChecks },
+  { to: "/total", label: "Total", icon: Sigma },
   { to: "/settings", label: "Data & Settings", icon: Database },
 ] as const;
 
@@ -73,9 +77,31 @@ function NavList({ onNav }: { onNav?: () => void }) {
   );
 }
 
+function MonthFilter() {
+  const { months, month, setMonth, connected } = useData();
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b bg-card px-4 py-2 text-sm">
+      <CalendarDays className="h-4 w-4 text-muted-foreground" />
+      <span className="text-muted-foreground">Month</span>
+      <Select value={month} onValueChange={setMonth} disabled={!months.length}>
+        <SelectTrigger aria-label="Month filter" className="h-8 w-[170px]"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All months</SelectItem>
+          {months.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      {!connected && (
+        <Link to="/settings" className="text-xs text-primary hover:underline">Connect the database to filter by month</Link>
+      )}
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { dark, toggle } = useTheme();
   const [open, setOpen] = useState(false);
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const showMonth = !/\/(compare|settings|total)\/?$/.test(path);
   return (
     <div className="flex min-h-screen bg-background">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-sidebar-border bg-sidebar md:block">
@@ -97,6 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         </div>
+        {showMonth && <MonthFilter />}
         <div className="flex items-center gap-2 border-b px-4 py-2 md:hidden">
           <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open menu">
             <Menu className="h-5 w-5" />

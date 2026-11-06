@@ -3,6 +3,8 @@ import { breakEvenHitRate, compute, monthlyActual, projectMonths, recordCost, re
 import { PRODUCTION_MODEL_ID, defaultState } from "./model";
 import { parseLogs } from "./logs";
 import { STORAGE_KEY, loadState, mergeState, parseOutlineLogs } from "./store";
+import type { RequestItem, Summary } from "./api";
+import { monthlyCosts, priceForModel, requestCost, sumMonths, usageCost } from "./dbcost";
 
 const s = defaultState();
 const sonnet = s.prices[0]!;
@@ -150,5 +152,62 @@ describe("saved settings survive a reload", () => {
     expect(loaded.scenario.outlines).toBe(321);
     delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
     expect(loadState().scenario.outlines).toBe(defaultState().scenario.outlines);
+  });
+});
+
+describe("database costs", () => {
+  const st = defaultState();
+  const sonnet = st.prices.find((x) => x.id === "sonnet-4-6")!;
+  const est = compute(st, sonnet);
+  const counts = (o: number, c: number, f: number, r: number) => ({ outlines: o, completed: c, failed: f, other: o - c - f, refines: r });
+  const summary = (usage: Summary["usage"] = []): Summary => ({
+    generated_at: "",
+    months: ["2026-10", "2026-11"],
+    by_month: [
+      { month: "2026-10", zoho: counts(10, 8, 2, 3), bitrix: counts(5, 5, 0, 2) },
+      { month: "2026-11", zoho: counts(4, 4, 0, 0), bitrix: counts(2, 2, 0, 1) },
+    ],
+    usage,
+    usage_recording: { available: usage.length > 0, first_recorded: null },
+  });
+
+  it("with no recorded usage every completed outline and refinement is estimated", () => {
+    const rows = monthlyCosts(summary(), st.prices, sonnet, "5m", est.perOutline, est.perRefine);
+    const oct = rows[0]!;
+    expect(oct.completed).toBe(13);
+    expect(oct.failed).toBe(2);
+    expect(oct.refines).toBe(5);
+    expect(oct.recorded).toBe(0);
+    expect(oct.estimated).toBeCloseTo(13 * est.perOutline + 5 * est.perRefine, 10);
+    expect(sumMonths(rows).outlines).toBe(21);
+  });
+
+  it("recorded usage is priced exactly and removes those requests from the estimate", () => {
+    const u = { month: "2026-11", kind: "outline", label: "learning_objectives", model: "claude-sonnet-4-6", calls: 4, input: 1000, output: 900, cache_write: 1200, cache_read: 0, searches: 0, jobs: 4 };
+    const r = { ...u, kind: "refine", label: "refine_outline", calls: 1, jobs: 0, input: 7000, output: 6000, cache_write: 0, cache_read: 0 };
+    const nov = monthlyCosts(summary([u, r]), st.prices, sonnet, "5m", est.perOutline, est.perRefine)[1]!;
+    expect(nov.recorded).toBeCloseTo(usageCost(u, sonnet, "5m") + usageCost(r, sonnet, "5m"), 10);
+    expect(nov.recordedOutlines).toBe(4);
+    expect(nov.estimated).toBeCloseTo(Math.max(0, 6 - 4) * est.perOutline + Math.max(0, 1 - 1) * est.perRefine, 10);
+  });
+
+  it("matches a logged model name to its price row, falling back to production", () => {
+    expect(priceForModel("claude-sonnet-5-5", st.prices, sonnet).id).toBe("sonnet-5-5");
+    expect(priceForModel("mystery-model", st.prices, sonnet).id).toBe("sonnet-4-6");
+  });
+
+  it("prices one request from recorded tokens, or estimates it", () => {
+    const base: RequestItem = { id: "1", created_at: null, source: "zoho", record_id: "r", course_name: "", company_name: "", status: "completed", failed: false, versions: 3, refinements: 2, pdf_url: null, usage: { outline: null, refine: null } };
+    const estimated = requestCost(base, sonnet, "5m", est.perOutline, est.perRefine);
+    expect(estimated.exact).toBe(false);
+    expect(estimated.total).toBeCloseTo(est.perOutline + 2 * est.perRefine, 10);
+    const tokens = { calls: 4, input: 1000, output: 900, cache_write: 0, cache_read: 0, searches: 0 };
+    const mixed = requestCost({ ...base, usage: { outline: tokens, refine: null } }, sonnet, "5m", est.perOutline, est.perRefine);
+    expect(mixed.outlineRecorded).toBe(true);
+    expect(mixed.outline).toBeCloseTo(usageCost(tokens, sonnet, "5m"), 10);
+    expect(mixed.exact).toBe(false); // refinements still estimated
+    const failed = requestCost({ ...base, status: "failed", refinements: 0 }, sonnet, "5m", est.perOutline, est.perRefine);
+    expect(failed.total).toBe(0);
+    expect(failed.exact).toBe(true);
   });
 });
