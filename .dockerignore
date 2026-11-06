@@ -18,3 +18,6 @@ tmp
 .ruff_cache
 htmlcov
 .coverage
+
+dashboard/node_modules
+dashboard/dist

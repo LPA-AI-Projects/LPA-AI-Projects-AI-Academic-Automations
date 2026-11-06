@@ -5,7 +5,8 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import "./styles.css";
 
-const router = createRouter({ routeTree, defaultPreload: "intent" });
+// Must match `base` in vite.config.ts and the mount path in app/api/cost_dashboard.py.
+const router = createRouter({ routeTree, basepath: "/cost-dashboard", defaultPreload: "intent" });
 
 declare module "@tanstack/react-router" {
   interface Register {

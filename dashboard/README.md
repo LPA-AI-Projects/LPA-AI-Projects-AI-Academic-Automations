@@ -18,9 +18,12 @@ price is blank are ignored until you enter one.
 ```bash
 cd dashboard
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        # http://localhost:5173/cost-dashboard/
 npm test           # cost-rule unit tests
 npm run build      # type-check + production build into dist/
 ```
+
+The backend serves the production build at `/cost-dashboard` (see `app/api/cost_dashboard.py`; the Dockerfile
+builds it in a Node stage). The app is a client-side single-page app mounted under that base path.
 
 The cost formulas live in `src/lib/cost/calc.ts` (each page has a "How this is calculated" section).

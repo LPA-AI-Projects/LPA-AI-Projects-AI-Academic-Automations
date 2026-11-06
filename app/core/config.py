@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Constrain outline/refine JSON with a schema (output_config.format) to avoid invalid-JSON retries.
     # If Anthropic rejects the schema the call is retried without it; set false to disable.
     ANTHROPIC_STRUCTURED_OUTPUT: bool = True
+
+    # Cost dashboard (dashboard/dist) served at /cost-dashboard. Empty dist dir = <repo>/dashboard/dist.
+    COST_DASHBOARD_ENABLED: bool = True
+    COST_DASHBOARD_DIST_DIR: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com"
@@ -280,6 +284,7 @@ class Settings(BaseSettings):
         "AI_FALLBACK_TO_OPENAI",
         "ANTHROPIC_PROMPT_CACHING",
         "ANTHROPIC_STRUCTURED_OUTPUT",
+        "COST_DASHBOARD_ENABLED",
         mode="before",
     )
     @classmethod
