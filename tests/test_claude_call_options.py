@@ -169,6 +169,12 @@ def test_unrelated_400_is_not_swallowed(fake_http):
     assert len(fake_http.calls) == 1
 
 
+def test_structured_output_and_caching_are_on_by_default():
+    fields = claude_mod.settings.__class__.model_fields
+    assert fields["ANTHROPIC_STRUCTURED_OUTPUT"].default is True
+    assert fields["ANTHROPIC_PROMPT_CACHING"].default is True
+
+
 def test_json_outline_methods_default_to_long_timeout():
     for name in ("build_roi_course_outline_json", "refine_course_outline_json", "normalize_to_payload"):
         default = inspect.signature(getattr(ClaudeService, name)).parameters["timeout_s"].default

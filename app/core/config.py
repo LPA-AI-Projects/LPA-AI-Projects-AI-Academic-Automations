@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     # Mark system prompts as cacheable so repeat calls within ~5 min bill the cached part at a discount.
     ANTHROPIC_PROMPT_CACHING: bool = True
     # Constrain outline/refine JSON with a schema (output_config.format) to avoid invalid-JSON retries.
-    ANTHROPIC_STRUCTURED_OUTPUT: bool = False
+    # If Anthropic rejects the schema the call is retried without it; set false to disable.
+    ANTHROPIC_STRUCTURED_OUTPUT: bool = True
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com"
