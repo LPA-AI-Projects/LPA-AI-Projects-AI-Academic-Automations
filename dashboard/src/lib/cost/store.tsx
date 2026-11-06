@@ -3,7 +3,7 @@ import { defaultState, type AppState, type PriceRow } from "./model";
 import { isPriced } from "./calc";
 import { aggregate, parseLogs } from "./logs";
 
-const KEY = "outline-ai-cost-console:v1";
+const KEY = "outline-ai-cost-console:v2"; // v2: verified prices + token factor
 
 interface Ctx {
   state: AppState;

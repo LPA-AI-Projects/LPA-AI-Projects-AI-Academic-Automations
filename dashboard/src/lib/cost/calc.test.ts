@@ -39,6 +39,24 @@ describe("cost rules", () => {
   });
 });
 
+describe("verified prices and tokenizer factor", () => {
+  const byId = (id: string) => s.prices.find((x) => x.id === id)!;
+  it("Sonnet 5.5 uses $2/$10, 0.05x cache reads and 512-token minimum", () => {
+    const p = byId("sonnet-5-5");
+    expect([p.input, p.output, p.readMult, p.minCache]).toEqual([2, 10, 0.05, 512]);
+  });
+  it("token factor scales tokens, so the 33% cheaper list price is only ~13% cheaper", () => {
+    const a = compute(s, byId("sonnet-4-6")).perOutline;
+    const b = compute(s, byId("sonnet-5-5")).perOutline;
+    expect(b / a).toBeGreaterThan(0.8);
+    expect(b / a).toBeLessThan(0.95);
+  });
+  it("token factor 1 reproduces the list-price arithmetic", () => {
+    const p = { ...byId("sonnet-4-6"), tokenFactor: 1 };
+    expect(stepCost(json, p, { caching: false, hitRate: 0.3, window: "5m" }).output).toBeCloseTo(6000 * 15e-6, 10);
+  });
+});
+
 describe("log parser", () => {
   it("ignores prefix and treats None as 0", () => {
     const { records } = parseLogs(

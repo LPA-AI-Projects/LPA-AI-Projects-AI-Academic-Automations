@@ -42,16 +42,17 @@ export function breakEvenHitRate(p: PriceRow, w: "5m" | "1h") {
 }
 
 export function cacheEligible(step: Pick<Step, "system">, p: PriceRow, caching: boolean) {
-  return caching && step.system > 0 && step.system >= p.minCache;
+  return caching && step.system > 0 && step.system * (p.tokenFactor ?? 1) >= p.minCache;
 }
 
 /** Cost of `step.calls` calls of a step (one attempt). */
 export function stepCost(step: Step, p: PriceRow, o: CalcOpts): Components {
   const ip = (p.input ?? 0) / 1e6;
   const op = (p.output ?? 0) / 1e6;
-  const C = step.system;
-  const U = step.input + step.searchInput;
-  const O = step.output * (o.outputMult ?? 1);
+  const tf = p.tokenFactor ?? 1;
+  const C = step.system * tf;
+  const U = (step.input + step.searchInput) * tf;
+  const O = step.output * (o.outputMult ?? 1) * tf;
   const S = o.searchesOverride != null && step.searches > 0 ? o.searchesOverride : step.searches;
   const c = zero();
   if (cacheEligible(step, p, o.caching)) {
@@ -107,8 +108,9 @@ export function slidesCost(s: SlidesProfile, p: PriceRow, outputMult = 1): Compo
   if (!s.include) return c;
   const ip = (p.input ?? 0) / 1e6;
   const op = (p.output ?? 0) / 1e6;
-  const inTok = s.plannerInput + s.slideCalls * (s.slideSystem + s.slideInput) + s.validatorInput;
-  const outTok = s.plannerOutput + s.slideCalls * s.slideOutput + s.validatorOutput;
+  const tf = p.tokenFactor ?? 1;
+  const inTok = (s.plannerInput + s.slideCalls * (s.slideSystem + s.slideInput) + s.validatorInput) * tf;
+  const outTok = (s.plannerOutput + s.slideCalls * s.slideOutput + s.validatorOutput) * tf;
   const k = s.modules * s.retryFactor;
   c.uncached = inTok * ip * k;
   c.output = outTok * op * outputMult * k;

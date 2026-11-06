@@ -9,6 +9,8 @@ export interface PriceRow {
   readMult: number;
   minCache: number;
   searchPer1k: number | null;
+  /** Token-count multiplier vs. the older tokenizer (Claude 4.7+ produce ~30% more tokens for the same text). */
+  tokenFactor: number;
   notes: string;
   lastVerified: string;
   qualityNotes: string;
@@ -97,36 +99,39 @@ const price = (
   output: number | null,
   minCache: number,
   notes = "",
+  o: Partial<Pick<PriceRow, "writeMult5m" | "writeMult1h" | "readMult" | "tokenFactor">> = {},
 ): PriceRow => ({
   id,
   model,
   provider,
   input,
   output,
-  writeMult5m: 1.25,
-  writeMult1h: 2,
-  readMult: 0.1,
+  writeMult5m: o.writeMult5m ?? 1.25,
+  writeMult1h: o.writeMult1h ?? 2,
+  readMult: o.readMult ?? 0.1,
   minCache,
   searchPer1k: provider === "Anthropic" ? 10 : null,
+  tokenFactor: o.tokenFactor ?? 1,
   notes,
-  lastVerified: "",
+  lastVerified: input === null ? "" : VERIFIED,
   qualityNotes: "",
 });
 
-const NEEDS = "Enter price from pricing page";
+const VERIFIED = "2026-11-06";
+const NEW_TOKENIZER = "Newer tokenizer: ~30% more tokens for the same text (token factor 1.3).";
 
 export function defaultState(): AppState {
   return {
     version: 1,
     prices: [
-      price("sonnet-4-6", "Claude Sonnet 4.6", "Anthropic", 3, 15, 1024),
-      price("haiku-4-5", "Claude Haiku 4.5", "Anthropic", 1, 5, 4096),
-      price("opus-4-5", "Claude Opus 4.5", "Anthropic", 5, 25, 4096),
-      price("sonnet-5-5", "Claude Sonnet 5.5", "Anthropic", null, null, 1024, NEEDS),
-      price("haiku-5-5", "Claude Haiku 5.5", "Anthropic", null, null, 4096, NEEDS),
-      price("opus-5-5", "Claude Opus 5.5", "Anthropic", null, null, 4096, NEEDS),
-      price("fable-5-1", "Claude Fable 5.1", "Anthropic", null, null, 1024, NEEDS),
-      price("gpt-5-4", "OpenAI GPT-5.4", "OpenAI", null, null, 1024, NEEDS),
+      price("sonnet-4-6", "Claude Sonnet 4.6", "Anthropic", 3, 15, 1024, "Current model. Anthropic pricing page."),
+      price("haiku-4-5", "Claude Haiku 4.5", "Anthropic", 1, 5, 4096, "Anthropic pricing page."),
+      price("opus-4-5", "Claude Opus 4.5", "Anthropic", 5, 25, 4096, "Anthropic pricing page."),
+      price("sonnet-5-5", "Claude Sonnet 5.5", "Anthropic", 2, 10, 512, `Anthropic pricing page. Cache reads 0.05x. ${NEW_TOKENIZER}`, { readMult: 0.05, tokenFactor: 1.3 }),
+      price("haiku-5-5", "Claude Haiku 5.5", "Anthropic", 0.1, 0.5, 512, `Anthropic pricing page, prompts up to 100k tokens ($0.50 / $2.50 above). ${NEW_TOKENIZER}`, { tokenFactor: 1.3 }),
+      price("opus-5-5", "Claude Opus 5.5", "Anthropic", 4, 20, 512, `Anthropic pricing page. Cache reads 0.05x. ${NEW_TOKENIZER}`, { readMult: 0.05, tokenFactor: 1.3 }),
+      price("fable-5-1", "Claude Fable 5.1", "Anthropic", 10, 50, 512, `Anthropic pricing page. Cache reads 0.025x. ${NEW_TOKENIZER}`, { readMult: 0.025, tokenFactor: 1.3 }),
+      price("gpt-5-4", "OpenAI GPT-5.4", "OpenAI", 2.5, 15, 1024, "From third-party listings (verify on openai.com/api/pricing). Caching is automatic: no write fee, cached input ~0.1x. Different tokenizer.", { writeMult5m: 1, writeMult1h: 1 }),
     ],
     steps: [
       { id: "lo", job: "outline", name: "Learning objectives", label: "learning_objectives", kind: "once", calls: 1, system: 1200, input: 1300, searchInput: 0, output: 1000, searches: 0, include: true },

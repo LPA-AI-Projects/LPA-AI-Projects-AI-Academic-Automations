@@ -35,7 +35,7 @@ export function PriceSheetEditor() {
               ...s,
               prices: [
                 ...s.prices,
-                { id: uid(), model: "New model", provider: "Anthropic", input: null, output: null, writeMult5m: 1.25, writeMult1h: 2, readMult: 0.1, minCache: 1024, searchPer1k: 10, notes: "Enter price from pricing page", lastVerified: "", qualityNotes: "" },
+                { id: uid(), model: "New model", provider: "Anthropic", input: null, output: null, writeMult5m: 1.25, writeMult1h: 2, readMult: 0.1, minCache: 1024, searchPer1k: 10, tokenFactor: 1, notes: "Enter price from pricing page", lastVerified: "", qualityNotes: "" },
               ],
             }))
           }
@@ -59,6 +59,7 @@ export function PriceSheetEditor() {
               <th className={th}>Read ×</th>
               <th className={th}>Min cacheable</th>
               <th className={th}>Search $/1k</th>
+              <th className={th}>Token ×</th>
               <th className={th}>Notes</th>
               <th className={th}>Last verified</th>
               <th className={th} />
@@ -98,6 +99,7 @@ export function PriceSheetEditor() {
                   <td className={td}><NumInput value={p.readMult} onChange={(v) => upd(p.id, { readMult: v ?? 0 })} /></td>
                   <td className={td}><NumInput value={p.minCache} onChange={(v) => upd(p.id, { minCache: v ?? 0 })} /></td>
                   <td className={td}><NumInput nullable value={p.searchPer1k} placeholder="n/a" onChange={(v) => upd(p.id, { searchPer1k: v })} /></td>
+                  <td className={td}><NumInput value={p.tokenFactor ?? 1} onChange={(v) => upd(p.id, { tokenFactor: v ?? 1 })} aria-label="Token factor" /></td>
                   <td className={td}>
                     <div className="flex items-center gap-1.5">
                       {!priced && <Badge variant="warning" className="whitespace-nowrap">Enter price from pricing page</Badge>}
