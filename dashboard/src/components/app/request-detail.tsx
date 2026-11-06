@@ -4,13 +4,14 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ApiError, apiGet, fmtDate, type RequestDetail } from "@/lib/cost/api";
 import { useData } from "@/lib/cost/data";
-import { usageCost } from "@/lib/cost/dbcost";
+import { priceForModel, usageCost } from "@/lib/cost/dbcost";
 import { int, money } from "@/lib/cost/format";
 import type { PriceRow } from "@/lib/cost/model";
 import { SourceBadge, StatusBadge } from "./request-badges";
 
 export interface CostContext {
   price: PriceRow;
+  prices: PriceRow[];
   window: "5m" | "1h";
   perOutline: number;
   perRefine: number;
@@ -52,7 +53,8 @@ export function RequestDetailSheet({ id, onClose, cost }: { id: string | null; o
     };
   }, [id, apiKey]);
 
-  const callsCost = detail?.usage_calls.reduce((a, c) => a + usageCost(c, cost.price, cost.window), 0) ?? 0;
+  const priceOf = (model: string) => priceForModel(model, cost.prices, cost.price);
+  const callsCost = detail?.usage_calls.reduce((a, c) => a + usageCost(c, priceOf(c.model), cost.window), 0) ?? 0;
   const refinements = detail?.versions.filter((v) => v.is_refinement) ?? [];
 
   return (
@@ -154,19 +156,22 @@ export function RequestDetailSheet({ id, onClose, cost }: { id: string | null; o
                       <tbody>
                         {detail.usage_calls.map((c, i) => (
                           <tr key={i} className="border-b last:border-0">
-                            <td className="whitespace-nowrap px-2 py-1.5">{c.label}</td>
+                            <td className="whitespace-nowrap px-2 py-1.5">
+                              {c.label}
+                              <div className="text-[10px] text-muted-foreground">{c.model}</div>
+                            </td>
                             <td className="px-2">{int(c.input)}</td>
                             <td className="px-2">{int(c.cache_write)} / {int(c.cache_read)}</td>
                             <td className="px-2">{int(c.output)}</td>
                             <td className="px-2">{c.searches}</td>
-                            <td className="px-2 font-medium">{money(usageCost(c, cost.price, cost.window))}</td>
+                            <td className="px-2 font-medium">{money(usageCost(c, priceOf(c.model), cost.window))}</td>
                           </tr>
                         ))}
                         <tr className="bg-muted/40 font-semibold"><td className="px-2 py-1.5" colSpan={5}>Recorded total</td><td className="px-2">{money(callsCost)}</td></tr>
                       </tbody>
                     </table>
                   </div>
-                  <p className="text-xs text-muted-foreground">Priced from the tokens Anthropic billed, with the production model's prices.</p>
+                  <p className="text-xs text-muted-foreground">Each call uses that model's list price. Claude Sonnet 4.6 is $3 input and $15 output per million tokens; cache writes are 1.25× and cache reads 0.1× the input price. Web search is $10 per 1,000 searches.</p>
                 </div>
               ) : (
                 <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">

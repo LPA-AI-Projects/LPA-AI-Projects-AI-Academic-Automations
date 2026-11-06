@@ -241,12 +241,23 @@ async def _version_counts(db: AsyncSession, course_ids: list[uuid.UUID]) -> dict
     return {r[0]: (int(r[1]), int(r[2])) for r in rows}
 
 
-async def _usage_by_owner(db: AsyncSession, col: Any, ids: list[uuid.UUID], kind: str) -> dict[uuid.UUID, dict[str, int]]:
+def _sum_usage_parts(parts: list[dict[str, Any]]) -> dict[str, int]:
+    keys = ("calls", "input", "output", "cache_write", "cache_read", "searches")
+    total = {k: 0 for k in keys}
+    for part in parts:
+        for k in keys:
+            total[k] += int(part[k])
+    return total
+
+
+async def _usage_by_owner(db: AsyncSession, col: Any, ids: list[uuid.UUID], kind: str) -> dict[uuid.UUID, dict[str, Any]]:
+    """owner id -> {totals, parts}. Parts keep the billed model so each rate can be applied."""
     if not ids:
         return {}
     stmt = (
         select(
             col,
+            LlmUsage.model,
             func.count(),
             func.coalesce(func.sum(LlmUsage.input_tokens), 0),
             func.coalesce(func.sum(LlmUsage.output_tokens), 0),
@@ -255,13 +266,25 @@ async def _usage_by_owner(db: AsyncSession, col: Any, ids: list[uuid.UUID], kind
             func.coalesce(func.sum(LlmUsage.web_searches), 0),
         )
         .where(col.in_(ids), LlmUsage.kind == kind)
-        .group_by(col)
+        .group_by(col, LlmUsage.model)
     )
     if not await usage_table_exists(db):
         return {}
     rows = (await db.execute(stmt)).all()
-    keys = ("calls", "input", "output", "cache_write", "cache_read", "searches")
-    return {r[0]: {k: int(v) for k, v in zip(keys, r[1:])} for r in rows}
+    grouped: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    for owner, model, calls, inp, out, cw, cr, searches in rows:
+        grouped.setdefault(owner, []).append(
+            {
+                "model": str(model or ""),
+                "calls": int(calls),
+                "input": int(inp),
+                "output": int(out),
+                "cache_write": int(cw),
+                "cache_read": int(cr),
+                "searches": int(searches),
+            }
+        )
+    return {owner: {"totals": _sum_usage_parts(parts), "parts": parts} for owner, parts in grouped.items()}
 
 
 @router.get("/requests", summary="Paginated list of outline requests")
@@ -312,6 +335,8 @@ async def list_requests(
     for j in jobs:
         course, company = summarize_names(j.payload_json)
         versions, refinements = counts.get(j.course_id, (0, 0)) if j.course_id else (0, 0)
+        outline_usage = out_usage.get(j.id)
+        refine_usage = ref_usage.get(j.course_id) if j.course_id else None
         items.append(
             {
                 "id": str(j.id),
@@ -325,7 +350,12 @@ async def list_requests(
                 "versions": versions,
                 "refinements": refinements,
                 "pdf_url": j.pdf_url,
-                "usage": {"outline": out_usage.get(j.id), "refine": ref_usage.get(j.course_id) if j.course_id else None},
+                "usage": {
+                    "outline": outline_usage["totals"] if outline_usage else None,
+                    "refine": refine_usage["totals"] if refine_usage else None,
+                    "outline_parts": outline_usage["parts"] if outline_usage else [],
+                    "refine_parts": refine_usage["parts"] if refine_usage else [],
+                },
             }
         )
     return {"total": total, "limit": limit, "offset": offset, "items": items}

@@ -1,13 +1,17 @@
-import type { ByMonth, RequestItem, Summary, UsageAgg } from "./api";
+import type { ByMonth, RequestItem, Summary, UsageAgg, UsagePart } from "./api";
 import { writeMult } from "./calc";
 import type { PriceRow } from "./model";
 
 type Tokens = { input: number; output: number; cache_write: number; cache_read: number; searches: number };
 
-/** Price row for a logged model name such as "claude-sonnet-4-6"; the production row when unknown. */
+const norm = (s: string) => s.toLowerCase().replaceAll(".", "-");
+
+/** Price row for a logged model name such as "claude-sonnet-4-6"; the production row when unknown. Longest id wins so "sonnet-4-6" is not shadowed by a shorter id. */
 export function priceForModel(model: string, prices: PriceRow[], fallback: PriceRow): PriceRow {
-  const m = model.toLowerCase();
-  return prices.find((p) => p.input != null && p.output != null && m.includes(p.id)) ?? fallback;
+  const m = norm(model);
+  const hits = prices.filter((p) => p.input != null && p.output != null && m.includes(norm(p.id)));
+  hits.sort((a, b) => b.id.length - a.id.length);
+  return hits[0] ?? fallback;
 }
 
 /** Cost of recorded token usage (real tokens, so no token factor). */
@@ -123,14 +127,28 @@ export interface RequestCost {
   exact: boolean;
 }
 
+function partsCost(parts: UsagePart[] | undefined, prices: PriceRow[] | undefined, fallback: PriceRow, window: "5m" | "1h"): number | null {
+  if (!parts?.length || !prices) return null;
+  return parts.reduce((a, part) => a + usageCost(part, priceForModel(part.model, prices, fallback), window), 0);
+}
+
 /** Cost of one request: recorded tokens when available, otherwise the estimated unit cost. */
-export function requestCost(item: RequestItem, price: PriceRow, window: "5m" | "1h", perOutline: number, perRefine: number): RequestCost {
+export function requestCost(
+  item: RequestItem,
+  price: PriceRow,
+  window: "5m" | "1h",
+  perOutline: number,
+  perRefine: number,
+  prices?: PriceRow[],
+): RequestCost {
   const o = item.usage.outline;
   const r = item.usage.refine;
-  const outlineRecorded = !!o && o.calls > 0;
-  const refineRecorded = !!r && r.calls > 0;
-  const outline = outlineRecorded ? usageCost(o, price, window) : item.status === "completed" ? perOutline : 0;
-  const refine = refineRecorded ? usageCost(r, price, window) : item.refinements * perRefine;
+  const outlineFromParts = partsCost(item.usage.outline_parts, prices, price, window);
+  const refineFromParts = partsCost(item.usage.refine_parts, prices, price, window);
+  const outlineRecorded = outlineFromParts != null || (!!o && o.calls > 0);
+  const refineRecorded = refineFromParts != null || (!!r && r.calls > 0);
+  const outline = outlineFromParts ?? (outlineRecorded ? usageCost(o, price, window) : item.status === "completed" ? perOutline : 0);
+  const refine = refineFromParts ?? (refineRecorded ? usageCost(r, price, window) : item.refinements * perRefine);
   const outlineExact = outlineRecorded || item.status !== "completed";
   const refineExact = refineRecorded || item.refinements === 0;
   return { total: outline + refine, outline, refine, outlineRecorded, refineRecorded, exact: outlineExact && refineExact };

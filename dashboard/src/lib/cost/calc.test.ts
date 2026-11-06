@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { breakEvenHitRate, compute, monthlyActual, projectMonths, recordCost, retryStats, stepCost } from "./calc";
 import { PRODUCTION_MODEL_ID, defaultState } from "./model";
 import { parseLogs } from "./logs";
-import { STORAGE_KEY, loadState, mergeState, parseOutlineLogs } from "./store";
+import { STORAGE_KEY, loadState, mergePrices, mergeState, parseOutlineLogs } from "./store";
 import type { RequestItem, Summary } from "./api";
 import { monthlyCosts, priceForModel, requestCost, sumMonths, usageCost } from "./dbcost";
 
@@ -193,7 +193,21 @@ describe("database costs", () => {
 
   it("matches a logged model name to its price row, falling back to production", () => {
     expect(priceForModel("claude-sonnet-5-5", st.prices, sonnet).id).toBe("sonnet-5-5");
+    expect(priceForModel("gpt-5.4", st.prices, sonnet).id).toBe("gpt-5-4");
     expect(priceForModel("mystery-model", st.prices, sonnet).id).toBe("sonnet-4-6");
+  });
+
+  it("prices a request from each model's recorded tokens", () => {
+    const base: RequestItem = { id: "1", created_at: null, source: "zoho", record_id: "r", course_name: "", company_name: "", status: "completed", failed: false, versions: 1, refinements: 0, pdf_url: null, usage: { outline: { calls: 1, input: 1_000_000, output: 0, cache_write: 0, cache_read: 0, searches: 0 }, refine: null, outline_parts: [{ model: "claude-sonnet-4-6", calls: 1, input: 1_000_000, output: 0, cache_write: 0, cache_read: 0, searches: 0 }] } };
+    const c = requestCost(base, sonnet, "5m", est.perOutline, est.perRefine, st.prices);
+    expect(c.exact).toBe(true);
+    expect(c.outline).toBeCloseTo(3, 10);
+  });
+
+  it("keeps official prices when a saved sheet has stale rates", () => {
+    const merged = mergePrices([{ id: "sonnet-4-6", model: "old", provider: "Anthropic", input: 99, output: 99, writeMult5m: 1, writeMult1h: 1, readMult: 1, minCache: 1, searchPer1k: 0, tokenFactor: 1, notes: "", lastVerified: "", qualityNotes: "" }], st.prices);
+    expect(merged.find((p) => p.id === "sonnet-4-6")!.input).toBe(3);
+    expect(merged.find((p) => p.id === "sonnet-4-6")!.output).toBe(15);
   });
 
   it("prices one request from recorded tokens, or estimates it", () => {

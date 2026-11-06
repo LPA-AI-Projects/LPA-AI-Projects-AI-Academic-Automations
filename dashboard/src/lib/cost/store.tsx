@@ -35,6 +35,17 @@ function pickKnown<T extends object>(defaults: T, raw: unknown): T {
   return out as T;
 }
 
+/** Official rows always win, so a saved sheet cannot keep an outdated Sonnet or Haiku rate. Extra custom rows are kept. */
+export function mergePrices(saved: unknown, defaults: PriceRow[]): PriceRow[] {
+  if (!Array.isArray(saved)) return defaults;
+  const known = new Set(defaults.map((p) => p.id));
+  const extras = saved.filter((row): row is PriceRow => {
+    if (!row || typeof row !== "object" || !("id" in row)) return false;
+    return !known.has(String((row as PriceRow).id));
+  });
+  return [...defaults, ...extras];
+}
+
 export function mergeState(raw: unknown): AppState {
   const d = defaultState();
   if (!raw || typeof raw !== "object") return d;
@@ -44,7 +55,7 @@ export function mergeState(raw: unknown): AppState {
     version: 1,
     scenario: pickKnown(d.scenario, r.scenario),
     compare: pickKnown(d.compare, r.compare),
-    prices: Array.isArray(r.prices) ? r.prices : d.prices,
+    prices: mergePrices(r.prices, d.prices),
     steps: Array.isArray(r.steps) ? r.steps.filter((s) => s.job === "outline" || s.job === "refine") : d.steps,
     fixed: Array.isArray(r.fixed) ? r.fixed : d.fixed,
     logText: typeof r.logText === "string" ? r.logText : "",

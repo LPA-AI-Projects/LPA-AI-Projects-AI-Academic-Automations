@@ -79,7 +79,7 @@ function RequestsTable() {
   }, [apiKey, month, source, status, refined, dq, offset]);
 
   const est = useMemo(() => (current ? compute(state, current) : null), [state, current]);
-  const cost: CostContext | null = current && est ? { price: current, window: state.scenario.window, perOutline: est.perOutline, perRefine: est.perRefine } : null;
+  const cost: CostContext | null = current && est ? { price: current, prices: state.prices, window: state.scenario.window, perOutline: est.perOutline, perRefine: est.perRefine } : null;
   if (!cost) return <EmptyState title="The production model has no price yet">Open Data & Settings → price sheet and fill in Claude Sonnet 4.6.</EmptyState>;
 
   const total = data?.total ?? 0;
@@ -141,7 +141,7 @@ function RequestsTable() {
               </thead>
               <tbody>
                 {(data?.items ?? []).map((r) => {
-                  const c = requestCost(r, cost.price, cost.window, cost.perOutline, cost.perRefine);
+                  const c = requestCost(r, cost.price, cost.window, cost.perOutline, cost.perRefine, cost.prices);
                   return (
                     <tr
                       key={r.id}

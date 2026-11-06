@@ -40,6 +40,10 @@ export interface UsageTotals {
   cache_read: number;
   searches: number;
 }
+/** Same tokens, split by the model that was actually billed. */
+export interface UsagePart extends UsageTotals {
+  model: string;
+}
 export type Source = "zoho" | "bitrix";
 export interface RequestItem {
   id: string;
@@ -53,7 +57,12 @@ export interface RequestItem {
   versions: number;
   refinements: number;
   pdf_url: string | null;
-  usage: { outline: UsageTotals | null; refine: UsageTotals | null };
+  usage: {
+    outline: UsageTotals | null;
+    refine: UsageTotals | null;
+    outline_parts?: UsagePart[];
+    refine_parts?: UsagePart[];
+  };
 }
 export interface RequestList {
   total: number;
