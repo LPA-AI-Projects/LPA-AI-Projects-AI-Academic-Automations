@@ -145,10 +145,13 @@ export function requestCost(
   const r = item.usage.refine;
   const outlineFromParts = partsCost(item.usage.outline_parts, prices, price, window);
   const refineFromParts = partsCost(item.usage.refine_parts, prices, price, window);
-  const outlineRecorded = outlineFromParts != null || (!!o && o.calls > 0);
-  const refineRecorded = refineFromParts != null || (!!r && r.calls > 0);
-  const outline = outlineFromParts ?? (outlineRecorded ? usageCost(o, price, window) : item.status === "completed" ? perOutline : 0);
-  const refine = refineFromParts ?? (refineRecorded ? usageCost(r, price, window) : item.refinements * perRefine);
+  const outlineTotals = o && o.calls > 0 ? o : null;
+  const refineTotals = r && r.calls > 0 ? r : null;
+  const outlineRecorded = outlineFromParts != null || outlineTotals != null;
+  const refineRecorded = refineFromParts != null || refineTotals != null;
+  const outline =
+    outlineFromParts ?? (outlineTotals ? usageCost(outlineTotals, price, window) : item.status === "completed" ? perOutline : 0);
+  const refine = refineFromParts ?? (refineTotals ? usageCost(refineTotals, price, window) : item.refinements * perRefine);
   const outlineExact = outlineRecorded || item.status !== "completed";
   const refineExact = refineRecorded || item.refinements === 0;
   return { total: outline + refine, outline, refine, outlineRecorded, refineRecorded, exact: outlineExact && refineExact };
