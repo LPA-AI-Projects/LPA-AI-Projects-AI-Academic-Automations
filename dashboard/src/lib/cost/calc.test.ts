@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { breakEvenHitRate, compute, retryStats, stepCost } from "./calc";
-import { defaultState } from "./model";
+import { breakEvenHitRate, compute, monthlyActual, projectMonths, recordCost, retryStats, stepCost } from "./calc";
+import { PRODUCTION_MODEL_ID, defaultState } from "./model";
 import { parseLogs } from "./logs";
+import { STORAGE_KEY, loadState, mergeState, parseOutlineLogs } from "./store";
 
 const s = defaultState();
 const sonnet = s.prices[0]!;
@@ -63,5 +64,91 @@ describe("log parser", () => {
       "2026-11-01 10:00:00 INFO app: Anthropic usage | label=outline_json model=claude-sonnet-4-6 input=300 output=5200 cache_write=4900 cache_read=None web_searches=0 stop=end_turn structured=False",
     );
     expect(records[0]).toMatchObject({ label: "outline_json", input: 300, output: 5200, cacheWrite: 4900, cacheRead: 0, date: "2026-11-01" });
+  });
+});
+
+describe("outline + refine only, locked model", () => {
+  it("has no assessment, slides or Gamma anywhere in the defaults", () => {
+    const d = defaultState();
+    expect(d.steps.every((x) => x.job === "outline" || x.job === "refine")).toBe(true);
+    expect(JSON.stringify(d)).not.toMatch(/assessment|slidesJobs|gamma/i);
+  });
+  it("structured output defaults to ON like the backend", () => {
+    expect(defaultState().scenario.structured).toBe(true);
+  });
+  it("saved settings cannot change the production model or bring back removed fields", () => {
+    const saved = { ...defaultState(), scenario: { ...defaultState().scenario, currentModelId: "opus-5-5", slidesJobs: 9 }, slides: { include: true } };
+    const m = mergeState(saved) as unknown as Record<string, unknown>;
+    const sc = m["scenario"] as Record<string, unknown>;
+    expect(Object.keys(sc)).not.toContain("currentModelId");
+    expect(Object.keys(sc)).not.toContain("slidesJobs");
+    expect(Object.keys(m)).not.toContain("slides");
+    expect(PRODUCTION_MODEL_ID).toBe("sonnet-4-6");
+  });
+  it("drops assessment steps from old saved profiles", () => {
+    const old = { ...defaultState(), steps: [...defaultState().steps, { ...defaultState().steps[0]!, id: "as", job: "assessment" }] };
+    expect(mergeState(old).steps.some((x) => x.id === "as")).toBe(false);
+  });
+});
+
+describe("monthly analysis", () => {
+  const st = defaultState();
+  const sonnet = st.prices.find((x) => x.id === "sonnet-4-6")!;
+  const r = compute(st, sonnet);
+
+  it("projects 12 months and the total is the sum of the months", () => {
+    const rows = projectMonths(st, r, 12, new Date(2026, 10, 15));
+    expect(rows).toHaveLength(12);
+    expect(rows[0]!.month).toBe("Nov 2026");
+    expect(rows[11]!.month).toBe("Oct 2027");
+    const sum = rows.reduce((a, x) => a + x.total, 0);
+    expect(rows[11]!.cumulative).toBeCloseTo(sum, 8);
+    expect(rows[0]!.total).toBeCloseTo(r.allIn, 8);
+  });
+  it("applies compound monthly growth to volumes", () => {
+    const g = { ...st, scenario: { ...st.scenario, monthlyGrowth: 10 } };
+    const rows = projectMonths(g, r, 3, new Date(2026, 0, 1));
+    expect(rows[1]!.outlines).toBeCloseTo(st.scenario.outlines * 1.1, 8);
+    expect(rows[2]!.outlines).toBeCloseTo(st.scenario.outlines * 1.21, 8);
+  });
+  it("prices a logged call from real tokens, with and without caching", () => {
+    const c = recordCost({ input: 300, output: 5200, cacheWrite: 0, cacheRead: 4900, searches: 0 }, sonnet, "5m");
+    expect(c.actual).toBeCloseTo(300 * 3e-6 + 4900 * 3e-6 * 0.1 + 5200 * 15e-6, 10);
+    expect(c.noCache).toBeCloseTo((300 + 4900) * 3e-6 + 5200 * 15e-6, 10);
+    expect(c.noCache).toBeGreaterThan(c.actual);
+  });
+  it("groups imported logs by month and ignores other features", () => {
+    const text = [
+      "2026-10-31 10:00:00 Anthropic usage | label=learning_objectives model=claude-sonnet-4-6 input=1000 output=900 cache_write=1200 cache_read=0 web_searches=0 stop=end_turn structured=True",
+      "2026-11-02 10:00:00 Anthropic usage | label=learning_objectives model=claude-sonnet-4-6 input=1000 output=900 cache_write=0 cache_read=1200 web_searches=0 stop=end_turn structured=True",
+      "2026-11-02 10:05:00 Anthropic usage | label=refine_outline model=claude-sonnet-4-6 input=7000 output=6000 cache_write=0 cache_read=0 web_searches=0 stop=end_turn structured=True",
+      "2026-11-02 10:06:00 Anthropic usage | label=completion model=claude-sonnet-4-6 input=900 output=200 cache_write=0 cache_read=0 web_searches=None stop=end_turn structured=False",
+      "Anthropic usage | label=research model=claude-sonnet-4-6 input=100 output=100 cache_write=0 cache_read=0 web_searches=1 stop=end_turn structured=False",
+    ].join("\n");
+    const logs = parseOutlineLogs(text);
+    expect(logs.ignored).toBe(1);
+    const { rows, undated } = monthlyActual(logs.records, st.prices, sonnet, "5m");
+    expect(undated).toBe(1);
+    expect(rows.map((x) => [x.month, x.outlines, x.refines, x.calls])).toEqual([
+      ["2026-10", 1, 0, 1],
+      ["2026-11", 1, 1, 2],
+    ]);
+  });
+});
+
+describe("saved settings survive a reload", () => {
+  it("loadState returns what was saved (logs included), not the defaults", () => {
+    const store = new Map<string, string>();
+    (globalThis as unknown as { localStorage: unknown }).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    };
+    const saved = { ...defaultState(), logText: "2026-11-02 Anthropic usage | label=research model=claude-sonnet-4-6 input=1 output=1 cache_write=0 cache_read=0 web_searches=0 stop=end_turn structured=True", scenario: { ...defaultState().scenario, outlines: 321 } };
+    store.set(STORAGE_KEY, JSON.stringify(saved));
+    const loaded = loadState();
+    expect(loaded.logText).toContain("label=research");
+    expect(loaded.scenario.outlines).toBe(321);
+    delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+    expect(loadState().scenario.outlines).toBe(defaultState().scenario.outlines);
   });
 });

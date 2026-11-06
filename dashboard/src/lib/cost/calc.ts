@@ -1,4 +1,5 @@
-import type { AppState, PriceRow, SlidesProfile, Step } from "./model";
+import type { LogRecord } from "./logs";
+import type { AppState, PriceRow, Step } from "./model";
 
 export interface Components {
   uncached: number;
@@ -102,21 +103,6 @@ export function jobCost(steps: Step[], job: Step["job"], p: PriceRow, o: CalcOpt
   return { rows, total: t };
 }
 
-/** Slides get no caching benefit; everything bills as uncached input. */
-export function slidesCost(s: SlidesProfile, p: PriceRow, outputMult = 1): Components {
-  const c = zero();
-  if (!s.include) return c;
-  const ip = (p.input ?? 0) / 1e6;
-  const op = (p.output ?? 0) / 1e6;
-  const tf = p.tokenFactor ?? 1;
-  const inTok = (s.plannerInput + s.slideCalls * (s.slideSystem + s.slideInput) + s.validatorInput) * tf;
-  const outTok = (s.plannerOutput + s.slideCalls * s.slideOutput + s.validatorOutput) * tf;
-  const k = s.modules * s.retryFactor;
-  c.uncached = inTok * ip * k;
-  c.output = outTok * op * outputMult * k;
-  return c;
-}
-
 export interface Overrides {
   caching?: boolean;
   outputMult?: number;
@@ -143,19 +129,13 @@ export function compute(state: AppState, p: PriceRow, ov: Overrides = {}) {
   };
   const outline = jobCost(steps, "outline", p, o, rs);
   const refine = jobCost(steps, "refine", p, o, rs);
-  const assessment = jobCost(steps, "assessment", p, o, rs);
-  const slides = slidesCost(state.slides, p, ov.outputMult ?? 1);
 
   const perOutline = total(outline.total);
   const perRefine = total(refine.total);
-  const perAssessment = total(assessment.total);
-  const perSlides = total(slides);
 
   const monthly = zero();
   addTo(monthly, outline.total, sc.outlines);
   addTo(monthly, refine.total, sc.refines);
-  addTo(monthly, assessment.total, sc.assessments);
-  addTo(monthly, slides, sc.slidesJobs);
   const monthlyApi = total(monthly);
   const fixedTotal = state.fixed.reduce((a, x) => a + (Number(x.amount) || 0), 0);
 
@@ -171,12 +151,8 @@ export function compute(state: AppState, p: PriceRow, ov: Overrides = {}) {
     opts: o,
     outline,
     refine,
-    assessment,
-    slides,
     perOutline,
     perRefine,
-    perAssessment,
-    perSlides,
     monthly,
     monthlyApi,
     monthlySearch: monthly.search,
@@ -202,7 +178,6 @@ export function ledger(state: AppState, r: Result): LedgerLine[] {
   const jobs: [typeof r.outline, number, string][] = [
     [r.outline, sc.outlines, "outline"],
     [r.refine, sc.refines, "refine"],
-    [r.assessment, sc.assessments, "assessment"],
   ];
   for (const [job, vol, unit] of jobs) {
     for (const row of job.rows) {
@@ -217,7 +192,104 @@ export function ledger(state: AppState, r: Result): LedgerLine[] {
     }
   }
   lines.push({ group: "Web search", name: "Web search", detail: "all searching steps", amount: r.monthlySearch });
-  lines.push({ group: "Slides", name: "Slides jobs", detail: `${sc.slidesJobs} jobs × ${state.slides.modules} modules`, amount: r.perSlides * sc.slidesJobs });
   for (const fx of state.fixed) lines.push({ group: "Fixed", name: fx.name, detail: "monthly", amount: Number(fx.amount) || 0 });
   return lines;
+}
+
+// ───────────────────────── Monthly analysis ─────────────────────────
+
+export interface ProjectionRow {
+  month: string;
+  outlines: number;
+  refines: number;
+  anthropic: number;
+  fixed: number;
+  total: number;
+  cumulative: number;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** `months` months starting at `start`, with volumes growing `growthPct`% per month. */
+export function projectMonths(
+  state: AppState,
+  r: Pick<Result, "perOutline" | "perRefine" | "fixedTotal">,
+  months = 12,
+  start: Date = new Date(),
+): ProjectionRow[] {
+  const g = 1 + (state.scenario.monthlyGrowth || 0) / 100;
+  const rows: ProjectionRow[] = [];
+  let cumulative = 0;
+  for (let k = 0; k < months; k++) {
+    const d = new Date(start.getFullYear(), start.getMonth() + k, 1);
+    const outlines = state.scenario.outlines * g ** k;
+    const refines = state.scenario.refines * g ** k;
+    const anthropic = outlines * r.perOutline + refines * r.perRefine;
+    const total = anthropic + r.fixedTotal;
+    cumulative += total;
+    rows.push({ month: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`, outlines, refines, anthropic, fixed: r.fixedTotal, total, cumulative });
+  }
+  return rows;
+}
+
+/** Cost of one logged call from its real token counts (no token factor: the log already holds real tokens). */
+export function recordCost(
+  r: Pick<LogRecord, "input" | "output" | "cacheWrite" | "cacheRead" | "searches">,
+  p: PriceRow,
+  window: "5m" | "1h",
+) {
+  const ip = (p.input ?? 0) / 1e6;
+  const op = (p.output ?? 0) / 1e6;
+  const search = (r.searches * (p.searchPer1k ?? 0)) / 1000;
+  const actual = r.input * ip + r.cacheWrite * ip * writeMult(p, window) + r.cacheRead * ip * p.readMult + r.output * op + search;
+  const noCache = (r.input + r.cacheWrite + r.cacheRead) * ip + r.output * op + search;
+  return { actual, noCache };
+}
+
+export interface ActualMonth {
+  month: string; // YYYY-MM
+  outlines: number; // one learning_objectives call per outline job
+  refines: number; // refine_outline calls (retries counted)
+  calls: number;
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+  searches: number;
+  cost: number;
+  noCache: number;
+}
+
+/** Real monthly spend from imported logs. Each call is priced with its own model's price row when known. */
+export function monthlyActual(
+  records: LogRecord[],
+  prices: PriceRow[],
+  fallback: PriceRow,
+  window: "5m" | "1h",
+): { rows: ActualMonth[]; undated: number } {
+  const map = new Map<string, ActualMonth>();
+  let undated = 0;
+  for (const r of records) {
+    if (!r.date) {
+      undated++;
+      continue;
+    }
+    const month = r.date.slice(0, 7);
+    const a = map.get(month) ?? { month, outlines: 0, refines: 0, calls: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, searches: 0, cost: 0, noCache: 0 };
+    const model = r.model.toLowerCase();
+    const p = prices.find((x) => isPriced(x) && model.includes(x.id)) ?? fallback;
+    const c = recordCost(r, p, window);
+    a.calls++;
+    if (r.label === "learning_objectives") a.outlines++;
+    if (r.label === "refine_outline") a.refines++;
+    a.input += r.input;
+    a.output += r.output;
+    a.cacheWrite += r.cacheWrite;
+    a.cacheRead += r.cacheRead;
+    a.searches += r.searches;
+    a.cost += c.actual;
+    a.noCache += c.noCache;
+    map.set(month, a);
+  }
+  return { rows: [...map.values()].sort((x, y) => x.month.localeCompare(y.month)), undated };
 }

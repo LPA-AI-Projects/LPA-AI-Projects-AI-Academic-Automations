@@ -1,17 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Lock } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/app/AppShell";
 import { AssumptionsDrawer } from "@/components/app/editors";
-import { EmptyState, HowCalculated, InfoTip, Kpi, Panel, axisProps, tooltipStyle } from "@/components/app/bits";
+import { EmptyState, HowCalculated, InfoTip, Kpi, NumInput, Panel, axisProps, tooltipStyle } from "@/components/app/bits";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore } from "@/lib/cost/store";
-import { breakEvenHitRate, compute, ledger, total, writeMult } from "@/lib/cost/calc";
-import { applyLogAverages } from "@/lib/cost/logs";
+import { breakEvenHitRate, compute, ledger, monthlyActual, projectMonths, total, writeMult } from "@/lib/cost/calc";
+import { applyLogAverages, hitRate } from "@/lib/cost/logs";
 import { int, money, pct } from "@/lib/cost/format";
 import type { Scenario } from "@/lib/cost/model";
 
@@ -32,7 +33,7 @@ export const Route = createFileRoute("/")({
 const C = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)", "var(--chart-7)"];
 
 function CostAnalysis() {
-  const { state, setState, current, priced, byLabel } = useStore();
+  const { state, setState, current, priced, byLabel, logs } = useStore();
   const sc = state.scenario;
   const u = (p: Partial<Scenario>) => setState((s) => ({ ...s, scenario: { ...s.scenario, ...p } }));
   const useLogs = sc.dataSource === "logs" && byLabel.length > 0;
@@ -41,8 +42,8 @@ function CostAnalysis() {
   if (!current)
     return (
       <>
-        <PageHeader title="Cost Analysis" desc="No priced model available." actions={<AssumptionsDrawer />} />
-        <EmptyState title="Enter a price for at least one model">Open Edit assumptions → Prices.</EmptyState>
+        <PageHeader title="Cost Analysis" desc="The production model has no price yet." actions={<AssumptionsDrawer />} />
+        <EmptyState title="Enter a price for the production model">Open Edit assumptions → Prices and fill in Claude Sonnet 4.6.</EmptyState>
       </>
     );
 
@@ -57,6 +58,16 @@ function CostAnalysis() {
   const lines = ledger(state, r);
   const ledgerTotal = lines.reduce((a, l) => a + l.amount, 0);
   const outputShare = r.monthlyApi ? r.monthly.output / r.monthlyApi : 0;
+  const proj = projectMonths(state, r);
+  const projSum = proj.reduce(
+    (a, x) => ({ outlines: a.outlines + x.outlines, refines: a.refines + x.refines, anthropic: a.anthropic + x.anthropic, fixed: a.fixed + x.fixed, total: a.total + x.total }),
+    { outlines: 0, refines: 0, anthropic: 0, fixed: 0, total: 0 },
+  );
+  const actual = monthlyActual(logs.records, priced, current, sc.window);
+  const actualSum = actual.rows.reduce(
+    (a, x) => ({ outlines: a.outlines + x.outlines, refines: a.refines + x.refines, calls: a.calls + x.calls, input: a.input + x.input, output: a.output + x.output, cw: a.cw + x.cacheWrite, cr: a.cr + x.cacheRead, searches: a.searches + x.searches, cost: a.cost + x.cost, noCache: a.noCache + x.noCache }),
+    { outlines: 0, refines: 0, calls: 0, input: 0, output: 0, cw: 0, cr: 0, searches: 0, cost: 0, noCache: 0 },
+  );
 
   const stepData = r.outline.rows.map((x) => ({
     name: x.step.name.replace(" (web search)", ""),
@@ -67,14 +78,13 @@ function CostAnalysis() {
     "Web search": x.expected.search,
   }));
   const fx = (n: string) => state.fixed.filter((f) => f.name.toLowerCase().includes(n)).reduce((a, f) => a + f.amount, 0);
-  const known = ["openai", "railway", "supabase", "gamma"];
+  const known = ["openai", "railway", "supabase"];
   const donut = [
     { name: "Anthropic tokens", value: r.monthlyApi - r.monthlySearch },
     { name: "Web search", value: r.monthlySearch },
     { name: "OpenAI fallback", value: fx("openai") },
     { name: "Railway", value: fx("railway") },
     { name: "Supabase", value: fx("supabase") },
-    { name: "Gamma", value: fx("gamma") },
     { name: "Other", value: state.fixed.filter((f) => !known.some((k) => f.name.toLowerCase().includes(k))).reduce((a, f) => a + f.amount, 0) },
   ].filter((d) => d.value > 0);
   const maxN = Math.max(400, sc.outlines * 2);
@@ -130,10 +140,9 @@ function CostAnalysis() {
           <Switch checked={sc.structured} onCheckedChange={(v) => u({ structured: v })} /> Structured output
           <InfoTip>When ON, the projected JSON failure rate becomes {pct(sc.structuredFailRate)} (editable in Scenario).</InfoTip>
         </label>
-        <Select value={current.id} onValueChange={(v) => u({ currentModelId: v })}>
-          <SelectTrigger aria-label="Current model"><SelectValue /></SelectTrigger>
-          <SelectContent>{priced.map((p) => <SelectItem key={p.id} value={p.id}>{p.model}</SelectItem>)}</SelectContent>
-        </Select>
+        <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm font-medium" title="The production model is fixed and cannot be changed here.">
+          <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> <span className="truncate">{current.model}</span>
+        </div>
         <Select value={sc.dataSource} onValueChange={(v) => u({ dataSource: v as Scenario["dataSource"] })}>
           <SelectTrigger aria-label="Data source"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="estimates">Estimates</SelectItem><SelectItem value="logs">Imported logs</SelectItem></SelectContent>
@@ -141,13 +150,15 @@ function CostAnalysis() {
       </div>
       {sc.dataSource === "logs" && !useLogs && <EmptyState title="No imported logs yet">Import logs on Data & Settings — estimates are used meanwhile.</EmptyState>}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="Cost per outline" value={money(r.perOutline)} sub={<>Caching {sc.caching ? "saves" : "would save"} {money(off.perOutline - on.perOutline, true)} vs off</>} tip="Expected cost of one outline including JSON retries (1+f+f²) and fallback (f³)." />
         <Kpi label="Cost per refine" value={money(r.perRefine)} tip="Refine call × expected attempts (1+f+f²)." />
-        <Kpi label="Monthly Anthropic spend" value={money(r.monthlyApi)} tip="Outlines, refines, slides and assessments × volumes, incl. web search." />
+        <Kpi label="Monthly Anthropic spend" value={money(r.monthlyApi)} tip="Outlines and refines × monthly volumes, incl. web search." />
         <Kpi label="Monthly all-in" value={money(r.allIn)} sub={`incl. ${money(r.fixedTotal)} fixed`} tip="Anthropic spend plus fixed monthly costs." />
         <Kpi label="Caching net effect / month" value={money(cacheNet, true)} tone={cacheNet >= 0 ? "success" : "danger"} sub={cacheNet >= 0 ? "saving" : "extra cost"} tip="Monthly Anthropic cost with caching OFF minus with caching ON." />
         <Kpi label="Web-search share" value={pct(r.monthlySearch / allSpend)} tip="Web-search fees ÷ all-in monthly spend." />
+        <Kpi label="12-month total" value={money(projSum.total)} sub={`${money(projSum.anthropic)} Anthropic + ${money(projSum.fixed)} fixed`} tip="All-in cost over the next 12 months at the scenario volumes and monthly growth." />
+        <Kpi label={logs.records.length ? "Actual spend (imported logs)" : "Actual spend"} value={logs.records.length ? money(actualSum.cost) : "—"} sub={logs.records.length ? `${int(actualSum.outlines)} outlines, ${int(actualSum.refines)} refines` : "Import logs on Data & Settings"} tip="Real cost of all imported outline and refine calls, priced from their actual token counts." />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -176,14 +187,44 @@ function CostAnalysis() {
         </Panel>
       </div>
 
+      <Panel
+        title="Monthly analysis — next 12 months"
+        tip="Projection from the scenario volumes and per-outline / per-refine costs, with the monthly growth rate below."
+        actions={<div className="flex items-center gap-2 text-sm">Growth / month <NumInput value={sc.monthlyGrowth} className="w-20" onChange={(v) => u({ monthlyGrowth: Math.max(-50, Math.min(200, v ?? 0)) })} /> %</div>}
+      >
+        <div className="h-64">
+          <ResponsiveContainer><BarChart data={proj}><CartesianGrid stroke="var(--border)" vertical={false} /><XAxis dataKey="month" {...axisProps} /><YAxis {...axisProps} tickFormatter={(v) => money(v)} /><Tooltip {...tooltipStyle} formatter={(v: number) => money(v)} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="anthropic" name="Anthropic" stackId="m" fill={C[0]} /><Bar dataKey="fixed" name="Fixed costs" stackId="m" fill={C[6]} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+        </div>
+        <div className="mt-4 overflow-x-auto rounded-lg border"><table className="w-full text-sm tabular"><thead className="border-b bg-muted/40 text-xs text-muted-foreground"><tr>{["Month", "Outlines", "Refines", "Anthropic $", "Fixed $", "Total $", "Cumulative $"].map((h) => <th key={h} className="whitespace-nowrap px-3 py-2 text-left font-medium">{h}</th>)}</tr></thead>
+          <tbody>{proj.map((x) => <tr key={x.month} className="border-b last:border-0"><td className="whitespace-nowrap px-3 py-2 font-medium">{x.month}</td><td className="px-3">{int(Math.round(x.outlines))}</td><td className="px-3">{int(Math.round(x.refines))}</td><td className="px-3">{money(x.anthropic)}</td><td className="px-3">{money(x.fixed)}</td><td className="px-3 font-semibold">{money(x.total)}</td><td className="px-3 text-muted-foreground">{money(x.cumulative)}</td></tr>)}
+            <tr className="bg-muted/40 font-semibold"><td className="px-3 py-2">12-month total</td><td className="px-3">{int(Math.round(projSum.outlines))}</td><td className="px-3">{int(Math.round(projSum.refines))}</td><td className="px-3">{money(projSum.anthropic)}</td><td className="px-3">{money(projSum.fixed)}</td><td className="px-3">{money(projSum.total)}</td><td className="px-3" /></tr></tbody></table></div>
+      </Panel>
+
+      <Panel title="Actual monthly spend (imported logs)" tip="Real spend from imported usage logs, priced from actual token counts per call. Outlines = learning_objectives calls; refines = refine_outline calls (retries included)." bodyClass="p-0 sm:p-0">
+        {actual.rows.length === 0 ? (
+          <div className="p-5"><EmptyState title="No dated outline or refine usage lines yet">Paste Railway logs on Data & Settings to see real month-by-month spend.</EmptyState></div>
+        ) : (
+          <>
+            <div className="overflow-x-auto"><table className="w-full text-sm tabular"><thead className="border-b bg-muted/40 text-xs text-muted-foreground"><tr>{["Month", "Outlines", "Refines", "Calls", "Input tok", "Output tok", "Cache hit", "Searches", "Spend $", "Without caching $", "Caching saved $", "All-in $ (+ fixed)"].map((h) => <th key={h} className="whitespace-nowrap px-3 py-2 text-left font-medium">{h}</th>)}</tr></thead>
+              <tbody>{actual.rows.map((x) => <tr key={x.month} className="border-b last:border-0"><td className="whitespace-nowrap px-3 py-2 font-medium">{x.month}</td><td className="px-3">{int(x.outlines)}</td><td className="px-3">{int(x.refines)}</td><td className="px-3">{int(x.calls)}</td><td className="px-3">{int(x.input + x.cacheWrite + x.cacheRead)}</td><td className="px-3">{int(x.output)}</td><td className="px-3">{pct(hitRate(x) ?? 0, 0)}</td><td className="px-3">{int(x.searches)}</td><td className="px-3 font-semibold">{money(x.cost)}</td><td className="px-3">{money(x.noCache)}</td><td className={`px-3 ${x.noCache - x.cost >= 0 ? "text-success" : "text-destructive"}`}>{money(x.noCache - x.cost, true)}</td><td className="px-3">{money(x.cost + r.fixedTotal)}</td></tr>)}
+                <tr className="bg-muted/40 font-semibold"><td className="px-3 py-2">Total</td><td className="px-3">{int(actualSum.outlines)}</td><td className="px-3">{int(actualSum.refines)}</td><td className="px-3">{int(actualSum.calls)}</td><td className="px-3">{int(actualSum.input + actualSum.cw + actualSum.cr)}</td><td className="px-3">{int(actualSum.output)}</td><td className="px-3">{pct(hitRate({ cacheWrite: actualSum.cw, cacheRead: actualSum.cr }) ?? 0, 0)}</td><td className="px-3">{int(actualSum.searches)}</td><td className="px-3">{money(actualSum.cost)}</td><td className="px-3">{money(actualSum.noCache)}</td><td className="px-3">{money(actualSum.noCache - actualSum.cost, true)}</td><td className="px-3">{money(actualSum.cost + r.fixedTotal * actual.rows.length)}</td></tr></tbody></table></div>
+            <p className="px-4 py-3 text-xs text-muted-foreground">
+              {logs.ignored ? `${logs.ignored} usage line(s) from other features (slides, assessments) ignored. ` : ""}
+              {actual.undated ? `${actual.undated} line(s) without a date are not in this table. ` : ""}
+              Each call is priced with its own model's price row; fixed costs are added once per month shown.
+            </p>
+          </>
+        )}
+      </Panel>
+
       <Panel title="Insights">
         <ul className="list-disc space-y-1.5 pl-5 text-sm">{insights.map((i) => <li key={i}>{i}</li>)}</ul>
       </Panel>
 
       <Panel title="Step-by-step cost (per job)" bodyClass="p-0 sm:p-0">
         <div className="overflow-x-auto"><table className="w-full text-sm tabular"><thead className="border-b bg-muted/40 text-xs text-muted-foreground"><tr>{["Step", "×", "Cached", "Input", "Output", "Searches", "Uncached $", "Write $", "Read $", "Output $", "Search $", "Expected $", "% of job"].map((h) => <th key={h} className="whitespace-nowrap px-3 py-2 text-left font-medium">{h}</th>)}</tr></thead>
-          <tbody>{[...r.outline.rows, ...r.refine.rows, ...r.assessment.rows].map((x) => {
-            const jt = x.step.job === "outline" ? r.perOutline : x.step.job === "refine" ? r.perRefine : r.perAssessment;
+          <tbody>{[...r.outline.rows, ...r.refine.rows].map((x) => {
+            const jt = x.step.job === "outline" ? r.perOutline : r.perRefine;
             const e = x.expected;
             return <tr key={x.step.id} className="border-b last:border-0"><td className="whitespace-nowrap px-3 py-2 font-medium">{x.step.name}</td><td className="px-3">{x.mult.toFixed(3)}</td><td className="px-3">{int(x.step.system)}</td><td className="px-3">{int(x.step.input + x.step.searchInput)}</td><td className="px-3">{int(x.step.output)}</td><td className="px-3">{x.step.searches}</td><td className="px-3">{money(e.uncached)}</td><td className="px-3">{money(e.write)}</td><td className="px-3">{money(e.read)}</td><td className="px-3">{money(e.output)}</td><td className="px-3">{money(e.search)}</td><td className="px-3 font-semibold">{money(total(e))}</td><td className="px-3">{pct(jt ? total(e) / jt : 0)}</td></tr>;
           })}</tbody></table></div>
@@ -206,7 +247,8 @@ function CostAnalysis() {
         <p>Per step with cacheable tokens C, other input U, output O, searches S. Caching OFF: <code>input = (C+U)·inputPrice</code>. Caching ON and C ≥ min cacheable: <code>input = U·inputPrice + C·inputPrice·(h·read + (1−h)·write)</code>; below the minimum caching has no effect.</p>
         <p><code>output = O·outputPrice</code>, <code>search = S·searchPrice/1000</code>. Prices are per 1M tokens.</p>
         <p>Expected JSON calls per outline <code>= 1 + f + f²</code> (max 3 attempts); fallback probability <code>= f³</code>. Refine retries the same way. Structured output ON replaces f with its projected rate.</p>
-        <p>Monthly = outlines·perOutline + refines·perRefine + slides·perSlides + assessments·perAssessment; all-in adds fixed costs. Break-even <code>h* = (write − 1)/(write − read)</code>. Slides bill all tokens as uncached input. Imported-logs mode replaces token estimates with per-label averages (cached = cache_write + cache_read).</p>
+        <p>Monthly = outlines·perOutline + refines·perRefine; all-in adds fixed costs. Break-even <code>h* = (write − 1)/(write − read)</code>. Imported-logs mode replaces token estimates with per-label averages (cached = cache_write + cache_read).</p>
+        <p>12-month projection: month k uses volume × (1 + growth)^k. Actual monthly spend prices every imported call from its real tokens (<code>input·in + cache_write·in·write + cache_read·in·read + output·out + searches·fee</code>); outlines = learning_objectives calls, refines = refine_outline calls (retries included). Only outline and refine calls are counted.</p>
       </HowCalculated>
     </>
   );

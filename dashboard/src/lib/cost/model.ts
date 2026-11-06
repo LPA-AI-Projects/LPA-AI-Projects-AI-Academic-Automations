@@ -17,7 +17,11 @@ export interface PriceRow {
 }
 
 export type StepKind = "once" | "json" | "fallback" | "refine";
-export type Job = "outline" | "refine" | "assessment";
+/** Only course-outline generation and outline refinement are tracked. */
+export type Job = "outline" | "refine";
+
+/** The production model (ANTHROPIC_MODEL on the backend). The dashboard cannot be switched to another one. */
+export const PRODUCTION_MODEL_ID = "sonnet-4-6";
 
 export interface Step {
   id: string;
@@ -34,25 +38,11 @@ export interface Step {
   include: boolean;
 }
 
-export interface SlidesProfile {
-  include: boolean;
-  modules: number;
-  plannerInput: number;
-  plannerOutput: number;
-  slideCalls: number;
-  slideSystem: number;
-  slideInput: number;
-  slideOutput: number;
-  validatorInput: number;
-  validatorOutput: number;
-  retryFactor: number;
-}
-
 export interface Scenario {
   outlines: number;
   refines: number;
-  slidesJobs: number;
-  assessments: number;
+  /** Month-over-month volume growth in percent, used by the 12-month projection. */
+  monthlyGrowth: number;
   failRate: number; // 0..1
   maxAttempts: number;
   structured: boolean;
@@ -60,7 +50,6 @@ export interface Scenario {
   caching: boolean;
   hitRate: number;
   window: "5m" | "1h";
-  currentModelId: string;
   dataSource: "estimates" | "logs";
 }
 
@@ -72,11 +61,10 @@ export interface FixedCost {
 
 export interface CompareSettings {
   selected: string[];
-  workload: "outline" | "refine" | "monthly" | "slides";
+  workload: "outline" | "refine" | "monthly";
   caching: boolean;
   outputMult: number;
   searches: number;
-  baselineId: string;
   switchCost: number;
 }
 
@@ -84,7 +72,6 @@ export interface AppState {
   version: 1;
   prices: PriceRow[];
   steps: Step[];
-  slides: SlidesProfile;
   scenario: Scenario;
   fixed: FixedCost[];
   compare: CompareSettings;
@@ -124,7 +111,7 @@ export function defaultState(): AppState {
   return {
     version: 1,
     prices: [
-      price("sonnet-4-6", "Claude Sonnet 4.6", "Anthropic", 3, 15, 1024, "Current model. Anthropic pricing page."),
+      price("sonnet-4-6", "Claude Sonnet 4.6", "Anthropic", 3, 15, 1024, "Production model (locked). Anthropic pricing page."),
       price("haiku-4-5", "Claude Haiku 4.5", "Anthropic", 1, 5, 4096, "Anthropic pricing page."),
       price("opus-4-5", "Claude Opus 4.5", "Anthropic", 5, 25, 4096, "Anthropic pricing page."),
       price("sonnet-5-5", "Claude Sonnet 5.5", "Anthropic", 2, 10, 512, `Anthropic pricing page. Cache reads 0.05x. ${NEW_TOKENIZER}`, { readMult: 0.05, tokenFactor: 1.3 }),
@@ -140,50 +127,32 @@ export function defaultState(): AppState {
       { id: "js", job: "outline", name: "Structured JSON outline", label: "outline_json", kind: "json", calls: 1, system: 4700, input: 4300, searchInput: 0, output: 6000, searches: 0, include: true },
       { id: "fb", job: "outline", name: "Text-outline fallback", label: "outline_text_fallback", kind: "fallback", calls: 1, system: 5000, input: 1500, searchInput: 0, output: 6000, searches: 0, include: true },
       { id: "rf", job: "refine", name: "Refine call", label: "refine_outline", kind: "refine", calls: 1, system: 1400, input: 6000, searchInput: 0, output: 6000, searches: 0, include: true },
-      { id: "as", job: "assessment", name: "Assessment (pre + post)", label: "assessment", kind: "once", calls: 2, system: 0, input: 6000, searchInput: 0, output: 2500, searches: 0, include: true },
     ],
-    slides: {
-      include: true,
-      modules: 8,
-      plannerInput: 15000,
-      plannerOutput: 800,
-      slideCalls: 15,
-      slideSystem: 400,
-      slideInput: 20000,
-      slideOutput: 600,
-      validatorInput: 40000,
-      validatorOutput: 1500,
-      retryFactor: 1.3,
-    },
     scenario: {
       outlines: 200,
       refines: 100,
-      slidesJobs: 0,
-      assessments: 0,
+      monthlyGrowth: 0,
       failRate: 0.1,
       maxAttempts: 3,
-      structured: false,
+      structured: true, // backend default: ANTHROPIC_STRUCTURED_OUTPUT=true
       structuredFailRate: 0.01,
       caching: true,
       hitRate: 0.3,
       window: "5m",
-      currentModelId: "sonnet-4-6",
       dataSource: "estimates",
     },
     fixed: [
       { id: "railway", name: "Railway hosting", amount: 5 },
       { id: "supabase", name: "Supabase", amount: 0 },
-      { id: "gamma", name: "Gamma plan", amount: 0 },
       { id: "openai", name: "OpenAI fallback usage", amount: 0 },
       { id: "other", name: "Other", amount: 0 },
     ],
     compare: {
-      selected: ["sonnet-4-6", "haiku-4-5", "opus-4-5"],
+      selected: [PRODUCTION_MODEL_ID, "sonnet-5-5", "haiku-4-5", "opus-4-5"],
       workload: "outline",
       caching: true,
       outputMult: 1,
       searches: 3,
-      baselineId: "sonnet-4-6",
       switchCost: 0,
     },
     logText: "",

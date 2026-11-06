@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { TriangleAlert } from "lucide-react";
+import { Lock, TriangleAlert } from "lucide-react";
 import { PageHeader } from "@/components/app/AppShell";
 import { AssumptionsDrawer } from "@/components/app/editors";
 import { EmptyState, HowCalculated, InfoTip, NumInput, Panel, axisProps, tooltipStyle } from "@/components/app/bits";
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useStore } from "@/lib/cost/store";
 import { compute } from "@/lib/cost/calc";
 import { int, money, pct } from "@/lib/cost/format";
-import type { CompareSettings, PriceRow } from "@/lib/cost/model";
+import { PRODUCTION_MODEL_ID, type CompareSettings, type PriceRow } from "@/lib/cost/model";
 
 export const Route = createFileRoute("/compare")({
   head: () => ({
@@ -35,10 +35,10 @@ function Compare() {
   const { state, setState, priced } = useStore();
   const cs = state.compare;
   const u = (p: Partial<CompareSettings>) => setState((s) => ({ ...s, compare: { ...s.compare, ...p } }));
-  const sel = priced.filter((p) => cs.selected.includes(p.id));
-  const base = priced.find((p) => p.id === cs.baselineId) ?? priced[0];
+  const sel = priced.filter((p) => p.id === PRODUCTION_MODEL_ID || cs.selected.includes(p.id));
+  const base = priced.find((p) => p.id === PRODUCTION_MODEL_ID);
   const run = (p: PriceRow, caching = cs.caching) => compute(state, p, { caching, outputMult: cs.outputMult, searchesOverride: cs.searches });
-  const metric = (r: ReturnType<typeof run>) => cs.workload === "outline" ? r.perOutline : cs.workload === "refine" ? r.perRefine : cs.workload === "slides" ? r.perSlides : r.monthlyApi;
+  const metric = (r: ReturnType<typeof run>) => cs.workload === "outline" ? r.perOutline : cs.workload === "refine" ? r.perRefine : r.monthlyApi;
 
   const header = <PageHeader title="Price Comparison" desc="Compare priced models on the same workload." actions={<AssumptionsDrawer />} />;
   if (!priced.length || !base) return <>{header}<EmptyState title="No priced models">Enter input and output prices in the price sheet.</EmptyState></>;
@@ -70,23 +70,23 @@ function Compare() {
         A cheaper model can change output quality - compare sample outputs before switching.
       </div>
 
-      <Panel title="Controls">
+      <Panel title="Controls" tip="The production model is the fixed baseline and cannot be changed.">
         <div className="grid gap-5 lg:grid-cols-3">
           <div className="space-y-2">
             <div className="text-xs font-medium text-muted-foreground">Models (priced only)</div>
             <div className="flex flex-wrap gap-x-4 gap-y-2">
               {priced.map((p) => (
                 <label key={p.id} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={cs.selected.includes(p.id)} onCheckedChange={(v) => u({ selected: v ? [...cs.selected, p.id] : cs.selected.filter((x) => x !== p.id) })} /> {p.model}
+                  <Checkbox checked={p.id === PRODUCTION_MODEL_ID || cs.selected.includes(p.id)} disabled={p.id === PRODUCTION_MODEL_ID} onCheckedChange={(v) => u({ selected: v ? [...cs.selected, p.id] : cs.selected.filter((x) => x !== p.id) })} /> {p.model}
                 </label>
               ))}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1"><div className="text-xs text-muted-foreground">Workload</div>
-              <Select value={cs.workload} onValueChange={(v) => u({ workload: v as CompareSettings["workload"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="outline">Per outline</SelectItem><SelectItem value="refine">Per refine</SelectItem><SelectItem value="monthly">Monthly scenario</SelectItem><SelectItem value="slides">Slides job</SelectItem></SelectContent></Select></div>
-            <div className="space-y-1"><div className="text-xs text-muted-foreground">Current model (baseline)</div>
-              <Select value={base.id} onValueChange={(v) => u({ baselineId: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priced.map((p) => <SelectItem key={p.id} value={p.id}>{p.model}</SelectItem>)}</SelectContent></Select></div>
+              <Select value={cs.workload} onValueChange={(v) => u({ workload: v as CompareSettings["workload"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="outline">Per outline</SelectItem><SelectItem value="refine">Per refine</SelectItem><SelectItem value="monthly">Monthly scenario</SelectItem></SelectContent></Select></div>
+            <div className="space-y-1"><div className="text-xs text-muted-foreground">Production model (baseline)</div>
+              <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm font-medium"><Lock className="h-3.5 w-3.5 text-muted-foreground" /> {base.model}</div></div>
             <label className="col-span-2 flex items-center gap-2 text-sm"><Switch checked={cs.caching} onCheckedChange={(v) => u({ caching: v })} /> Prompt caching {cs.caching ? "ON" : "OFF"}</label>
           </div>
           <div className="space-y-4">

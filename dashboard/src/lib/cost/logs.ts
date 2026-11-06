@@ -13,6 +13,18 @@ export interface LogRecord {
   structured: boolean;
 }
 
+/** Only outline generation and refinement are tracked; calls from other features (slides, assessments) are ignored. */
+export const OUTLINE_REFINE_LABELS: ReadonlySet<string> = new Set([
+  "learning_objectives",
+  "context_profile",
+  "research",
+  "outline_json",
+  "outline_text_fallback",
+  "outline_with_research",
+  "normalize_outline",
+  "refine_outline",
+]);
+
 const RE = /Anthropic usage \| (.+)$/;
 
 const num = (v?: string) => {

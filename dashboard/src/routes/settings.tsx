@@ -55,7 +55,7 @@ function Settings() {
           <input ref={fileRef} type="file" accept=".log,.txt,text/plain" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setLog(await f.text()); e.target.value = ""; }} />
         </>}>
         <Textarea value={state.logText} onChange={(e) => setLog(e.target.value)} placeholder="Paste log lines here…" className="h-40 font-mono text-xs" />
-        <p className="mt-2 text-xs text-muted-foreground">{recs.length} usage lines parsed{logs.skipped ? `, ${logs.skipped} other lines ignored` : ""}.</p>
+        <p className="mt-2 text-xs text-muted-foreground">{recs.length} outline / refine usage lines parsed{logs.ignored ? `, ${logs.ignored} from other features (slides, assessments) ignored` : ""}{logs.skipped ? `, ${logs.skipped} non-usage lines skipped` : ""}.</p>
       </Panel>
 
       {recs.length === 0 ? <EmptyState title="No log data yet">Paste logs, upload a file, or load the sample.</EmptyState> : (
